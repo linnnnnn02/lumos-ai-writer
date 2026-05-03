@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+dist
+.wxt
+.output
+.DS_Store
+.turbo
+.tools
+coverage
+*.tsbuildinfo
+server/functions/lib
+

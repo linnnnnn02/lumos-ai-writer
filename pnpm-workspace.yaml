@@ -1,0 +1,8 @@
+packages:
+  - web
+  - extension
+  - packages/*
+  - server/functions
+allowBuilds:
+  esbuild: true
+  spawn-sync: true
