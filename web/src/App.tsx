@@ -876,7 +876,16 @@ function App() {
                 return (
                   <article
                     key={project.id}
-                    className="grid gap-4 bg-white/72 px-5 py-5 transition hover:bg-white/92 lg:grid-cols-[minmax(0,2.7fr)_minmax(150px,0.9fr)_minmax(150px,0.9fr)_144px] lg:px-6"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`进入项目 ${project.name}`}
+                    onClick={() => handleOpenProject(project.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      handleOpenProject(project.id)
+                    }}
+                    className="grid cursor-pointer gap-4 bg-white/72 px-5 py-5 outline-none transition hover:bg-white/92 focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,2.7fr)_minmax(150px,0.9fr)_minmax(150px,0.9fr)_144px] lg:px-6"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
@@ -892,7 +901,9 @@ function App() {
                               aria-label={`重命名 ${project.name}`}
                               onBlur={() => handleSaveRenameProject(project.id)}
                               onChange={(event) => setRenamingProjectName(event.target.value)}
+                              onClick={(event) => event.stopPropagation()}
                               onKeyDown={(event) => {
+                                event.stopPropagation()
                                 if (event.key === 'Enter') {
                                   event.currentTarget.blur()
                                 }
@@ -911,7 +922,10 @@ function App() {
                                 size="icon"
                                 className="size-7 shrink-0 text-[var(--soft-foreground)] hover:bg-transparent hover:text-[var(--muted-foreground)]"
                                 aria-label={`重命名 ${project.name}`}
-                                onClick={() => handleStartRenameProject(project)}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleStartRenameProject(project)
+                                }}
                               >
                                 <PenLine className="size-3.5" />
                               </Button>
@@ -931,15 +945,14 @@ function App() {
                       {formatProjectUpdatedAt(project.updatedAt)}
                     </div>
                     <div className="flex items-center gap-2 lg:justify-end">
-                      <Button variant="secondary" size="sm" onClick={() => handleOpenProject(project.id)}>
-                        <FolderOpen className="h-4 w-4" />
-                        进入
-                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         aria-label={`删除 ${project.name}`}
-                        onClick={() => handleDeleteProject(project.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleDeleteProject(project.id)
+                        }}
                       >
                         <X className="h-4 w-4" />
                       </Button>

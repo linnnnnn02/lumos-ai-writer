@@ -1647,23 +1647,22 @@ export function OptionsApp() {
               <div className="folder-summary trash-summary">
                 <div className="trash-title-row">
                   <h2>回收站</h2>
-                  <p className="trash-retention-note">已删除内容将在 7 天后自动清空</p>
+                  <button
+                    className="danger-folder-button"
+                    type="button"
+                    disabled={trashItems.length === 0}
+                    onClick={() =>
+                      setConfirmAction({
+                        type: 'empty-trash',
+                        name: '回收站',
+                      })
+                    }
+                  >
+                    清空回收站
+                  </button>
                 </div>
                 <span>{trashFolderCount} 个文件夹 / {trashNoteCount} 篇笔记</span>
               </div>
-              <button
-                className="danger-folder-button"
-                type="button"
-                disabled={trashItems.length === 0}
-                onClick={() =>
-                  setConfirmAction({
-                    type: 'empty-trash',
-                    name: '回收站',
-                  })
-                }
-              >
-                清空回收站
-              </button>
             </section>
 
             {trashGroups.length > 0 ? (
@@ -1807,6 +1806,7 @@ export function OptionsApp() {
                 <p>删除的文件夹和笔记会暂存在这里，7 天后自动清空。</p>
               </section>
             )}
+            <p className="trash-retention-note">已删除内容将在 7 天后自动清空</p>
           </>
         )}
       </main>
