@@ -343,7 +343,7 @@ a:hover {
 
 .library-header {
   display: grid;
-  grid-template-columns: minmax(360px, 640px) auto;
+  grid-template-columns: minmax(360px, 640px);
   justify-content: center;
   align-items: center;
   gap: 18px;
@@ -581,7 +581,10 @@ a:hover {
 }
 
 .trash-subbar {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
   margin-top: 14px;
   margin-bottom: 14px;
 }
@@ -612,6 +615,13 @@ a:hover {
   color: var(--manager-text);
   font-size: 14px;
   font-weight: 760;
+}
+
+.trash-context-controls {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: max-content;
+  padding-top: 2px;
 }
 
 .trash-retention-note {
@@ -703,7 +713,7 @@ a:hover {
 .trash-folder-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 14px;
   border-bottom: 1px solid rgba(31, 22, 17, 0.06);
   padding: 14px 16px;
@@ -754,6 +764,10 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.trash-folder-actions {
+  margin-left: auto;
 }
 
 .trash-folder-actions button,
@@ -860,18 +874,24 @@ a:hover {
   font-weight: 700;
 }
 
+.trash-note-library-grid {
+  padding: 14px;
+}
+
 .note-grid {
-  display: block;
-  column-gap: 14px;
-  column-count: 5;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 
 .note-card {
-  display: inline-block;
+  position: relative;
+  display: block;
   width: 100%;
   min-width: 0;
-  margin: 0 0 14px;
-  overflow: hidden;
+  margin: 0;
+  overflow: visible;
   break-inside: avoid;
   page-break-inside: avoid;
   border: 1px solid rgba(31, 22, 17, 0.06);
@@ -891,6 +911,10 @@ a:hover {
   border-color: rgba(31, 22, 17, 0.12);
   box-shadow: 0 20px 42px rgba(48, 34, 22, 0.1);
   transform: translateY(-2px);
+}
+
+.note-card:has(.note-card-menu.is-open) {
+  z-index: 5;
 }
 
 .cover-frame {
@@ -1017,7 +1041,8 @@ a:hover {
 }
 
 .note-card-actions a,
-.note-card-actions button {
+.note-card-actions button,
+.note-card-actions span {
   border: 0;
   background: transparent;
   color: var(--manager-text-soft);
@@ -1033,22 +1058,78 @@ a:hover {
   color: #bf5a34;
 }
 
-@media (max-width: 1480px) {
-  .note-grid {
-    column-count: 4;
-  }
+.trash-note-card-actions {
+  justify-content: flex-end;
+  position: relative;
 }
 
-@media (max-width: 1260px) {
-  .note-grid {
-    column-count: 3;
-  }
+.note-card-menu {
+  position: relative;
 }
 
-@media (max-width: 860px) {
-  .note-grid {
-    column-count: 2;
-  }
+.note-card-menu-trigger {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--manager-text-soft);
+  cursor: pointer;
+  padding: 0;
+}
+
+.note-card-menu-trigger svg {
+  width: 18px;
+  height: 18px;
+}
+
+.note-card-menu-trigger:hover,
+.note-card-menu.is-open .note-card-menu-trigger {
+  background: rgba(31, 22, 17, 0.08);
+  color: var(--manager-text);
+}
+
+.note-card-menu-content {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  min-width: 136px;
+  overflow: hidden;
+  border: 1px solid rgba(31, 22, 17, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(48, 34, 22, 0.16);
+  padding: 6px;
+}
+
+.note-card-menu-content a,
+.note-card-menu-content button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  border-radius: 7px;
+  color: var(--manager-text-muted);
+  font-size: 13px;
+  font-weight: 760;
+  padding: 0 10px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.note-card-menu-content a:hover,
+.note-card-menu-content button:hover {
+  background: rgba(255, 240, 229, 0.72);
+  color: var(--manager-accent-deep);
+  transform: none;
+}
+
+.note-card-menu-content button:nth-child(2):hover {
+  color: #bf5a34;
 }
 
 .dialog-backdrop.note-detail-backdrop {
@@ -1435,16 +1516,18 @@ a:hover {
   min-height: 34px;
   border: 0;
   border-radius: 999px;
-  background: var(--manager-accent);
+  background: var(--manager-gradient);
   color: #fff;
   font-size: 13px;
   font-weight: 800;
   padding: 0 13px;
-  box-shadow: 0 14px 30px rgba(240, 122, 47, 0.24);
+  box-shadow: 0 14px 30px rgba(255, 149, 80, 0.24);
 }
 
-.note-selection-confirm:hover {
-  background: var(--manager-accent-deep);
+.note-selection-confirm:hover,
+.note-selection-confirm:focus-visible {
+  background: var(--manager-gradient);
+  box-shadow: 0 18px 36px rgba(255, 149, 80, 0.3);
 }
 
 .snippet-editor-empty {
@@ -1589,9 +1672,15 @@ a:hover {
 
 .danger-dialog-button {
   border: 0;
-  background: var(--manager-accent);
+  background: var(--manager-gradient);
   color: #fff;
-  box-shadow: 0 14px 28px rgba(240, 122, 47, 0.2);
+  box-shadow: 0 14px 28px rgba(255, 149, 80, 0.24);
+}
+
+.danger-dialog-button:hover,
+.danger-dialog-button:focus-visible {
+  background: var(--manager-gradient);
+  box-shadow: 0 18px 36px rgba(255, 149, 80, 0.3);
 }
 
 @media (max-width: 1180px) {
@@ -1643,6 +1732,12 @@ a:hover {
 
   .library-context-controls {
     justify-content: flex-start;
+  }
+
+  .trash-context-controls {
+    justify-content: flex-start;
+    min-width: 0;
+    padding-top: 0;
   }
 
   .trash-subbar .danger-folder-button {

@@ -198,7 +198,7 @@ export default defineBackground(() => {
   }
 
   chrome.runtime.onInstalled.addListener(() => {
-    console.info('XHS AI Studio extension installed')
+    console.info('Lumos AI Writer extension installed')
     void enableSidePanelBehavior()
   })
 

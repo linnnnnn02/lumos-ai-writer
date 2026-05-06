@@ -1,6 +1,7 @@
 import * as React from 'react'
-import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@xhs-ai/shared'
-import { ArrowLeft, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from 'lucide-react'
+import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
+import { createPortal } from 'react-dom'
+import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -14,6 +15,11 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import {
+  WorkflowTitleMenu,
+  type WorkflowStepId,
+  type WorkflowTitleMenuStep,
+} from '@/components/workflow-title-menu'
 
 type ChatMessage = {
   id: string
@@ -43,12 +49,14 @@ type LearnWorkspaceProps = {
   analysisReady: boolean
   chatInput: string
   chatMessages: ChatMessage[]
+  activeWorkflowStep: WorkflowStepId
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
   snippets: SavedSnippetRecord[]
+  workflowSteps: WorkflowTitleMenuStep[]
   isStreaming: boolean
   projectName: string
-  conversations: Array<{ id: string; title: string; pinned?: boolean }>
+  conversations: Array<{ id: string; title: string; pinned?: boolean; finalizedAt?: string }>
   selectedItemIds: string[]
   onBackToWorkspace: () => void
   onCreateConversation: () => void
@@ -63,6 +71,7 @@ type LearnWorkspaceProps = {
   onDeselectItems: (itemIds: string[]) => void
   onSendChat: () => void
   onChatInputChange: (value: string) => void
+  onWorkflowStepChange: (step: WorkflowStepId) => void
 }
 
 type TagTab = {
@@ -117,13 +126,16 @@ function getUniqueValues(values: string[]) {
 }
 
 function makeHighlightNode(text: string, color: string, dimmed: boolean) {
-  const backgroundColor = withHexAlpha(color, dimmed ? '12' : '24')
-  const borderColor = withHexAlpha(color, dimmed ? '28' : '72')
+  const backgroundColor = withHexAlpha(color, dimmed ? '14' : '24')
+  const borderColor = withHexAlpha(color, dimmed ? '3A' : '72')
   const underlineColor = withHexAlpha(color, 'B8')
 
   return (
     <mark
-      className="rounded-[0.48rem] border px-1 py-0.5 text-[inherit] box-decoration-clone"
+      className={cn(
+        'rounded-[0.48rem] border px-1 py-0.5 text-[inherit] box-decoration-clone transition-opacity',
+        dimmed ? 'opacity-75' : 'opacity-100',
+      )}
       style={{
         backgroundColor,
         borderColor,
@@ -227,7 +239,11 @@ function NoteCover({ note }: { note?: SavedNoteRecord }) {
   const imageUrl = note?.coverImageUrl
 
   React.useEffect(() => {
-    setImageFailed(false)
+    const resetImageStateTimer = window.setTimeout(() => {
+      setImageFailed(false)
+    }, 0)
+
+    return () => window.clearTimeout(resetImageStateTimer)
   }, [imageUrl])
 
   return (
@@ -581,9 +597,11 @@ export function LearnWorkspace({
   analysisReady,
   chatInput,
   chatMessages,
+  activeWorkflowStep,
   folders,
   notes,
   snippets,
+  workflowSteps,
   isStreaming,
   projectName,
   conversations,
@@ -601,15 +619,41 @@ export function LearnWorkspace({
   onDeselectItems,
   onSendChat,
   onChatInputChange,
+  onWorkflowStepChange,
 }: LearnWorkspaceProps) {
   const [activeTab, setActiveTab] = React.useState('all')
   const [folderFilterId, setFolderFilterId] = React.useState('all')
   const [isFilterOpen, setIsFilterOpen] = React.useState(false)
   const [openConversationMenuId, setOpenConversationMenuId] = React.useState<string | null>(null)
+  const [conversationMenuPosition, setConversationMenuPosition] = React.useState({
+    left: 0,
+    top: 0,
+  })
   const [renamingConversationId, setRenamingConversationId] = React.useState<string | null>(null)
   const [draftConversationTitle, setDraftConversationTitle] = React.useState('')
+  const conversationMenuButtonRefs = React.useRef(new Map<string, HTMLButtonElement>())
   const scrollViewportRef = React.useRef<HTMLDivElement | null>(null)
   const scrollAnchorRef = React.useRef<HTMLDivElement | null>(null)
+
+  const updateConversationMenuPosition = React.useCallback((conversationId: string) => {
+    const button = conversationMenuButtonRefs.current.get(conversationId)
+    if (!button) return
+
+    const rect = button.getBoundingClientRect()
+    const viewportGap = 12
+    const menuWidth = 144
+    const menuHeight = 112
+    const left = Math.min(
+      Math.max(rect.right - 32, viewportGap),
+      window.innerWidth - menuWidth - viewportGap,
+    )
+    const top = Math.min(
+      Math.max(rect.top - 8, viewportGap),
+      window.innerHeight - menuHeight - viewportGap,
+    )
+
+    setConversationMenuPosition({ left, top })
+  }, [])
 
   React.useEffect(() => {
     const latestMessage = chatMessages[chatMessages.length - 1]
@@ -638,6 +682,12 @@ export function LearnWorkspace({
 
   React.useEffect(() => {
     if (!openConversationMenuId) return
+    const activeMenuId = openConversationMenuId
+    updateConversationMenuPosition(activeMenuId)
+
+    function updateOpenMenuPosition() {
+      updateConversationMenuPosition(activeMenuId)
+    }
 
     function closeMenuOnOutsidePointerDown(event: PointerEvent) {
       const target = event.target
@@ -653,12 +703,16 @@ export function LearnWorkspace({
 
     document.addEventListener('pointerdown', closeMenuOnOutsidePointerDown)
     document.addEventListener('keydown', closeMenuOnEscape)
+    window.addEventListener('resize', updateOpenMenuPosition)
+    window.addEventListener('scroll', updateOpenMenuPosition, true)
 
     return () => {
       document.removeEventListener('pointerdown', closeMenuOnOutsidePointerDown)
       document.removeEventListener('keydown', closeMenuOnEscape)
+      window.removeEventListener('resize', updateOpenMenuPosition)
+      window.removeEventListener('scroll', updateOpenMenuPosition, true)
     }
-  }, [openConversationMenuId])
+  }, [openConversationMenuId, updateConversationMenuPosition])
 
   function startConversationRename(conversation: { id: string; title: string }) {
     setDraftConversationTitle(conversation.title)
@@ -768,9 +822,6 @@ export function LearnWorkspace({
         const selectedCount = itemIds.filter((itemId) => selectedItemIdSet.has(itemId)).length
         const isFullySelected = itemIds.length > 0 && selectedCount === itemIds.length
         const isPartiallySelected = selectedCount > 0 && selectedCount < itemIds.length
-        const hasSelectedSnippet = visibleSnippets.some((snippet) =>
-          selectedSnippetIdSet.has(snippet.id),
-        )
         const tags = visibleSnippets.map((snippet) => ({
           id: getTagId(snippet),
           label: getTagLabel(snippet),
@@ -793,7 +844,7 @@ export function LearnWorkspace({
             note.contentText,
             visibleSnippets.map((snippet) => ({
               ...snippet,
-              dimmed: hasSelectedSnippet && !selectedSnippetIdSet.has(snippet.id),
+              dimmed: !selectedSnippetIdSet.has(snippet.id),
             })),
           ),
         }
@@ -1092,7 +1143,15 @@ export function LearnWorkspace({
                     />
                   ) : (
                     <div className="min-w-0 flex-1 py-1 text-left">
-                      <span className="block min-w-0 truncate">{conversation.title}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="block min-w-0 truncate">{conversation.title}</span>
+                        {conversation.finalizedAt ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#17675b]">
+                            <CheckCircle2 className="h-3 w-3" />
+                            完成
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                   )}
 
@@ -1102,10 +1161,20 @@ export function LearnWorkspace({
                         <Pin className="h-3.5 w-3.5 text-[var(--accent-strong)] transition group-hover:opacity-0 group-focus-within:opacity-0" />
                       ) : null}
                       <button
+                        ref={(node) => {
+                          if (node) {
+                            conversationMenuButtonRefs.current.set(conversation.id, node)
+                          } else {
+                            conversationMenuButtonRefs.current.delete(conversation.id)
+                          }
+                        }}
                         type="button"
                         data-conversation-menu
                         onClick={(event) => {
                           event.stopPropagation()
+                          if (openConversationMenuId !== conversation.id) {
+                            updateConversationMenuPosition(conversation.id)
+                          }
                           setOpenConversationMenuId((current) =>
                             current === conversation.id ? null : conversation.id,
                           )
@@ -1124,39 +1193,46 @@ export function LearnWorkspace({
                     </div>
                   ) : null}
 
-                  {openConversationMenuId === conversation.id ? (
-                    <div
-                      data-conversation-menu
-                      className="absolute bottom-8 right-0 z-50 w-36 translate-x-[calc(100%-2rem)] overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
-                      role="menu"
-                      onClick={(event) => event.stopPropagation()}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onToggleConversationPin(conversation.id)
-                          setOpenConversationMenuId(null)
-                        }}
-                        className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
-                      >
-                        {conversation.pinned ? '取消置顶' : '置顶'}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          startConversationRename(conversation)
-                        }}
-                        className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
-                      >
-                        重命名
-                      </button>
-                    </div>
-                  ) : null}
+                  {openConversationMenuId === conversation.id && typeof document !== 'undefined'
+                    ? createPortal(
+                        <div
+                          data-conversation-menu
+                          className="fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                          role="menu"
+                          style={{
+                            left: conversationMenuPosition.left,
+                            top: conversationMenuPosition.top,
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onToggleConversationPin(conversation.id)
+                              setOpenConversationMenuId(null)
+                            }}
+                            className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                          >
+                            {conversation.pinned ? '取消置顶' : '置顶'}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              startConversationRename(conversation)
+                            }}
+                            className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                          >
+                            重命名
+                          </button>
+                        </div>,
+                        document.body,
+                      )
+                    : null}
                 </div>
               )
             })}
@@ -1168,13 +1244,19 @@ export function LearnWorkspace({
         {analysisReady ? (
           <header className="grid grid-cols-1 items-center gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-6">
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                文案分析
-              </h1>
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+                  文案分析
+                </h1>
+                <WorkflowTitleMenu
+                  activeStep={activeWorkflowStep}
+                  steps={workflowSteps}
+                  onStepChange={onWorkflowStepChange}
+                />
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-              <Badge variant="outline">已选 {selectedItemIds.length} 项</Badge>
               <Button variant="secondary" size="sm" onClick={onBackToSelection}>
                 上一步
               </Button>
@@ -1214,6 +1296,11 @@ export function LearnWorkspace({
                       <h2 className="text-[1.35rem] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                         选择文案
                       </h2>
+                      <WorkflowTitleMenu
+                        activeStep={activeWorkflowStep}
+                        steps={workflowSteps}
+                        onStepChange={onWorkflowStepChange}
+                      />
                     </div>
                     <p className="text-xs leading-6 text-[var(--muted-foreground)]">
                       当前选择会累计进本轮分析，切换筛选不会清空已选内容。
@@ -1318,7 +1405,7 @@ export function LearnWorkspace({
                         <div
                           key={item.id}
                           className={cn(
-                            'group rounded-[1.35rem] p-4 transition-colors',
+                            'group rounded-[1.35rem] p-4 transition-[background-color,border-color,box-shadow]',
                             item.selectedCount > 0
                               ? 'border border-[rgba(240,122,47,0.24)] bg-[linear-gradient(180deg,rgba(255,250,246,0.94),rgba(255,255,255,0.88))] shadow-[0_12px_26px_rgba(48,34,22,0.045)]'
                               : 'border border-[rgba(31,22,17,0.07)] bg-white/66 hover:bg-white/88',

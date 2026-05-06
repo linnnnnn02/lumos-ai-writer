@@ -5,20 +5,23 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from 'react'
+import { MoreHorizontal } from 'lucide-react'
 import { pinyin } from 'pinyin-pro'
 import {
   normalizeNoteUrl,
   type SavedFolderRecord,
   type SavedNoteRecord,
   type SavedSnippetRecord,
-} from '@xhs-ai/shared'
+} from '@lumos-ai/shared'
 import {
   COLOR_TAG_NAMES_STORAGE_KEY,
   deleteSavedFolderCascade,
   deleteSavedNoteCascade,
+  deleteTrashFolderNotePermanently,
   deleteTrashItemPermanently,
   emptyTrash,
   getColorTagNames,
@@ -26,11 +29,13 @@ import {
   getSavedNotes,
   getSavedSnippets,
   getTrashItems,
+  restoreTrashFolderNote,
   restoreTrashItem,
   saveColorTagNames,
   saveFolders,
   saveNotes,
   saveSnippets,
+  saveTrashItems,
   TRASH_STORAGE_KEY,
   type TrashItem,
   type TrashedFolderItem,
@@ -114,6 +119,12 @@ type ConfirmAction =
       name: string
     }
   | {
+      type: 'trash-folder-note'
+      trashItemId: string
+      noteId: string
+      name: string
+    }
+  | {
       type: 'empty-trash'
       name: string
     }
@@ -183,6 +194,7 @@ function getColorFallbackName(colorValue: string) {
 function getConfirmDeleteTitle(confirmAction: ConfirmAction) {
   if (confirmAction.type === 'empty-trash') return '是否清空回收站？'
   if (confirmAction.type === 'trash-item') return `是否彻底删除：${confirmAction.name}？`
+  if (confirmAction.type === 'trash-folder-note') return `是否彻底删除：${confirmAction.name}？`
   return `是否删除：${confirmAction.name}？`
 }
 
@@ -195,7 +207,7 @@ function getConfirmDeleteDescription(confirmAction: ConfirmAction) {
     return '删除的笔记和对应标注片段将进入回收站，7 天后自动彻底删除。'
   }
 
-  if (confirmAction.type === 'trash-item') {
+  if (confirmAction.type === 'trash-item' || confirmAction.type === 'trash-folder-note') {
     return '删除后将无法恢复。'
   }
 
@@ -403,6 +415,15 @@ function getTrashRemainingDays(deletedAt: string) {
   return Math.max(0, remaining)
 }
 
+function getTrashRemainingLabel(deletedAt: string) {
+  const remainingDays = getTrashRemainingDays(deletedAt)
+  return remainingDays > 0 ? `${remainingDays} 天后彻底删除` : '今天彻底删除'
+}
+
+function getTrashNoteEntryId(item: TrashItem, note: SavedNoteRecord) {
+  return item.type === 'folder' ? `${item.id}-${note.id}` : item.id
+}
+
 function getTrashNoteTitle(note: SavedNoteRecord) {
   return getDisplayNoteTitle(note)
 }
@@ -591,6 +612,8 @@ export function OptionsApp() {
   const [newFolderName, setNewFolderName] = useState('')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [detailNoteId, setDetailNoteId] = useState('')
+  const [detailTrashEntryId, setDetailTrashEntryId] = useState('')
+  const [activeTrashMenuId, setActiveTrashMenuId] = useState('')
   const [snippetDrafts, setSnippetDrafts] = useState<SnippetDraft[]>([])
   const [activeSnippetId, setActiveSnippetId] = useState('')
   const [readerSelection, setReaderSelection] = useState<ReaderTextSelection | null>(null)
@@ -680,6 +703,18 @@ export function OptionsApp() {
     chrome.storage.onChanged.addListener(handleStorageChange)
     return () => chrome.storage.onChanged.removeListener(handleStorageChange)
   }, [])
+
+  useEffect(() => {
+    if (!activeTrashMenuId || typeof document === 'undefined') return
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Element && event.target.closest('.note-card-menu')) return
+      setActiveTrashMenuId('')
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [activeTrashMenuId])
 
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
     const shell = event.currentTarget.closest('.manager-shell')
@@ -880,7 +915,7 @@ export function OptionsApp() {
           deletedAt: item.deletedAt,
           folderItem: item,
           notes: item.notes.map((note) => ({
-            id: `${item.id}-${note.id}`,
+            id: getTrashNoteEntryId(item, note),
             trashItemId: item.id,
             source: 'folder',
             deletedAt: item.deletedAt,
@@ -960,9 +995,46 @@ export function OptionsApp() {
     setActiveTrashGroupId('')
   }, [activeTrashGroupId, trashGroups])
 
+  const detailTrashEntry = useMemo<TrashNoteEntry | null>(() => {
+    if (!detailTrashEntryId) return null
+
+    for (const item of trashItems) {
+      if (item.type === 'folder') {
+        const note = item.notes.find(
+          (currentNote) => getTrashNoteEntryId(item, currentNote) === detailTrashEntryId,
+        )
+        if (!note) continue
+
+        return {
+          id: getTrashNoteEntryId(item, note),
+          trashItemId: item.id,
+          source: 'folder',
+          deletedAt: item.deletedAt,
+          note,
+          snippets: item.snippets.filter(
+            (snippet) => normalizeNoteUrl(snippet.noteUrl) === normalizeNoteUrl(note.sourceUrl),
+          ),
+        }
+      }
+
+      if (item.id !== detailTrashEntryId) continue
+
+      return {
+        id: item.id,
+        trashItemId: item.id,
+        source: 'note',
+        deletedAt: item.deletedAt,
+        note: item.note,
+        snippets: item.snippets,
+      }
+    }
+
+    return null
+  }, [detailTrashEntryId, trashItems])
+
   const detailNote = useMemo(
-    () => notes.find((note) => note.id === detailNoteId) ?? null,
-    [detailNoteId, notes],
+    () => detailTrashEntry?.note ?? notes.find((note) => note.id === detailNoteId) ?? null,
+    [detailNoteId, detailTrashEntry, notes],
   )
 
   useEffect(() => {
@@ -1001,7 +1073,9 @@ export function OptionsApp() {
       map.set(color, normalizeTagName(tagName))
     })
 
-    snippets.forEach((snippet) => {
+    const tagSourceSnippets = [...snippets, ...trashItems.flatMap((item) => item.snippets)]
+
+    tagSourceSnippets.forEach((snippet) => {
       const color = snippet.colorValue || COLOR_PRESETS[0]
       if (!map.has(color)) map.set(color, '')
       if (map.get(color)) return
@@ -1010,8 +1084,17 @@ export function OptionsApp() {
       if (tagName) map.set(color, tagName)
     })
 
+    snippetDrafts.forEach((draft) => {
+      const color = draft.colorValue || COLOR_PRESETS[0]
+      if (!map.has(color)) map.set(color, '')
+      if (map.get(color)) return
+
+      const tagName = normalizeTagName(draft.colorTagName)
+      if (tagName) map.set(color, tagName)
+    })
+
     return map
-  }, [colorTagNames, snippets])
+  }, [colorTagNames, snippets, snippetDrafts, trashItems])
 
   const tagOptions = useMemo(
     () => Array.from(tagNameByColor.entries()).map(([color, tagName]) => ({ color, tagName })),
@@ -1033,7 +1116,7 @@ export function OptionsApp() {
   )
 
   useEffect(() => {
-    if (!detailNoteId) return
+    if (!detailNoteId && !detailTrashEntryId) return
     if (detailNote) return
 
     setSnippetDrafts([])
@@ -1041,8 +1124,9 @@ export function OptionsApp() {
     setReaderSelection(null)
     setDetailFeedback('')
     setDetailNoteId('')
+    setDetailTrashEntryId('')
     setEditingTagName(null)
-  }, [detailNote, detailNoteId])
+  }, [detailNote, detailNoteId, detailTrashEntryId])
 
   useEffect(() => {
     if (!editingTagName) return
@@ -1088,6 +1172,18 @@ export function OptionsApp() {
   function openNoteDetail(note: SavedNoteRecord) {
     const nextDrafts = getNoteSnippets(note, snippets).map(createSnippetDraft)
     setDetailNoteId(note.id)
+    setDetailTrashEntryId('')
+    setSnippetDrafts(nextDrafts)
+    setActiveSnippetId(nextDrafts[0]?.id || '')
+    setReaderSelection(null)
+    setDetailFeedback('')
+    setEditingTagName(null)
+  }
+
+  function openTrashNoteDetail(entry: TrashNoteEntry) {
+    const nextDrafts = entry.snippets.map(createSnippetDraft)
+    setDetailNoteId('')
+    setDetailTrashEntryId(entry.id)
     setSnippetDrafts(nextDrafts)
     setActiveSnippetId(nextDrafts[0]?.id || '')
     setReaderSelection(null)
@@ -1097,6 +1193,7 @@ export function OptionsApp() {
 
   function closeNoteDetail() {
     setDetailNoteId('')
+    setDetailTrashEntryId('')
     setSnippetDrafts([])
     setActiveSnippetId('')
     setReaderSelection(null)
@@ -1222,6 +1319,18 @@ export function OptionsApp() {
         colorTagName: nextTagName,
       }
     })
+    const nextTrashItems = trashItems.map((item) => ({
+      ...item,
+      snippets: item.snippets.map((snippet) => {
+        const sameColor = (snippet.colorValue || COLOR_PRESETS[0]) === selectedColor
+        if (!sameColor) return snippet
+
+        return {
+          ...snippet,
+          colorTagName: nextTagName,
+        }
+      }),
+    }))
     const nextDrafts = snippetDrafts.map((draft) => {
       const sameColor = (draft.colorValue || COLOR_PRESETS[0]) === selectedColor
       if (!sameColor) return draft
@@ -1232,9 +1341,14 @@ export function OptionsApp() {
       }
     })
 
-    await Promise.all([saveColorTagNames(nextColorTagNames), saveSnippets(nextSnippets)])
+    await Promise.all([
+      saveColorTagNames(nextColorTagNames),
+      saveSnippets(nextSnippets),
+      saveTrashItems(nextTrashItems),
+    ])
     setColorTagNames(nextColorTagNames)
     setSnippets(nextSnippets)
+    setTrashItems(nextTrashItems)
     setSnippetDrafts(nextDrafts)
     setEditingTagName(null)
     setDetailFeedback('标签名已更新')
@@ -1312,13 +1426,65 @@ export function OptionsApp() {
       ...snippetsForSave.filter((snippet) => normalizeNoteUrl(snippet.noteUrl) !== targetUrl),
       ...nextNoteSnippets,
     ]
+    const trashItemsForSave = pendingTagEdit
+      ? trashItems.map((item) => ({
+          ...item,
+          snippets: item.snippets.map((snippet) => {
+            const sameColor = (snippet.colorValue || COLOR_PRESETS[0]) === selectedColor
+            if (!sameColor) return snippet
+
+            return {
+              ...snippet,
+              colorTagName: nextTagName,
+            }
+          }),
+        }))
+      : trashItems
+
+    if (detailTrashEntry) {
+      const nextTrashItems = trashItemsForSave.map((item) => {
+        if (item.id !== detailTrashEntry.trashItemId) return item
+
+        if (item.type === 'folder') {
+          return {
+            ...item,
+            snippets: [
+              ...item.snippets.filter((snippet) => normalizeNoteUrl(snippet.noteUrl) !== targetUrl),
+              ...nextNoteSnippets,
+            ],
+          }
+        }
+
+        return {
+          ...item,
+          snippets: nextNoteSnippets,
+        }
+      })
+
+      await Promise.all([
+        saveTrashItems(nextTrashItems),
+        pendingTagEdit ? saveSnippets(snippetsForSave) : Promise.resolve(),
+        pendingTagEdit ? saveColorTagNames(nextColorTagNames) : Promise.resolve(),
+      ])
+      setTrashItems(nextTrashItems)
+      setSnippets(snippetsForSave)
+      setColorTagNames(nextColorTagNames)
+      setSnippetDrafts(nextNoteSnippets.map(createSnippetDraft))
+      setActiveSnippetId(nextActiveSnippetId || nextNoteSnippets[0]?.id || '')
+      setReaderSelection(null)
+      setEditingTagName(null)
+      setDetailFeedback('已保存')
+      return
+    }
 
     await Promise.all([
       saveSnippets(nextSnippets),
       pendingTagEdit ? saveColorTagNames(nextColorTagNames) : Promise.resolve(),
+      pendingTagEdit ? saveTrashItems(trashItemsForSave) : Promise.resolve(),
     ])
     setColorTagNames(nextColorTagNames)
     setSnippets(nextSnippets)
+    if (pendingTagEdit) setTrashItems(trashItemsForSave)
     setSnippetDrafts(nextNoteSnippets.map(createSnippetDraft))
     setActiveSnippetId(nextActiveSnippetId || nextNoteSnippets[0]?.id || '')
     setReaderSelection(null)
@@ -1326,14 +1492,186 @@ export function OptionsApp() {
     setDetailFeedback('已保存')
   }
 
+  function renderNoteCard({
+    keyValue,
+    note,
+    noteSnippets,
+    metaText,
+    onOpen,
+    actions,
+    actionsClassName = '',
+  }: {
+    keyValue: string
+    note: SavedNoteRecord
+    noteSnippets: SavedSnippetRecord[]
+    metaText: string
+    onOpen: () => void
+    actions: ReactNode
+    actionsClassName?: string
+  }) {
+    const visibleTags = noteSnippets.slice(0, 3)
+    const coverImageUrl = getDisplayCoverImageUrl(note.coverImageUrl)
+
+    return (
+      <article
+        key={keyValue}
+        className="note-card"
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          onOpen()
+        }}
+      >
+        <div className="cover-frame">
+          <div className="cover-fallback">
+            <span>未抓到封面</span>
+          </div>
+          {coverImageUrl ? (
+            <img
+              src={coverImageUrl}
+              alt={getDisplayNoteTitle(note)}
+              referrerPolicy="no-referrer"
+              loading="lazy"
+              decoding="async"
+              onError={hideBrokenCoverImage}
+            />
+          ) : null}
+          <div className="cover-badge">{noteSnippets.length} 个片段</div>
+        </div>
+
+        <div className="note-card-body">
+          <h3>{getDisplayNoteTitle(note)}</h3>
+
+          <div className="note-card-meta">
+            <span>{metaText}</span>
+          </div>
+
+          <div className="note-tag-row">
+            {visibleTags.map((snippet) => (
+              <span key={snippet.id} className="note-tag">
+                <span
+                  className="tag-dot"
+                  style={{ backgroundColor: snippet.colorValue || '#f07a2f' }}
+                />
+                {getDisplayTagName(snippet.colorTagName, snippet.colorValue)}
+              </span>
+            ))}
+            <span className="note-author-name">{getDisplayAuthorName(note.authorName)}</span>
+          </div>
+
+          <div
+            className={['note-card-actions', actionsClassName].filter(Boolean).join(' ')}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {actions}
+          </div>
+        </div>
+      </article>
+    )
+  }
+
   async function handleRestoreTrashItem(itemId: string) {
     await restoreTrashItem(itemId)
+    await loadData()
+  }
+
+  async function handleRestoreTrashNote(entry: TrashNoteEntry) {
+    if (entry.source === 'note') {
+      await handleRestoreTrashItem(entry.trashItemId)
+      return
+    }
+
+    await restoreTrashFolderNote(entry.trashItemId, entry.note.id)
+    setActiveTrashGroupId(`note-folder-${entry.note.folderId || 'unknown'}`)
     await loadData()
   }
 
   async function handleDeleteTrashItemPermanently(itemId: string) {
     await deleteTrashItemPermanently(itemId)
     await loadData()
+  }
+
+  async function handleDeleteTrashFolderNotePermanently(itemId: string, noteId: string) {
+    await deleteTrashFolderNotePermanently(itemId, noteId)
+    await loadData()
+  }
+
+  function requestDeleteTrashNote(entry: TrashNoteEntry) {
+    setConfirmAction(
+      entry.source === 'note'
+        ? {
+            type: 'trash-item',
+            id: entry.trashItemId,
+            name: getTrashNoteTitle(entry.note),
+          }
+        : {
+            type: 'trash-folder-note',
+            trashItemId: entry.trashItemId,
+            noteId: entry.note.id,
+            name: getTrashNoteTitle(entry.note),
+          },
+    )
+  }
+
+  function renderTrashNoteMenu(entry: TrashNoteEntry) {
+    const isOpen = activeTrashMenuId === entry.id
+
+    return (
+      <div
+        className={['note-card-menu', isOpen ? 'is-open' : ''].filter(Boolean).join(' ')}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return
+          setActiveTrashMenuId('')
+        }}
+      >
+        <button
+          type="button"
+          className="note-card-menu-trigger"
+          aria-label="更多操作"
+          aria-expanded={isOpen}
+          onClick={() => setActiveTrashMenuId((current) => (current === entry.id ? '' : entry.id))}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </button>
+        {isOpen ? (
+          <div className="note-card-menu-content" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActiveTrashMenuId('')
+                void handleRestoreTrashNote(entry)
+              }}
+            >
+              恢复
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActiveTrashMenuId('')
+                requestDeleteTrashNote(entry)
+              }}
+            >
+              彻底删除
+            </button>
+            <a
+              href={entry.note.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              role="menuitem"
+              onClick={() => setActiveTrashMenuId('')}
+            >
+              打开原笔记
+            </a>
+          </div>
+        ) : null}
+      </div>
+    )
   }
 
   async function handleEmptyTrash() {
@@ -1354,6 +1692,8 @@ export function OptionsApp() {
       await deleteSavedNoteCascade(confirmAction.id)
     } else if (confirmAction.type === 'trash-item') {
       await handleDeleteTrashItemPermanently(confirmAction.id)
+    } else if (confirmAction.type === 'trash-folder-note') {
+      await handleDeleteTrashFolderNotePermanently(confirmAction.trashItemId, confirmAction.noteId)
     } else {
       await handleEmptyTrash()
     }
@@ -1387,9 +1727,9 @@ export function OptionsApp() {
     >
       <aside className="manager-sidebar" aria-label="笔记库文件夹">
         <div className="brand-block">
-          <span className="brand-mark">X</span>
+          <span className="brand-mark">L</span>
           <div>
-            <p className="brand-name">XHS AI Studio</p>
+            <p className="brand-name">Lumos AI Writer</p>
             <h1>笔记库</h1>
           </div>
         </div>
@@ -1512,7 +1852,6 @@ export function OptionsApp() {
             ) : null}
             <span className="search-icon" aria-hidden="true" />
           </div>
-          {appView === 'trash' ? renderSortControl() : null}
         </header>
 
         {appView === 'library' ? (
@@ -1555,83 +1894,30 @@ export function OptionsApp() {
               <section className="note-grid" aria-label="笔记列表">
                 {filteredNotes.map((note) => {
                   const noteSnippets = getNoteSnippets(note, snippets)
-                  const visibleTags = noteSnippets.slice(0, 3)
-                  const coverImageUrl = getDisplayCoverImageUrl(note.coverImageUrl)
-
-                  return (
-                    <article
-                      key={note.id}
-                      className="note-card"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openNoteDetail(note)}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return
-                        event.preventDefault()
-                        openNoteDetail(note)
-                      }}
-                    >
-                      <div className="cover-frame">
-                        <div className="cover-fallback">
-                          <span>未抓到封面</span>
-                        </div>
-                        {coverImageUrl ? (
-                          <img
-                            src={coverImageUrl}
-                            alt={getDisplayNoteTitle(note)}
-                            referrerPolicy="no-referrer"
-                            loading="lazy"
-                            decoding="async"
-                            onError={hideBrokenCoverImage}
-                          />
-                        ) : null}
-                        <div className="cover-badge">{noteSnippets.length} 个片段</div>
-                      </div>
-
-                      <div className="note-card-body">
-                        <h3>{getDisplayNoteTitle(note)}</h3>
-
-                        <div className="note-card-meta">
-                          <span>{formatSavedAt(note.savedAt)}</span>
-                        </div>
-
-                        <div className="note-tag-row">
-                          {visibleTags.map((snippet) => (
-                            <span key={snippet.id} className="note-tag">
-                              <span
-                                className="tag-dot"
-                                style={{ backgroundColor: snippet.colorValue || '#f07a2f' }}
-                              />
-                              {getDisplayTagName(snippet.colorTagName, snippet.colorValue)}
-                            </span>
-                          ))}
-                          <span className="note-author-name">
-                            {getDisplayAuthorName(note.authorName)}
-                          </span>
-                        </div>
-
-                        <div className="note-card-actions">
-                          <a
-                            href={note.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            打开原笔记
-                          </a>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              requestDeleteNote(note)
-                            }}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  )
+                  return renderNoteCard({
+                    keyValue: note.id,
+                    note,
+                    noteSnippets,
+                    metaText: formatSavedAt(note.savedAt),
+                    onOpen: () => openNoteDetail(note),
+                    actions: (
+                      <>
+                        <a
+                          href={note.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          打开原笔记
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => requestDeleteNote(note)}
+                        >
+                          删除
+                        </button>
+                      </>
+                    ),
+                  })
                 })}
               </section>
             ) : (
@@ -1661,8 +1947,8 @@ export function OptionsApp() {
                     清空回收站
                   </button>
                 </div>
-                <span>{trashFolderCount} 个文件夹 / {trashNoteCount} 篇笔记</span>
               </div>
+              <div className="trash-context-controls">{renderSortControl()}</div>
             </section>
 
             {trashGroups.length > 0 ? (
@@ -1684,10 +1970,6 @@ export function OptionsApp() {
                           </button>
                           <div>
                             <h3>{group.folderName}</h3>
-                            <p>
-                              {folderItem ? '已删除文件夹' : '原文件夹'} · {group.notes.length}{' '}
-                              篇 · 还剩 {getTrashRemainingDays(group.deletedAt)} 天
-                            </p>
                           </div>
                           {folderItem ? (
                             <div className="trash-folder-actions">
@@ -1714,66 +1996,19 @@ export function OptionsApp() {
                         </header>
 
                         {group.notes.length > 0 ? (
-                          <div className="trash-note-grid">
-                            {group.notes.map((entry) => {
-                              const coverImageUrl = getDisplayCoverImageUrl(entry.note.coverImageUrl)
-
-                              return (
-                                <article key={entry.id} className="trash-note-card">
-                                  <div className="trash-note-cover">
-                                    <div className="cover-fallback">
-                                      <span>无封面</span>
-                                    </div>
-                                    {coverImageUrl ? (
-                                      <img
-                                        src={coverImageUrl}
-                                        alt={getTrashNoteTitle(entry.note)}
-                                        referrerPolicy="no-referrer"
-                                        loading="lazy"
-                                        decoding="async"
-                                        onError={hideBrokenCoverImage}
-                                      />
-                                    ) : null}
-                                  </div>
-                                  <div className="trash-note-body">
-                                    <h4>{getTrashNoteTitle(entry.note)}</h4>
-                                    <p>
-                                      {formatSavedAt(entry.deletedAt)} 删除 · 还剩{' '}
-                                      {getTrashRemainingDays(entry.deletedAt)} 天
-                                    </p>
-                                    <div className="trash-note-meta">
-                                      <span>{entry.snippets.length} 个片段</span>
-                                      <span>{getDisplayAuthorName(entry.note.authorName)}</span>
-                                    </div>
-                                    {entry.source === 'note' ? (
-                                      <div className="trash-note-actions">
-                                        <button
-                                          type="button"
-                                          onClick={() => void handleRestoreTrashItem(entry.trashItemId)}
-                                        >
-                                          恢复
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setConfirmAction({
-                                              type: 'trash-item',
-                                              id: entry.trashItemId,
-                                              name: getTrashNoteTitle(entry.note),
-                                            })
-                                          }
-                                        >
-                                          彻底删除
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <p className="trash-note-hint">随文件夹一起恢复</p>
-                                    )}
-                                  </div>
-                                </article>
-                              )
-                            })}
-                          </div>
+                          <section className="note-grid trash-note-library-grid" aria-label="笔记列表">
+                            {group.notes.map((entry) =>
+                              renderNoteCard({
+                                keyValue: entry.id,
+                                note: entry.note,
+                                noteSnippets: entry.snippets,
+                                metaText: getTrashRemainingLabel(entry.deletedAt),
+                                onOpen: () => openTrashNoteDetail(entry),
+                                actionsClassName: 'trash-note-card-actions',
+                                actions: renderTrashNoteMenu(entry),
+                              }),
+                            )}
+                          </section>
                         ) : (
                           <div className="trash-empty-folder">这个文件夹删除时没有笔记。</div>
                         )}

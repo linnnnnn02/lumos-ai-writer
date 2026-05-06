@@ -1,4 +1,4 @@
-import type { ProjectLength, SavedNoteRecord, SavedSnippetRecord } from '@xhs-ai/shared'
+import type { ProjectLength, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 
 type AnalysisInput = {
   folderName: string

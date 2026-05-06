@@ -4,7 +4,7 @@ import {
   type SavedFolderRecord,
   type SavedNoteRecord,
   type SavedSnippetRecord,
-} from '@xhs-ai/shared'
+} from '@lumos-ai/shared'
 
 export const FOLDERS_STORAGE_KEY = 'savedFolders'
 export const NOTES_STORAGE_KEY = 'savedNotes'
@@ -13,7 +13,7 @@ export const PENDING_SNIPPET_SELECTION_KEY = 'pendingSnippetSelection'
 export const FOLDER_TAG_NAMES_STORAGE_KEY = 'folderTagNames'
 export const COLOR_TAG_NAMES_STORAGE_KEY = 'colorTagNames'
 export const TRASH_STORAGE_KEY = 'trashItems'
-const PREVIEW_STORAGE_KEY = 'xhs-ai-studio-preview-storage-v4'
+const PREVIEW_STORAGE_KEY = 'lumos-ai-writer-preview-storage-v1'
 const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 export type TrashedNoteItem = {
@@ -606,6 +606,105 @@ export async function restoreTrashItem(itemId: string) {
     [SNIPPETS_STORAGE_KEY]: nextSnippets,
     [TRASH_STORAGE_KEY]: nextTrashItems,
   })
+}
+
+export async function restoreTrashFolderNote(itemId: string, noteId: string) {
+  const [folders, notes, snippets, trashItems] = await Promise.all([
+    getSavedFolders(),
+    getSavedNotes(),
+    getSavedSnippets(),
+    getTrashItems(),
+  ])
+  const item = trashItems.find((trashItem) => trashItem.id === itemId)
+  if (!item || item.type !== 'folder') return
+
+  const targetNote = item.notes.find((note) => note.id === noteId)
+  if (!targetNote) return
+
+  const now = new Date().toISOString()
+  const targetUrl = normalizeNoteUrl(targetNote.sourceUrl)
+  const nextFolders = [...folders]
+  const nextNotes = [...notes]
+  const nextSnippets = [...snippets]
+  const restoredFolder = {
+    ...item.folder,
+    updatedAt: now,
+  }
+
+  if (!nextFolders.some((folder) => folder.id === restoredFolder.id)) {
+    nextFolders.unshift(restoredFolder)
+  }
+
+  if (!nextNotes.some((note) => normalizeNoteUrl(note.sourceUrl) === targetUrl)) {
+    nextNotes.unshift({
+      ...targetNote,
+      folderId: restoredFolder.id,
+      folderName: restoredFolder.name,
+    })
+  }
+
+  item.snippets
+    .filter((snippet) => normalizeNoteUrl(snippet.noteUrl) === targetUrl)
+    .forEach((snippet) => {
+      if (nextSnippets.some((current) => current.id === snippet.id)) return
+      nextSnippets.unshift(snippet)
+    })
+
+  const remainingNoteItems: TrashedNoteItem[] = item.notes
+    .filter((note) => normalizeNoteUrl(note.sourceUrl) !== targetUrl)
+    .map((note) => {
+      const noteUrl = normalizeNoteUrl(note.sourceUrl)
+
+      return {
+        id: createTrashItemId('note', note.id),
+        type: 'note',
+        deletedAt: item.deletedAt,
+        folder: restoredFolder,
+        note: {
+          ...note,
+          folderId: restoredFolder.id,
+          folderName: restoredFolder.name,
+        },
+        snippets: item.snippets.filter(
+          (snippet) => normalizeNoteUrl(snippet.noteUrl) === noteUrl,
+        ),
+      }
+    })
+
+  await storageSet({
+    [FOLDERS_STORAGE_KEY]: nextFolders,
+    [NOTES_STORAGE_KEY]: nextNotes,
+    [SNIPPETS_STORAGE_KEY]: nextSnippets,
+    [TRASH_STORAGE_KEY]: trashItems.flatMap((trashItem) =>
+      trashItem.id === item.id ? remainingNoteItems : [trashItem],
+    ),
+  })
+}
+
+export async function deleteTrashFolderNotePermanently(itemId: string, noteId: string) {
+  const trashItems = await getTrashItems()
+  const item = trashItems.find((trashItem) => trashItem.id === itemId)
+  if (!item || item.type !== 'folder') return
+
+  const targetNote = item.notes.find((note) => note.id === noteId)
+  if (!targetNote) return
+
+  const targetUrl = normalizeNoteUrl(targetNote.sourceUrl)
+  const nextTrashItems = trashItems.flatMap((trashItem) => {
+    if (trashItem.id !== itemId || trashItem.type !== 'folder') return [trashItem]
+
+    return [
+      {
+        ...trashItem,
+        notes: trashItem.notes.filter((note) => normalizeNoteUrl(note.sourceUrl) !== targetUrl),
+        snippets: trashItem.snippets.filter(
+          (snippet) => normalizeNoteUrl(snippet.noteUrl) !== targetUrl,
+        ),
+      },
+    ]
+  })
+
+  await saveTrashItems(nextTrashItems)
 }
 
 export async function deleteTrashItemPermanently(itemId: string) {

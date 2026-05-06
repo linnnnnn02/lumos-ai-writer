@@ -1,4 +1,4 @@
-import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@xhs-ai/shared'
+import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 
 function makeDemoCover(lines: string[], background: string, accent: string) {
   const textLines = lines

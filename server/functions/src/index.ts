@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { projectLengths, type DraftBlockRecord } from '@xhs-ai/shared'
+import { projectLengths, type DraftBlockRecord } from '@lumos-ai/shared'
 
 const projectBriefSchema = z.object({
   topic: z.string().min(1),

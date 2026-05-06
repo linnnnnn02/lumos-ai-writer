@@ -1,5 +1,5 @@
 import { defineContentScript } from 'wxt/utils/define-content-script'
-import type { ExtractedNoteRecord, SavedSnippetRecord } from '@xhs-ai/shared'
+import type { ExtractedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 
 const UNTITLED_NOTE_TITLE = '无标题'
 
@@ -1321,8 +1321,9 @@ function createSelectionUi() {
       }
 
       .xhs-ai-button.primary {
-        background: #dd6c32;
+        background: linear-gradient(90deg, #67c7ff 0%, #efb6d0 44%, #ff9550 100%);
         color: #fff;
+        box-shadow: 0 14px 28px rgba(255, 149, 80, 0.22);
       }
 
       .xhs-ai-toast {
@@ -2112,7 +2113,7 @@ export default defineContentScript({
   matches: ['https://www.xiaohongshu.com/*'],
   runAt: 'document_start',
   main() {
-    console.info('XHS AI Studio content script ready')
+    console.info('Lumos AI Writer content script ready')
     setupNoteRouteChangeNotifier()
     const selectionUi = setupSelectionAnnotation()
 

@@ -21,12 +21,12 @@ importers:
 
   extension:
     dependencies:
+      '@lumos-ai/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       '@radix-ui/react-select':
         specifier: ^2.2.6
         version: 2.2.6(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      '@xhs-ai/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.5)
@@ -67,7 +67,7 @@ importers:
 
   server/functions:
     dependencies:
-      '@xhs-ai/shared':
+      '@lumos-ai/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       zod:
@@ -83,15 +83,15 @@ importers:
 
   web:
     dependencies:
+      '@lumos-ai/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       '@radix-ui/react-checkbox':
         specifier: ^1.3.3
         version: 1.3.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@radix-ui/react-select':
         specifier: ^2.2.6
         version: 2.2.6(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      '@xhs-ai/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.2.6",
-    "@xhs-ai/shared": "workspace:*",
+    "@lumos-ai/shared": "workspace:*",
     "lucide-react": "^0.511.0",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.0",

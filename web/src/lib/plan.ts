@@ -1,4 +1,4 @@
-import type { DraftBlockRecord, ProjectLength, SavedSnippetRecord } from '@xhs-ai/shared'
+import type { DraftBlockRecord, ProjectLength, SavedSnippetRecord } from '@lumos-ai/shared'
 
 type PlanInput = {
   topic: string

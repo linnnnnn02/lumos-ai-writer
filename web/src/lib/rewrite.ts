@@ -1,4 +1,4 @@
-import type { DraftBlockRecord, SavedSnippetRecord } from '@xhs-ai/shared'
+import type { DraftBlockRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 
 type RewriteInput = {
   blocks: DraftBlockRecord[]

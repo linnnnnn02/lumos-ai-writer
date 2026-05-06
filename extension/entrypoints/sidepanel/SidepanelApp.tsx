@@ -6,7 +6,7 @@ import {
   type SavedFolderRecord,
   type SavedNoteRecord,
   type SavedSnippetRecord,
-} from '@xhs-ai/shared'
+} from '@lumos-ai/shared'
 import {
   clearPendingSnippetSelection,
   COLOR_TAG_NAMES_STORAGE_KEY,
