@@ -558,7 +558,9 @@ async function copyTextToClipboard(text: string) {
     textarea.style.left = '-9999px'
     textarea.style.top = '0'
     document.body.appendChild(textarea)
+    textarea.focus({ preventScroll: true })
     textarea.select()
+    textarea.setSelectionRange(0, textarea.value.length)
 
     try {
       if (document.execCommand('copy')) return true
@@ -2895,7 +2897,7 @@ function App() {
       step: 'reader',
     }))
     setIsReaderAudienceOpen(false)
-    showFinalCopyToast(copied ? '已复制当前文案' : '已标记完成，复制失败')
+    showFinalCopyToast(copied ? '已复制当前文案' : '已确认完成，可再次点击复制')
   }
 
   function handleActivateReaderAnnotation(annotationId: string) {
@@ -3415,9 +3417,11 @@ function App() {
           <div className="relative grid gap-5">
             <div>
               <h1 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                工具名（待提供）
+                Lumos AI Writer
               </h1>
-              <p className="mt-1 text-sm text-[var(--muted-foreground)]">先留位置</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                管理项目、选择参考文案，并完成从学习到预演的创作流程。
+              </p>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto]">
@@ -3908,8 +3912,8 @@ function App() {
                 ? '还没有可调整的初版文案'
                 : '还没有可预演的文案',
         description:
-          '这个对话还没有选择参考文案，后续环节暂时没有内容。先回到学习拆解，选择要参考的文案并生成偏好分析。',
-        actionLabel: '去学习拆解',
+          '这个对话还没有选择参考文案，后续环节暂时没有内容。先回到选择文案，挑选要参考的内容并生成偏好分析。',
+        actionLabel: '去选择文案',
       }
     }
 
@@ -4008,7 +4012,7 @@ function App() {
           <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
-                篇幅选择
+                篇幅设置
               </h1>
               <WorkflowTitleMenu
                 activeStep={activeWorkflowStep}
@@ -4031,7 +4035,7 @@ function App() {
             {hasLearningResult ? (
               <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4">
                 <section
-                  aria-label="篇幅选择"
+                  aria-label="篇幅设置"
                   className="grid min-h-0 flex-1 snap-x snap-mandatory auto-cols-[minmax(19rem,calc(100vw-2rem))] grid-flow-col grid-rows-1 gap-4 overflow-x-auto overflow-y-hidden pb-2 xl:auto-cols-auto xl:grid-flow-row xl:grid-cols-3 xl:overflow-hidden xl:pb-0"
                   role="radiogroup"
                 >
