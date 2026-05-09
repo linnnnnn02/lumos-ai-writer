@@ -12,7 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import type { ProjectLength } from '@lumos-ai/shared'
+import type { AiAnalysisResult, ProjectLength } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -43,7 +43,7 @@ import {
   Users,
   WandSparkles,
   X,
-} from 'lucide-react'
+} from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -61,12 +61,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { LearnWorkspace } from '@/components/learn-workspace'
+import { AuthStatus } from '@/components/auth-status'
 import {
   WorkflowTitleMenu,
   type WorkflowStepId,
   type WorkflowTitleMenuStep,
 } from '@/components/workflow-title-menu'
+import { useCloudLibrary } from '@/hooks/use-cloud-library'
+import { analyzeReferences, generateDraft } from '@/lib/api-client'
+import { getCurrentAccessToken } from '@/lib/supabase-browser'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
 
@@ -390,7 +395,7 @@ function getConversationStep(conversation: ConversationRecord) {
   return conversation.step ?? 'learn'
 }
 
-function buildAssistantReply(question: string, context: ReturnType<typeof buildDemoAnalysis>) {
+function buildAssistantReply(question: string, context: AiAnalysisResult) {
   if (question.includes('结构')) {
     return {
       stage: 'followup' as const,
@@ -456,7 +461,7 @@ function buildSetupReply(question: string) {
   }
 }
 
-function buildAnalysisChat(context: ReturnType<typeof buildDemoAnalysis>): ChatMessage[] {
+function buildAnalysisChat(context: AiAnalysisResult): ChatMessage[] {
   return [
     {
       id: crypto.randomUUID(),
@@ -485,6 +490,10 @@ function buildAnalysisChat(context: ReturnType<typeof buildDemoAnalysis>): ChatM
 
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : '请求失败'
 }
 
 function buildInitialDraftCopy(input: {
@@ -770,6 +779,7 @@ function App() {
   const [activeProjectId, setActiveProjectId] = useState(initialProjects[0].id)
   const [chatInput, setChatInput] = useState('')
   const [isChatStreaming, setIsChatStreaming] = useState(false)
+  const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
   const [newProjectName, setNewProjectName] = useState('深圳周末路线项目')
   const [newProjectFolderId, setNewProjectFolderId] = useState(demoFolders[0].id)
   const [showCreateProjectCard, setShowCreateProjectCard] = useState(false)
@@ -796,11 +806,19 @@ function App() {
   const [finalCopyToast, setFinalCopyToast] = useState('')
   const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>({})
   const [draftCopyByConversation, setDraftCopyByConversation] = useState<Record<string, InitialDraftCopy>>({})
+  const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
+  const [draftGenerationErrorByConversation, setDraftGenerationErrorByConversation] = useState<
+    Record<string, string>
+  >({})
   const [draftDragSelection, setDraftDragSelection] = useState<DraftDragSelection | null>(null)
   const [draftPointerDrag, setDraftPointerDrag] = useState<DraftPointerDrag | null>(null)
   const [draftDropTarget, setDraftDropTarget] = useState<DraftDropTarget | null>(null)
   const [draftDropLanding, setDraftDropLanding] = useState<DraftDropLanding | null>(null)
   const [draftMovePrompt, setDraftMovePrompt] = useState<DraftMovePrompt | null>(null)
+  const cloudLibrary = useCloudLibrary()
+  const [analysisByConversation, setAnalysisByConversation] = useState<
+    Record<string, AiAnalysisResult>
+  >({})
   const [draftMoveHistoryByConversation, setDraftMoveHistoryByConversation] = useState<
     Record<string, DraftMoveHistory>
   >({})
@@ -830,6 +848,17 @@ function App() {
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
     [activeProjectId, projects],
   )
+  const isUsingCloudLibrary = cloudLibrary.status !== 'guest'
+  const libraryFolders = isUsingCloudLibrary ? cloudLibrary.folders : demoFolders
+  const libraryNotes = isUsingCloudLibrary ? cloudLibrary.notes : demoNotes
+  const librarySnippets = isUsingCloudLibrary ? cloudLibrary.snippets : demoSnippets
+  const libraryStatus = cloudLibrary.status === 'guest' ? 'demo' : cloudLibrary.status
+  const libraryError = isUsingCloudLibrary ? cloudLibrary.error : ''
+  const effectiveNewProjectFolderId = libraryFolders.some(
+    (folder) => folder.id === newProjectFolderId,
+  )
+    ? newProjectFolderId
+    : libraryFolders[0]?.id ?? ''
 
   const activeConversation = useMemo(
     () =>
@@ -1132,6 +1161,9 @@ function App() {
   const hasLengthSelected = Boolean(activeConversation.length)
   const hasPlanReady = hasLearningResult && hasLengthSelected
   const hasDraftReady = hasPlanReady && Boolean(draftReadyByConversation[activeConversation.id])
+  const isAnalyzing = analysisPendingConversationId === activeConversation.id
+  const isDraftGenerating = draftGeneratingConversationId === activeConversation.id
+  const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
   const effectiveLength = activeConversation.length ?? 'medium'
 
   const selectedSnippetIds = useMemo(
@@ -1153,16 +1185,16 @@ function App() {
   )
 
   const selectedSnippets = useMemo(
-    () => demoSnippets.filter((snippet) => selectedSnippetIds.has(snippet.id)),
-    [selectedSnippetIds],
+    () => librarySnippets.filter((snippet) => selectedSnippetIds.has(snippet.id)),
+    [librarySnippets, selectedSnippetIds],
   )
 
   const selectedNotes = useMemo(() => {
     const snippetNoteUrls = new Set(selectedSnippets.map((snippet) => snippet.noteUrl))
-    return demoNotes.filter(
+    return libraryNotes.filter(
       (note) => selectedNoteIds.has(note.id) || snippetNoteUrls.has(note.sourceUrl),
     )
-  }, [selectedNoteIds, selectedSnippets])
+  }, [libraryNotes, selectedNoteIds, selectedSnippets])
 
   const selectedFolderName = useMemo(() => {
     const folderNames = Array.from(new Set(selectedNotes.map((note) => note.folderName).filter(Boolean)))
@@ -1173,7 +1205,7 @@ function App() {
     return `${folderNames.length} 个文件夹`
   }, [selectedNotes])
 
-  const analysis = useMemo(
+  const fallbackAnalysis = useMemo(
     () =>
       buildDemoAnalysis({
         folderName: selectedFolderName,
@@ -1194,6 +1226,7 @@ function App() {
       selectedSnippets,
     ],
   )
+  const analysis = analysisByConversation[activeConversation.id] ?? fallbackAnalysis
 
   const generatedInitialDraftCopy = useMemo(
     () =>
@@ -1259,11 +1292,11 @@ function App() {
   const filteredProjects = useMemo(() => {
     const query = projectSearch.trim().toLowerCase()
     return projects.filter((project) => {
-      const folder = demoFolders.find((item) => item.id === project.folderId)
+      const folder = libraryFolders.find((item) => item.id === project.folderId)
       const content = [project.name, folder?.name || ''].join(' ').toLowerCase()
       return !query || content.includes(query)
     })
-  }, [projectSearch, projects])
+  }, [libraryFolders, projectSearch, projects])
 
   const projectPendingDelete = useMemo(
     () => projects.find((project) => project.id === projectPendingDeleteId),
@@ -1357,13 +1390,6 @@ function App() {
     if (nextStep === 'workspace') {
       setIsWorkspaceOpen(true)
       return
-    }
-
-    if (nextStep === 'plan' && hasPlanReady) {
-      setDraftReadyByConversation((current) => ({
-        ...current,
-        [activeConversation.id]: true,
-      }))
     }
 
     setIsWorkspaceOpen(false)
@@ -1469,7 +1495,7 @@ function App() {
     const nextProject: ProjectRecord = {
       id: crypto.randomUUID(),
       name,
-      folderId: newProjectFolderId,
+      folderId: effectiveNewProjectFolderId,
       activeConversationId: conversationId,
       updatedAt: now,
       conversations: [
@@ -1648,23 +1674,173 @@ function App() {
 
     const projectId = activeProject.id
     const conversationId = activeConversation.id
-    const analysisMessages = buildAnalysisChat(analysis)
 
     setIsChatStreaming(true)
-    updateConversation(projectId, conversationId, (conversation) => ({
-      ...conversation,
-      analysisReady: true,
+    setAnalysisPendingConversationId(conversationId)
+    setDraftReadyByConversation((current) => ({
+      ...current,
+      [conversationId]: false,
     }))
+    setDraftCopyByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setDraftGenerationErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    try {
+      let nextAnalysis = fallbackAnalysis
 
-    for (const message of analysisMessages) {
-      await sleep(320)
+      if (isUsingCloudLibrary && cloudLibrary.status === 'ready') {
+        const accessToken = await getCurrentAccessToken()
+        if (!accessToken) {
+          throw new Error('登录状态已过期，请重新登录后再开始分析。')
+        }
+
+        const response = await analyzeReferences(accessToken, {
+          projectName: activeProject.name,
+          folderName: selectedFolderName,
+          topic: activeConversation.topic,
+          targetAudience: activeConversation.targetAudience,
+          length: effectiveLength,
+          notes: selectedNotes,
+          snippets: selectedSnippets,
+        })
+        nextAnalysis = response.analysis
+      }
+
+      const analysisMessages = buildAnalysisChat(nextAnalysis)
+      setAnalysisByConversation((current) => ({
+        ...current,
+        [conversationId]: nextAnalysis,
+      }))
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
-        chatMessages: [...conversation.chatMessages, message],
+        analysisReady: true,
       }))
-    }
 
-    setIsChatStreaming(false)
+      for (const message of analysisMessages) {
+        await sleep(320)
+        updateConversation(projectId, conversationId, (conversation) => ({
+          ...conversation,
+          chatMessages: [...conversation.chatMessages, message],
+        }))
+      }
+    } catch (error) {
+      const message = getErrorMessage(error)
+      updateConversation(projectId, conversationId, (conversation) => ({
+        ...conversation,
+        analysisReady: false,
+        chatMessages: [
+          ...conversation.chatMessages,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            stage: 'setup',
+            title: '真实 AI 暂未跑通',
+            lines: [
+              message.includes('DeepSeek API key')
+                ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型完成学习拆解。'
+                : message,
+            ],
+          },
+        ],
+      }))
+    } finally {
+      setIsChatStreaming(false)
+      setAnalysisPendingConversationId((current) => (current === conversationId ? '' : current))
+    }
+  }
+
+  async function handleGenerateDraft() {
+    if (!hasPlanReady || draftGeneratingConversationId) return
+
+    const projectId = activeProject.id
+    const conversationId = activeConversation.id
+
+    setDraftGeneratingConversationId(conversationId)
+    setDraftReadyByConversation((current) => ({
+      ...current,
+      [conversationId]: false,
+    }))
+    setDraftGenerationErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+
+    try {
+      if (selectedNotes.length === 0) {
+        throw new Error('至少需要选择一篇参考文案，才能生成初版。')
+      }
+
+      let nextDraft = generatedInitialDraftCopy
+
+      if (isUsingCloudLibrary) {
+        if (cloudLibrary.status !== 'ready') {
+          throw new Error('云端资料库还在连接中，稍等一下再生成。')
+        }
+
+        const accessToken = await getCurrentAccessToken()
+        if (!accessToken) {
+          throw new Error('登录状态已过期，请重新登录后再生成初版。')
+        }
+
+        const response = await generateDraft(accessToken, {
+          projectName: activeProject.name,
+          topic: activeConversation.topic,
+          targetAudience: activeConversation.targetAudience,
+          length: effectiveLength,
+          analysis,
+          notes: selectedNotes,
+          snippets: selectedSnippets,
+          brief: creationBrief,
+        })
+        nextDraft = response.draft
+      }
+
+      setDraftCopyByConversation((current) => ({
+        ...current,
+        [conversationId]: nextDraft,
+      }))
+      setDraftReadyByConversation((current) => ({
+        ...current,
+        [conversationId]: true,
+      }))
+      setDraftBridgeMessagesByConversation((current) => {
+        const next = { ...current }
+        delete next[conversationId]
+        return next
+      })
+      setDraftMoveHistoryByConversation((current) => {
+        const next = { ...current }
+        delete next[conversationId]
+        return next
+      })
+      setDraftDragSelection(null)
+      setDraftPointerDrag(null)
+      setDraftDropTarget(null)
+      setDraftDropLanding(null)
+      setDraftMovePrompt(null)
+
+      updateConversation(projectId, conversationId, (conversation) => ({
+        ...conversation,
+        step: 'plan',
+      }))
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setDraftGenerationErrorByConversation((current) => ({
+        ...current,
+        [conversationId]: message.includes('DeepSeek API key')
+          ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型生成初版文案。'
+          : message,
+      }))
+    } finally {
+      setDraftGeneratingConversationId((current) => (current === conversationId ? '' : current))
+    }
   }
 
   function handleBackToSelection() {
@@ -2939,6 +3115,73 @@ function App() {
     })}`
   }
 
+  function renderDraftGenerationSkeleton() {
+    const lengthLabel =
+      effectiveLength === 'short' ? '短篇幅' : effectiveLength === 'medium' ? '中篇幅' : '长篇幅'
+
+    return (
+      <div
+        aria-live="polite"
+        className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4"
+        role="status"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm leading-6 text-[var(--foreground)]">
+            <p className="font-semibold">正在生成初版</p>
+            <p className="mt-1 text-[var(--muted-foreground)]">
+              DeepSeek 正在把学习拆解整理成 {lengthLabel} 可编辑文案
+            </p>
+          </div>
+          <div className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[rgba(15,23,42,0.08)] bg-[rgba(241,243,246,0.8)] px-3 text-xs font-semibold text-[var(--muted-foreground)]">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <span
+                key={index}
+                className="draft-thinking-dot h-1.5 w-1.5 rounded-full bg-[var(--accent-strong)]"
+                style={{ animationDelay: `${index * 0.14}s` }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4" aria-hidden="true">
+          <div className="space-y-2">
+            <div className="h-5 w-[68%] max-w-[24rem] overflow-hidden rounded-full bg-[rgba(226,232,240,0.78)]">
+              <div className="draft-thinking-bar h-full rounded-full bg-[linear-gradient(90deg,rgba(103,199,255,0.56),rgba(239,182,208,0.52),rgba(240,122,47,0.48))]" />
+            </div>
+            <div className="h-3 w-[42%] max-w-[16rem] overflow-hidden rounded-full bg-[rgba(226,232,240,0.7)]">
+              <div
+                className="draft-thinking-bar h-full rounded-full bg-[linear-gradient(90deg,rgba(103,199,255,0.36),rgba(148,163,184,0.38))]"
+                style={{ animationDelay: '120ms' }}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            {[0, 1, 2, 3].map((index) => (
+              <div key={index} className="space-y-2">
+                <div className="h-3 w-full overflow-hidden rounded-full bg-[rgba(226,232,240,0.68)]">
+                  <div
+                    className="draft-thinking-bar h-full rounded-full bg-[linear-gradient(90deg,rgba(148,163,184,0.38),rgba(103,199,255,0.34))]"
+                    style={{ animationDelay: `${index * 110}ms` }}
+                  />
+                </div>
+                <div
+                  className="h-3 overflow-hidden rounded-full bg-[rgba(226,232,240,0.55)]"
+                  style={{ width: `${index === 3 ? 54 : 76 - index * 8}%` }}
+                >
+                  <div
+                    className="draft-thinking-bar h-full rounded-full bg-[linear-gradient(90deg,rgba(148,163,184,0.3),rgba(239,182,208,0.28))]"
+                    style={{ animationDelay: `${index * 140}ms` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function renderInitialDraftCopy(variant: 'plan' | 'rewrite' | 'reader') {
     const isPlan = variant === 'plan'
     const isRewrite = variant === 'rewrite'
@@ -3047,7 +3290,7 @@ function App() {
                     type="button"
                     aria-label="拖动圈选文字"
                     onPointerDown={handleDraftDragHandlePointerDown}
-                    className="draft-selection-handle ml-1 inline-flex h-6 w-5 shrink-0 cursor-grab items-center justify-center rounded-full bg-white/95 text-[var(--accent-strong)] opacity-100 shadow-[0_8px_20px_rgba(48,34,22,0.16)] ring-1 ring-[rgba(240,122,47,0.22)] transition hover:scale-105 hover:bg-[var(--accent-soft)] active:cursor-grabbing"
+                    className="draft-selection-handle ml-1 inline-flex h-6 w-5 shrink-0 cursor-grab items-center justify-center rounded-full bg-white/95 text-[var(--accent-strong)] opacity-100 shadow-[0_8px_20px_rgba(48,34,22,0.16)] ring-1 ring-[rgba(15,23,42,0.14)] transition hover:scale-105 hover:bg-[var(--accent-soft)] active:cursor-grabbing"
                   >
                     <GripVertical className="h-3.5 w-3.5" />
                   </button>
@@ -3190,7 +3433,7 @@ function App() {
         }
         className={
           isPlan
-            ? 'select-text rounded-[1.15rem] border border-[rgba(31,22,17,0.08)] bg-[#fffdf9] px-5 py-5 shadow-[0_12px_28px_rgba(48,34,22,0.04)]'
+            ? 'select-text rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.08)] bg-white px-5 py-5 shadow-[0_12px_28px_rgba(15,23,42,0.04)]'
             : 'select-text py-1'
         }
         style={{
@@ -3201,7 +3444,7 @@ function App() {
         {isPlan ? (
           <div
             data-testid="draft-drag-instruction"
-            className="mb-5 rounded-[1rem] border border-[rgba(240,122,47,0.16)] bg-[rgba(255,248,241,0.84)] px-4 py-3 text-sm leading-6 text-[var(--muted-foreground)]"
+            className="mb-5 rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.86)] px-4 py-3 text-sm leading-6 text-[var(--muted-foreground)]"
           >
             <div className="flex items-start gap-2">
               <MousePointer2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
@@ -3282,7 +3525,7 @@ function App() {
 
         {draftPointerDrag && draftDragSelection && isPlan && typeof document !== 'undefined' ? createPortal(
           <div
-            className="pointer-events-none fixed z-[130] max-w-[18rem] rounded-[0.75rem] bg-white/96 px-3 py-2 text-sm font-medium leading-6 text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.18)] ring-1 ring-[rgba(240,122,47,0.18)] backdrop-blur-xl"
+            className="pointer-events-none fixed z-[130] max-w-[18rem] rounded-[0.75rem] bg-white/96 px-3 py-2 text-sm font-medium leading-6 text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.18)] ring-1 ring-[rgba(15,23,42,0.12)] backdrop-blur-xl"
             style={{
               left: draftPointerDrag.x + 12,
               top: draftPointerDrag.y + 12,
@@ -3297,8 +3540,8 @@ function App() {
           <span
             className={
               draftDropTarget.indicator.orientation === 'vertical'
-                ? 'pointer-events-none fixed z-[125] rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_3px_rgba(240,122,47,0.16)]'
-                : 'pointer-events-none fixed z-[125] rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_3px_rgba(240,122,47,0.14)]'
+                ? 'pointer-events-none fixed z-[125] rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_3px_rgba(15,23,42,0.14)]'
+                : 'pointer-events-none fixed z-[125] rounded-full bg-[var(--accent-strong)] shadow-[0_0_0_3px_rgba(15,23,42,0.12)]'
             }
             style={{
               height: draftDropTarget.indicator.height,
@@ -3365,7 +3608,7 @@ function App() {
         </div>
         <div
           data-testid="draft-bridge-message"
-          className="max-w-[46rem] rounded-[1.25rem] rounded-tl-md bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]"
+          className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]"
         >
           {message.status === 'generating' ? (
             <div className="grid gap-3">
@@ -3382,7 +3625,7 @@ function App() {
                 </span>
               </div>
               <div className="grid gap-2">
-                <span className="draft-thinking-bar h-3 w-[88%] rounded-full bg-[rgba(240,122,47,0.12)]" />
+                <span className="draft-thinking-bar h-3 w-[88%] rounded-full bg-[rgba(100,116,139,0.14)]" />
                 <span className="draft-thinking-bar h-3 w-[72%] rounded-full bg-[rgba(42,157,143,0.12)]" />
               </div>
             </div>
@@ -3394,7 +3637,7 @@ function App() {
               <p className="text-sm leading-7 text-[var(--muted-foreground)]">
                 我把刚才移动到{message.targetLabel}的内容接顺了一下，重点是补出前后关系，不改变原本的小红书口吻。
               </p>
-              <div className="rounded-[1rem] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.62)] px-4 py-3 text-[15px] leading-7 text-[#2e3430]">
+              <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.62)] px-4 py-3 text-[15px] leading-7 text-[#2e3430]">
                 {message.beforeText ? <span>{message.beforeText}</span> : null}
                 <span>{message.movedText}</span>
                 <mark className="mx-1 rounded-[0.45rem] bg-[rgba(42,157,143,0.2)] px-1.5 py-0.5 text-[#17675b] shadow-[0_0_0_1px_rgba(42,157,143,0.14)]">
@@ -3413,22 +3656,25 @@ function App() {
     return (
       <main className="relative flex h-screen min-h-0 flex-col overflow-hidden px-4 pb-4 pt-5 md:px-8 md:pb-8">
         <section className="relative z-10 mx-auto w-full max-w-6xl shrink-0 pb-4">
-          <div className="pointer-events-none absolute inset-x-[-12%] top-[-7rem] h-64 bg-[radial-gradient(circle_at_18%_18%,rgba(103,199,255,0.2),transparent_28%),radial-gradient(circle_at_78%_0%,rgba(255,176,106,0.22),transparent_30%)] blur-xl" />
+          <div className="pointer-events-none absolute inset-x-[-12%] top-[-7rem] h-64 bg-[radial-gradient(circle_at_18%_18%,rgba(103,199,255,0.2),transparent_28%),radial-gradient(circle_at_78%_0%,rgba(148,163,184,0.16),transparent_30%)] blur-xl" />
           <div className="relative grid gap-5">
-            <div>
-              <h1 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                Lumos AI Writer
-              </h1>
-              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                管理项目、选择参考文案，并完成从学习到预演的创作流程。
-              </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h1 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+                  Lumos AI Writer
+                </h1>
+                <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                  管理项目、选择参考文案，并完成从学习到预演的创作流程。
+                </p>
+              </div>
+              <AuthStatus />
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--soft-foreground)]" />
                 <Input
-                  className="h-12 rounded-full border-white/80 bg-white/82 pl-11 shadow-[0_14px_34px_rgba(48,34,22,0.06)]"
+                  className="h-12 rounded-[var(--ui-field-radius)] border-white/80 bg-white/82 pl-11 shadow-[0_14px_34px_rgba(48,34,22,0.06)]"
                   value={projectSearch}
                   onChange={(event) => setProjectSearch(event.target.value)}
                   placeholder="搜索项目或参考文件夹"
@@ -3443,7 +3689,7 @@ function App() {
         </section>
 
         <section className="mx-auto flex min-h-0 w-full max-w-6xl flex-1">
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] shadow-[var(--shadow-soft)]">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] shadow-[var(--shadow-soft)]">
             <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-[var(--border)] bg-white/76 px-5 py-4 lg:px-6">
               <div>
                 <h2 className="text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">
@@ -3452,7 +3698,7 @@ function App() {
               </div>
             </div>
 
-            <div className="hidden shrink-0 grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] items-center gap-6 bg-[rgba(255,248,241,0.68)] px-6 py-4 text-sm font-semibold text-[var(--soft-foreground)] lg:grid">
+            <div className="hidden shrink-0 grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] items-center gap-6 bg-[rgba(241,243,246,0.72)] px-6 py-4 text-sm font-semibold text-[var(--soft-foreground)] lg:grid">
               <div>项目</div>
               <div>参考文件夹</div>
               <div>最近更新</div>
@@ -3461,7 +3707,7 @@ function App() {
 
             <div className="min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto">
               {filteredProjects.map((project, index) => {
-                const folder = demoFolders.find((item) => item.id === project.folderId)
+                const folder = libraryFolders.find((item) => item.id === project.folderId)
                 const projectConversation =
                   project.conversations.find(
                     (conversation) => conversation.id === project.activeConversationId,
@@ -3486,14 +3732,14 @@ function App() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--panel)] text-[var(--accent-strong)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
                           <FolderOpen className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
                           {renamingProjectId === project.id ? (
                             <Input
                               autoFocus
-                              className="h-9 max-w-sm rounded-xl bg-white/90 text-base font-semibold"
+                              className="h-9 max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 text-base font-semibold"
                               value={renamingProjectName}
                               aria-label={`重命名 ${project.name}`}
                               onBlur={() => handleSaveRenameProject(project.id)}
@@ -3573,7 +3819,7 @@ function App() {
 
         {showCreateProjectCard ? (
           <div className="ui-dialog-backdrop fixed inset-0 z-20 flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-4 py-10 backdrop-blur-md">
-            <Card className="ui-dialog-card w-full max-w-xl rounded-[2.1rem] bg-white/90 shadow-[var(--shadow-elevated)]">
+            <Card className="ui-dialog-card w-full max-w-xl rounded-[var(--ui-radius-dialog)] bg-white/90 shadow-[var(--shadow-elevated)]">
               <CardHeader className="flex-row items-start justify-between gap-4">
                 <div>
                   <CardTitle className="text-3xl">新建项目</CardTitle>
@@ -3591,12 +3837,12 @@ function App() {
 
                 <label className="grid gap-2">
                   <span className="text-sm font-medium text-[var(--muted-foreground)]">参考文件夹</span>
-                  <Select value={newProjectFolderId} onValueChange={setNewProjectFolderId}>
+                  <Select value={effectiveNewProjectFolderId} onValueChange={setNewProjectFolderId}>
                     <SelectTrigger aria-label="参考文件夹">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {demoFolders.map((folder) => (
+                      {libraryFolders.map((folder) => (
                         <SelectItem key={folder.id} value={folder.id}>
                           {folder.name}
                         </SelectItem>
@@ -3609,7 +3855,12 @@ function App() {
                   <Button variant="secondary" onClick={() => setShowCreateProjectCard(false)}>
                     取消
                   </Button>
-                  <Button onClick={handleCreateProject}>新建并进入项目</Button>
+                  <Button
+                    onClick={handleCreateProject}
+                    disabled={!newProjectName.trim() || !effectiveNewProjectFolderId}
+                  >
+                    新建并进入项目
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -3626,7 +3877,7 @@ function App() {
             onClick={handleCancelDeleteProject}
           >
             <Card
-              className="ui-dialog-card w-full max-w-md rounded-[1.8rem] bg-white/94 shadow-[var(--shadow-elevated)]"
+              className="ui-dialog-card w-full max-w-md rounded-[var(--ui-radius-dialog)] bg-white/94 shadow-[var(--shadow-elevated)]"
               onClick={(event) => event.stopPropagation()}
             >
               <CardHeader className="gap-3">
@@ -3670,10 +3921,13 @@ function App() {
         chatInput={chatInput}
         chatMessages={activeConversation.chatMessages}
         activeWorkflowStep={activeWorkflowStep}
-        folders={demoFolders}
-        notes={demoNotes}
-        snippets={demoSnippets}
+        folders={libraryFolders}
+        notes={libraryNotes}
+        snippets={librarySnippets}
+        libraryStatus={libraryStatus}
+        libraryError={libraryError}
         workflowSteps={workflowSteps}
+        isAnalyzing={isAnalyzing}
         isStreaming={isChatStreaming}
         projectName={activeProject.name}
         conversations={sidebarConversations.map((conversation) => ({
@@ -3726,10 +3980,10 @@ function App() {
         }}
         className={
           isActive
-            ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[0.9rem] border border-transparent bg-white/58 px-3 py-2 text-sm font-semibold leading-6 text-[var(--foreground)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+            ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-white/58 px-3 py-2 text-sm font-semibold leading-6 text-[var(--foreground)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
             : conversation.pinned
-              ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[0.9rem] border border-transparent bg-[rgba(255,240,229,0.5)] px-3 py-2 text-sm leading-6 text-[var(--accent-strong)] outline-none transition hover:bg-[rgba(255,240,229,0.68)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-              : 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[0.9rem] border border-transparent bg-transparent px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none transition hover:bg-white/42 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+              ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-[rgba(241,243,246,0.72)] px-3 py-2 text-sm leading-6 text-[var(--accent-strong)] outline-none transition hover:bg-[rgba(226,232,240,0.86)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+              : 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-transparent px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none transition hover:bg-white/42 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
         }
       >
         <MessageCircle
@@ -3757,7 +4011,7 @@ function App() {
                 cancelSidebarConversationRename()
               }
             }}
-            className="h-9 min-w-0 flex-1 rounded-[0.85rem] bg-white/86 px-3 text-sm font-semibold"
+            className="h-9 min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-3 text-sm font-semibold"
             aria-label="重命名对话"
           />
         ) : (
@@ -3816,7 +4070,7 @@ function App() {
           ? createPortal(
               <div
                 data-sidebar-conversation-menu
-                className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
                 role="menu"
                 style={{
                   left: sidebarConversationMenuPosition.left,
@@ -3833,7 +4087,7 @@ function App() {
                     handleToggleConversationPin(conversation.id)
                     setOpenSidebarConversationMenuId('')
                   }}
-                  className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                  className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
                 >
                   {conversation.pinned ? '取消置顶' : '置顶'}
                 </button>
@@ -3844,7 +4098,7 @@ function App() {
                     event.stopPropagation()
                     startSidebarConversationRename(conversation)
                   }}
-                  className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                  className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
                 >
                   重命名
                 </button>
@@ -3858,7 +4112,7 @@ function App() {
 
   function renderWorkflowSidebar() {
     return (
-      <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(31,22,17,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f2eb_0%,#f7f4ee_58%,#faf6ef_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(31,22,17,0.06)]">
+      <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(15,23,42,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(15,23,42,0.06)]">
         <div className="shrink-0 px-6 pb-3 pt-6">
           <div className="flex items-center gap-3 px-1">
             <Button
@@ -3880,20 +4134,21 @@ function App() {
             </div>
           </div>
 
-          <button
+          <Button
             type="button"
             onClick={handleCreateConversation}
-            className="mt-7 flex w-full items-center justify-between gap-3 rounded-full border border-[rgba(240,122,47,0.18)] bg-[rgba(255,240,229,0.64)] px-4 py-3 text-left transition hover:bg-[rgba(255,240,229,0.86)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+            variant="subtle"
+            className="mt-7 w-full justify-between border-[var(--border)] bg-[rgba(241,243,246,0.78)] px-[var(--ui-control-px-lg)] text-left shadow-none hover:bg-[rgba(226,232,240,0.9)]"
           >
             <span className="text-sm font-semibold text-[var(--accent-strong)]">新对话</span>
-          </button>
+          </Button>
           <p className="mt-6 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--soft-foreground)]">
             历史对话
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             {sidebarConversations.map((conversation) => renderSidebarConversationRow(conversation))}
           </div>
         </div>
@@ -3979,7 +4234,7 @@ function App() {
 
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
-        <section className="ui-surface-enter w-full max-w-[42rem] rounded-[1.6rem] border border-white/72 bg-white/64 px-7 py-8 shadow-[0_18px_48px_rgba(48,34,22,0.055)]">
+        <section className="ui-surface-enter w-full max-w-[42rem] rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/64 px-7 py-8 shadow-[0_18px_48px_rgba(48,34,22,0.055)]">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
             <Sparkles className="h-5 w-5" />
           </div>
@@ -4006,10 +4261,10 @@ function App() {
 
   function renderLength() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#f3f1ea_0%,#f8f4ed_44%,#fffaf3_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(255,176,106,0.08),transparent_34%),linear-gradient(180deg,#fbf7f0_0%,#fffaf4_50%,#fffdf9_100%)]">
+        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
           <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
@@ -4053,6 +4308,11 @@ function App() {
                         delete next[activeConversation.id]
                         return next
                       })
+                      setDraftGenerationErrorByConversation((current) => {
+                        const next = { ...current }
+                        delete next[activeConversation.id]
+                        return next
+                      })
                       setDraftBridgeMessagesByConversation((current) => {
                         const next = { ...current }
                         delete next[activeConversation.id]
@@ -4082,8 +4342,8 @@ function App() {
                         aria-label={card.title}
                         className={
                           isSelected
-                            ? 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(240,122,47,0.34)] bg-[linear-gradient(180deg,rgba(255,246,240,0.96),rgba(255,255,255,0.9))] shadow-[0_20px_44px_rgba(61,35,18,0.1)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                            : 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(31,22,17,0.075)] bg-white/68 shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition hover:bg-white/86 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                            ? 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.18)] bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(255,255,255,0.92))] shadow-[0_20px_44px_rgba(15,23,42,0.1)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                            : 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.075)] bg-white/68 shadow-[0_10px_24px_rgba(15,23,42,0.03)] outline-none transition hover:bg-white/86 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
                         }
                         onClick={selectLength}
                         onKeyDown={(event) => {
@@ -4102,7 +4362,7 @@ function App() {
                         <div
                           className={
                             isSelected
-                              ? 'relative z-10 shrink-0 bg-[linear-gradient(180deg,rgba(255,246,240,1),rgba(255,250,247,1))] px-6 pb-4 pt-6 text-left'
+                              ? 'relative z-10 shrink-0 bg-[linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))] px-6 pb-4 pt-6 text-left'
                               : 'relative z-10 shrink-0 bg-[rgba(255,254,252,1)] px-6 pb-4 pt-6 text-left'
                           }
                         >
@@ -4119,15 +4379,15 @@ function App() {
                         <div className="relative min-h-0 flex-1 overflow-hidden px-4">
                           <div
                             className={
-                              isSelected
-                                ? 'pointer-events-none absolute inset-x-4 top-0 z-10 h-7 bg-[rgba(255,250,247,1)]'
+                            isSelected
+                                ? 'pointer-events-none absolute inset-x-4 top-0 z-10 h-7 bg-[rgba(255,255,255,1)]'
                                 : 'pointer-events-none absolute inset-x-4 top-0 z-10 h-7 bg-[rgba(255,254,252,1)]'
                             }
                           />
                           <div
                             className={
-                              isSelected
-                                ? 'pointer-events-none absolute inset-x-4 bottom-0 z-10 h-7 bg-[rgba(255,252,249,1)]'
+                            isSelected
+                                ? 'pointer-events-none absolute inset-x-4 bottom-0 z-10 h-7 bg-[rgba(255,255,255,1)]'
                                 : 'pointer-events-none absolute inset-x-4 bottom-0 z-10 h-7 bg-[rgba(255,254,252,1)]'
                             }
                           />
@@ -4143,7 +4403,7 @@ function App() {
                         <div
                           className={
                             isSelected
-                              ? 'relative z-10 shrink-0 bg-[rgba(255,252,249,1)] px-4 pb-4 pt-3'
+                              ? 'relative z-10 shrink-0 bg-[rgba(255,255,255,1)] px-4 pb-4 pt-3'
                               : 'relative z-10 shrink-0 bg-[rgba(255,254,252,1)] px-4 pb-4 pt-3'
                           }
                         >
@@ -4175,10 +4435,10 @@ function App() {
 
   function renderPlan() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#f3f1ea_0%,#f8f4ed_44%,#fffaf3_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(255,176,106,0.08),transparent_34%),linear-gradient(180deg,#fbf7f0_0%,#fffaf4_50%,#fffdf9_100%)]">
+        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
           <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
@@ -4210,13 +4470,13 @@ function App() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
                       <WandSparkles className="h-5 w-5" />
                     </div>
-                    <div className="max-w-[46rem] rounded-[1.25rem] rounded-tl-md bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
+                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
                       请补充主题、目标读者、必含要点和表达边界。我会先核验信息，必要时继续追问。
                     </div>
                   </div>
 
-                  <div className="justify-self-end rounded-[1.35rem] rounded-tr-md bg-[linear-gradient(135deg,#67c7ff_0%,#efb6d0_54%,#ff9550_100%)] p-[1px] shadow-[0_18px_36px_rgba(255,149,80,0.16)]">
-                    <div className="max-w-[42rem] rounded-[1.3rem] bg-white/94 px-5 py-4">
+                  <div className="justify-self-end rounded-[var(--ui-radius-panel)] rounded-tr-[0.45rem] border border-[var(--border)] bg-white/78 p-[1px] shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
+                    <div className="max-w-[42rem] rounded-[var(--ui-radius-card)] bg-white/94 px-5 py-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="accent">创作信息</Badge>
                         <span className="text-sm font-medium text-[var(--muted-foreground)]">
@@ -4265,8 +4525,12 @@ function App() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
                       <MessageCircle className="h-5 w-5" />
                     </div>
-                    <div className="max-w-[46rem] rounded-[1.25rem] rounded-tl-md bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
-                      信息已核验，暂不需要追问。我会结合已学习的写法生成初版方案。
+                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
+                      {hasDraftReady
+                        ? '初版已生成，可以确认整体方向。'
+                        : isDraftGenerating
+                          ? '正在结合已学习的写法生成初版方案。'
+                          : '信息已核验，可以生成初版方案。'}
                     </div>
                   </div>
 
@@ -4276,44 +4540,80 @@ function App() {
                     </div>
                     <div
                       data-plan-draft-card
-                      className="max-w-[50rem] rounded-[1.35rem] rounded-tl-md bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
+                      className="max-w-[50rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="accent">初版方案</Badge>
                         <Badge variant="outline">标题 + 正文</Badge>
                       </div>
                       <p className="mt-4 text-sm leading-7 text-[var(--muted-foreground)]">
-                        先确认整体方向；认可后进入编辑细调。
+                        {hasDraftReady ? '先确认整体方向；认可后进入编辑细调。' : '根据已选参考内容和学习拆解生成。'}
                       </p>
-                      <div className="mt-5">
-                        {renderInitialDraftCopy('plan')}
-                      </div>
-                      <div className="mt-3 flex justify-end border-t border-[rgba(31,22,17,0.06)] pt-3">
-                        <div className="inline-flex items-center rounded-full bg-[rgba(255,248,241,0.7)] p-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleUndoDraftMove}
-                            disabled={!canUndoDraftMove}
-                            className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
-                          >
-                            <Undo2 className="h-3.5 w-3.5" />
-                            撤回
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleRedoDraftMove}
-                            disabled={!canRedoDraftMove}
-                            className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
-                          >
-                            <Redo2 className="h-3.5 w-3.5" />
-                            恢复
-                          </Button>
+                      {hasDraftReady ? (
+                        <>
+                          <div className="mt-5">
+                            {renderInitialDraftCopy('plan')}
+                          </div>
+                          <div className="mt-3 flex justify-end border-t border-[rgba(31,22,17,0.06)] pt-3">
+                            <div className="inline-flex items-center rounded-full bg-[rgba(241,243,246,0.78)] p-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleUndoDraftMove}
+                                disabled={!canUndoDraftMove}
+                                className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
+                              >
+                                <Undo2 className="h-3.5 w-3.5" />
+                                撤回
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleRedoDraftMove}
+                                disabled={!canRedoDraftMove}
+                                className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
+                              >
+                                <Redo2 className="h-3.5 w-3.5" />
+                                恢复
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      ) : isDraftGenerating ? (
+                        renderDraftGenerationSkeleton()
+                      ) : (
+                        <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="text-sm leading-6 text-[var(--foreground)]">
+                              <p className="font-semibold">已准备好生成</p>
+                              <p className="mt-1 text-[var(--muted-foreground)]">
+                                {effectiveLength === 'short'
+                                  ? '短篇幅'
+                                  : effectiveLength === 'medium'
+                                    ? '中篇幅'
+                                    : '长篇幅'}
+                                ｜{selectedNotes.length} 篇参考，{selectedSnippets.length} 条标注
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={handleGenerateDraft}
+                              disabled={isDraftGenerating}
+                            >
+                              <WandSparkles className="h-4 w-4" />
+                              {isDraftGenerating ? '生成中...' : '生成初版文案'}
+                            </Button>
+                          </div>
+                          {draftGenerationError ? (
+                            <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]">
+                              {draftGenerationError}
+                            </p>
+                          ) : null}
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
@@ -4323,7 +4623,7 @@ function App() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
                       <PenLine className="h-5 w-5" />
                     </div>
-                    <div className="max-w-[46rem] rounded-[1.25rem] rounded-tl-md bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
+                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
                       <p>
                         整体方向认可后，进入编辑细调，继续处理字词、段落、衔接和局部重写。
                       </p>
@@ -4356,8 +4656,8 @@ function App() {
               </div>
 
               <div className="shrink-0 bg-transparent px-1 pt-3 md:px-4">
-                <div className="relative min-h-[132px] rounded-[1.35rem] border border-[rgba(31,22,17,0.08)] bg-[rgba(255,250,245,0.78)] shadow-[0_10px_24px_rgba(48,34,22,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(48,34,22,0.08)]">
-                  <textarea
+                <div className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
+                  <Textarea
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
                     onKeyDown={(event) => {
@@ -4366,7 +4666,7 @@ function App() {
                         handleSendChat()
                       }
                     }}
-                    className="min-h-[132px] w-full resize-none border-0 bg-transparent px-5 py-4 pb-[4.25rem] pr-36 text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus-visible:ring-0"
+                    className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
                     placeholder="补充文案信息，或说明要调整的方向..."
                   />
                   <label className="absolute bottom-4 left-6 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
@@ -4406,10 +4706,10 @@ function App() {
 
   function renderRewrite() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#f3f1ea_0%,#f8f4ed_44%,#fffaf3_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(255,176,106,0.08),transparent_34%),linear-gradient(180deg,#fbf7f0_0%,#fffaf4_50%,#fffdf9_100%)]">
+        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
           <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
@@ -4434,7 +4734,7 @@ function App() {
 
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-6">
             {hasDraftReady ? (
-              <div className="h-full min-h-0 rounded-[1.8rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.34),rgba(255,248,241,0.22))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+              <div className="h-full min-h-0 rounded-[var(--ui-radius-panel)] bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(241,245,249,0.32))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
                 <div className="grid h-full min-h-0 gap-0 xl:grid-cols-[minmax(0,1.08fr)_1px_minmax(22rem,0.78fr)]">
                   <section className="relative flex min-h-0 flex-col overflow-hidden">
                     <div
@@ -4462,7 +4762,7 @@ function App() {
                               data-rewrite-selection-popover
                               onMouseDown={(event) => event.preventDefault()}
                               onClick={handleConfirmRewriteSelection}
-                              className="fixed z-[110] inline-flex h-9 items-center gap-1.5 rounded-full border border-[rgba(240,122,47,0.18)] bg-white/95 px-3 text-xs font-semibold text-[var(--accent-strong)] shadow-[0_14px_36px_rgba(48,34,22,0.14)] backdrop-blur-xl transition hover:bg-[var(--accent-soft)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                              className="fixed z-[110] inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/95 px-3 text-xs font-semibold text-[var(--foreground)] shadow-[0_14px_36px_rgba(48,34,22,0.14)] backdrop-blur-xl transition hover:bg-[var(--accent-soft)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
                               style={{
                                 left: rewriteSelectionCandidate.position.left,
                                 top: rewriteSelectionCandidate.position.top,
@@ -4477,13 +4777,13 @@ function App() {
                     </div>
                   </section>
 
-                  <div className="hidden h-full w-px bg-[linear-gradient(180deg,transparent,rgba(74,50,28,0.10)_18%,rgba(240,122,47,0.12)_50%,rgba(74,50,28,0.08)_82%,transparent)] xl:block" />
+                  <div className="hidden h-full w-px bg-[linear-gradient(180deg,transparent,rgba(15,23,42,0.10)_18%,rgba(103,199,255,0.12)_50%,rgba(15,23,42,0.08)_82%,transparent)] xl:block" />
 
-                  <aside className="relative flex min-h-0 flex-col overflow-hidden bg-[rgba(255,252,247,0.42)]">
+                  <aside className="relative flex min-h-0 flex-col overflow-hidden bg-[rgba(248,250,252,0.5)]">
                     <div className="relative min-h-0 flex-1 overflow-y-auto p-5 lg:p-6">
                       <div className="grid gap-3">
                         {selectedRewriteText ? (
-                          <div className="rounded-[1.05rem] border border-[rgba(240,122,47,0.14)] bg-white/82 px-4 py-3 text-sm leading-6 text-[var(--foreground)] shadow-[0_12px_30px_rgba(74,50,28,0.055)]">
+                          <div className="rounded-[var(--ui-radius-card)] border border-[var(--border)] bg-white/82 px-4 py-3 text-sm leading-6 text-[var(--foreground)] shadow-[0_12px_30px_rgba(74,50,28,0.055)]">
                             <p className="mb-1 text-xs font-medium text-[var(--soft-foreground)]">
                               正在修改
                             </p>
@@ -4498,8 +4798,8 @@ function App() {
                           key={message.id}
                           className={
                             message.role === 'user'
-                              ? 'justify-self-end rounded-[1.2rem] rounded-tr-md bg-[var(--accent)] px-4 py-3 text-sm leading-7 text-white shadow-[0_16px_34px_rgba(240,122,47,0.2)]'
-                              : 'rounded-[1.2rem] rounded-tl-md bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]'
+                              ? 'justify-self-end rounded-[var(--ui-radius-panel)] rounded-tr-[0.45rem] bg-[var(--foreground)] px-4 py-3 text-sm leading-7 text-white shadow-[0_16px_34px_rgba(15,23,42,0.16)]'
+                              : 'rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]'
                           }
                         >
                           {message.selectedText ? (
@@ -4516,8 +4816,8 @@ function App() {
                   </div>
 
                   <div className="relative shrink-0 border-t border-white/72 bg-white/58 p-4 backdrop-blur-xl">
-                    <div className="relative min-h-[172px] rounded-[1.25rem] border border-white/80 bg-white/90 shadow-[0_14px_36px_rgba(48,34,22,0.055)] transition focus-within:border-[rgba(240,122,47,0.22)] focus-within:shadow-[0_20px_52px_rgba(48,34,22,0.09)]">
-                      <textarea
+                    <div className="relative min-h-[172px] rounded-[var(--ui-radius-panel)] border border-white/80 bg-white/90 shadow-[0_14px_36px_rgba(48,34,22,0.055)] transition focus-within:border-[rgba(15,23,42,0.18)] focus-within:shadow-[0_20px_52px_rgba(48,34,22,0.09)]">
+                      <Textarea
                         ref={rewriteInputRef}
                         data-rewrite-chat-input
                         value={rewriteChatInput}
@@ -4527,7 +4827,7 @@ function App() {
                             handleSendRewriteChat()
                           }
                         }}
-                        className="min-h-[172px] w-full resize-none border-0 bg-transparent px-5 py-4 pb-20 text-sm leading-6 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus-visible:ring-0"
+                        className="min-h-[172px] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[var(--ui-chat-input-pb)] text-sm leading-6 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
                         placeholder={selectedRewriteText ? '说说已高亮内容想怎么改，⌘/Ctrl + Enter 发送' : '先圈选左侧内容并确认修改'}
                       />
                       <div className="absolute bottom-4 right-4 flex items-center gap-2">
@@ -4575,7 +4875,7 @@ function App() {
     if (tone === 'question') {
       return 'border-[rgba(103,199,255,0.2)] bg-[rgba(235,248,255,0.72)] text-[#28769a]'
     }
-    return 'border-[rgba(240,122,47,0.18)] bg-[rgba(255,248,241,0.82)] text-[var(--accent-strong)]'
+    return 'border-[rgba(15,23,42,0.12)] bg-[rgba(241,243,246,0.82)] text-[var(--foreground)]'
   }
 
   function getReaderFeedbackIcon(tone: ReaderFeedbackTone) {
@@ -4595,7 +4895,7 @@ function App() {
           <span
             className={[
               `inline-flex h-8 min-w-8 items-center justify-center rounded-full border text-xs font-bold ${getReaderFeedbackToneClass(annotation.tone)}`,
-              isActive ? 'ring-4 ring-[rgba(240,122,47,0.16)]' : '',
+              isActive ? 'ring-4 ring-[rgba(15,23,42,0.1)]' : '',
             ].filter(Boolean).join(' ')}
           >
             {annotation.noteNumber}
@@ -4613,9 +4913,9 @@ function App() {
           aria-current={isActive ? 'true' : undefined}
           data-reader-comment={annotation.id}
           className={[
-            'scroll-mt-5 rounded-[1.2rem] border px-4 py-4 transition duration-300',
+            'scroll-mt-5 rounded-[var(--ui-radius-card)] border px-4 py-4 transition duration-300',
             isActive
-              ? 'border-[rgba(240,122,47,0.34)] bg-white shadow-[0_20px_52px_rgba(240,122,47,0.14),0_0_0_4px_rgba(240,122,47,0.08)]'
+              ? 'border-[rgba(15,23,42,0.18)] bg-white shadow-[0_20px_52px_rgba(15,23,42,0.1),0_0_0_4px_rgba(15,23,42,0.06)]'
               : 'border-white/76 bg-white/82 shadow-[0_12px_28px_rgba(48,34,22,0.045)]',
           ].join(' ')}
         >
@@ -4630,7 +4930,7 @@ function App() {
               {annotation.title}
             </h3>
           </div>
-          <p className="mt-3 rounded-[0.9rem] bg-[rgba(255,248,241,0.62)] px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]">
+          <p className="mt-3 rounded-[var(--ui-radius-card)] bg-[rgba(241,243,246,0.72)] px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]">
             对应文案：{annotation.text}
           </p>
           <div className="mt-3 grid gap-2 text-sm leading-6 text-[var(--foreground)]">
@@ -4649,7 +4949,7 @@ function App() {
     return (
       <section
         key={block.title}
-        className="ui-surface-enter rounded-[1.2rem] border border-white/76 bg-[rgba(255,248,241,0.7)] px-4 py-4 shadow-[0_12px_28px_rgba(48,34,22,0.04)]"
+        className="ui-surface-enter rounded-[var(--ui-radius-card)] border border-white/76 bg-[rgba(248,250,252,0.78)] px-4 py-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -4673,10 +4973,10 @@ function App() {
 
   function renderReaderPreview() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#f3f1ea_0%,#f8f4ed_44%,#fffaf3_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(255,176,106,0.08),transparent_34%),linear-gradient(180deg,#fbf7f0_0%,#fffaf4_50%,#fffdf9_100%)]">
+        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
           <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
@@ -4698,7 +4998,7 @@ function App() {
                   aria-expanded={isReaderAudienceOpen}
                   aria-label="目标用户群体"
                   title={readerAudienceDraft || '填写目标人群，AI 将按此模拟读者'}
-                  className="flex h-11 w-[min(31rem,46vw)] min-w-[22rem] items-center gap-4 rounded-[1rem] border border-[rgba(31,22,17,0.12)] bg-white/92 px-4 text-left text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(240,122,47,0.2)] focus-visible:border-[rgba(240,122,47,0.34)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                  className="flex h-11 w-[min(31rem,46vw)] min-w-[22rem] items-center gap-4 rounded-[var(--ui-radius-control)] border border-[rgba(31,22,17,0.12)] bg-white/92 px-4 text-left text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(15,23,42,0.18)] focus-visible:border-[rgba(15,23,42,0.24)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
                 >
                   <span className="flex shrink-0 items-center gap-1.5 font-semibold text-[var(--foreground)]">
                     <Users className="h-4 w-4 text-[var(--accent-strong)]" />
@@ -4717,7 +5017,7 @@ function App() {
                 {isReaderAudienceOpen ? (
                   <div
                     data-reader-audience-popover
-                    className="absolute right-0 top-full z-30 mt-2 w-[min(23rem,calc(100vw-2rem))] rounded-[1.25rem] border border-white/80 bg-white/94 p-4 shadow-[0_22px_60px_rgba(48,34,22,0.14)] backdrop-blur-xl"
+                    className="absolute right-0 top-full z-30 mt-2 w-[min(23rem,calc(100vw-2rem))] rounded-[var(--ui-radius-panel)] border border-white/80 bg-white/94 p-4 shadow-[0_22px_60px_rgba(48,34,22,0.14)] backdrop-blur-xl"
                   >
                     <label className="grid gap-2">
                       <span className="text-sm font-semibold text-[var(--foreground)]">
@@ -4726,7 +5026,7 @@ function App() {
                       <span className="text-xs leading-5 text-[var(--muted-foreground)]">
                         填写后，AI 会基于该人群模拟阅读反馈、兴趣点和划走风险。
                       </span>
-                      <textarea
+                      <Textarea
                         value={readerAudienceDraft}
                         onChange={(event) =>
                           setReaderAudienceByConversation((current) => ({
@@ -4734,7 +5034,7 @@ function App() {
                             [activeConversation.id]: event.target.value,
                           }))
                         }
-                        className="min-h-[104px] resize-none rounded-[1rem] border border-[var(--border)] bg-white/84 px-4 py-3 text-sm leading-6 text-[var(--foreground)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(240,122,47,0.28)] focus:ring-4 focus:ring-[var(--ring)]"
+                        className="min-h-[104px] resize-none rounded-[var(--ui-field-radius)] bg-white/84 text-sm leading-6 shadow-none"
                         placeholder="例如：刚开始骑行、怕路线太难、想找周末轻松路线的新手"
                       />
                     </label>
@@ -4750,7 +5050,7 @@ function App() {
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-6">
             {hasDraftReady ? (
               <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,0.88fr)_minmax(24rem,1fr)]">
-                <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
+                <section className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
                   <div className="shrink-0 border-b border-white/72 px-6 py-4 lg:px-7">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="accent">最终文案</Badge>
@@ -4766,7 +5066,7 @@ function App() {
                   </div>
                 </section>
 
-                <aside className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
+                <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
                   <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-6">
                     <div className="grid gap-4">
                       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -4840,7 +5140,7 @@ function App() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div className="pointer-events-none absolute left-[-12rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(103,199,255,0.18),transparent_65%)] blur-2xl" />
-      <div className="pointer-events-none absolute right-[-8rem] top-[-5rem] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(255,176,106,0.22),transparent_62%)] blur-2xl" />
+      <div className="pointer-events-none absolute right-[-8rem] top-[-5rem] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(148,163,184,0.16),transparent_62%)] blur-2xl" />
       {finalCopyToast ? (
         <div
           role="status"
@@ -4854,7 +5154,7 @@ function App() {
         </div>
       ) : null}
       {showShellHeader ? (
-        <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(250,247,241,0.78)] backdrop-blur-2xl">
+        <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(248,250,252,0.82)] backdrop-blur-2xl">
           <div className="flex w-full items-center justify-between gap-4 px-5 py-4 md:px-8">
             <div className="flex min-w-0 items-center gap-4">
               <Badge variant="outline" className="hidden shrink-0 tracking-[0.2em] sm:inline-flex">
@@ -4876,8 +5176,8 @@ function App() {
               <div className="rounded-full border border-white/80 bg-white/72 px-4 py-2 text-sm text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
                 {activeProject.name}
               </div>
-              <div className="rounded-full border border-[rgba(240,122,47,0.16)] bg-[rgba(255,240,229,0.92)] px-4 py-2 text-sm font-medium text-[var(--accent-strong)]">
-                {demoFolders.find((folder) => folder.id === activeProject.folderId)?.name ?? '未选择文件夹'}
+              <div className="rounded-full border border-[var(--border)] bg-[rgba(241,243,246,0.92)] px-4 py-2 text-sm font-medium text-[var(--foreground)]">
+                {libraryFolders.find((folder) => folder.id === activeProject.folderId)?.name ?? '未选择文件夹'}
               </div>
             </div>
           </div>
@@ -4892,11 +5192,11 @@ function App() {
         }
       >
         {showShellHeader && step !== 'workspace' && step !== 'learn' && step !== 'length' ? (
-          <header className="mb-6 overflow-hidden rounded-[2.2rem] border border-white/72 bg-[linear-gradient(135deg,rgba(255,250,244,0.96),rgba(255,255,255,0.88))] shadow-[0_28px_80px_rgba(71,37,15,0.08)] backdrop-blur-xl">
+          <header className="mb-6 overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/72 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.9))] shadow-[0_28px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl">
             <div className="relative px-6 py-8 md:px-10">
-              <div className="absolute inset-x-0 top-0 h-52 bg-[radial-gradient(circle_at_top_left,rgba(103,199,255,0.18),transparent_40%),radial-gradient(circle_at_top_right,rgba(255,176,106,0.24),transparent_44%),radial-gradient(circle_at_60%_10%,rgba(239,182,208,0.24),transparent_38%)]" />
+              <div className="absolute inset-x-0 top-0 h-52 bg-[radial-gradient(circle_at_top_left,rgba(103,199,255,0.18),transparent_40%),radial-gradient(circle_at_top_right,rgba(148,163,184,0.16),transparent_44%),radial-gradient(circle_at_60%_10%,rgba(239,182,208,0.22),transparent_38%)]" />
               <div className="relative max-w-4xl space-y-4">
-                <span className="inline-flex rounded-full border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold tracking-[0.24em] text-[var(--accent-strong)] uppercase">
+                <span className="inline-flex rounded-full border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold tracking-[0.24em] text-[var(--foreground)] uppercase">
                   Lumos AI Writer
                 </span>
                 <h1 className="font-display text-4xl leading-none tracking-[-0.06em] text-[var(--foreground)] md:text-6xl">

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -53,7 +53,10 @@ type LearnWorkspaceProps = {
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
   snippets: SavedSnippetRecord[]
+  libraryStatus?: 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
+  libraryError?: string
   workflowSteps: WorkflowTitleMenuStep[]
+  isAnalyzing?: boolean
   isStreaming: boolean
   projectName: string
   conversations: Array<{ id: string; title: string; pinned?: boolean; finalizedAt?: string }>
@@ -100,6 +103,7 @@ type RenderItem = {
 }
 
 const colorNameMap: Record<string, string> = {
+  '#64748B': '灰色',
   '#DD6C32': '红色',
   '#E56B6F': '红色',
   '#E9C46A': '黄色',
@@ -190,7 +194,7 @@ function highlightMultipleSnippets(
     if (index > cursor) parts.push(content.slice(cursor, index))
     parts.push(
       <React.Fragment key={`${snippet.id}-${index}`}>
-        {makeHighlightNode(snippet.selectedText, snippet.colorValue || '#ffeddc', snippet.dimmed)}
+        {makeHighlightNode(snippet.selectedText, snippet.colorValue || '#e8eef5', snippet.dimmed)}
       </React.Fragment>,
     )
     cursor = index + snippet.selectedText.length
@@ -319,7 +323,7 @@ function NoteDetailDialog({
       onMouseDown={onClose}
     >
       <div
-        className="ui-dialog-card grid max-h-[90vh] w-[calc(100vw-2.5rem)] overflow-hidden rounded-[1.65rem] border border-[rgba(31,22,17,0.08)] bg-[#fffdf9] shadow-[0_28px_90px_rgba(31,22,17,0.18)] md:w-[calc(100vw-4rem)] lg:w-[clamp(54rem,63vw,80rem)] lg:grid-cols-[49%_51%]"
+        className="ui-dialog-card grid max-h-[90vh] w-[calc(100vw-2.5rem)] overflow-hidden rounded-[var(--ui-radius-dialog)] border border-[rgba(15,23,42,0.08)] bg-white shadow-[0_28px_90px_rgba(15,23,42,0.18)] md:w-[calc(100vw-4rem)] lg:w-[clamp(54rem,63vw,80rem)] lg:grid-cols-[49%_51%]"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <NoteCover note={note} />
@@ -376,15 +380,15 @@ function AnalysisBlock({
   return (
     <>
       <article className="ui-chat-row mx-auto flex max-w-7xl gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.2),rgba(255,149,80,0.22))] text-xs font-semibold text-[var(--accent-strong)]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.2),rgba(226,232,240,0.86))] text-xs font-semibold text-[var(--accent-strong)]">
           AI
         </div>
-        <div className="min-w-0 flex-1 rounded-[1.2rem] border border-white/82 bg-white/88 px-5 py-4 shadow-[0_14px_34px_rgba(48,34,22,0.04)]">
+        <div className="min-w-0 flex-1 rounded-[var(--ui-radius-panel)] border border-white/82 bg-white/88 px-5 py-4 shadow-[0_14px_34px_rgba(48,34,22,0.04)]">
           <p className="max-w-5xl text-[15px] leading-7 text-[var(--foreground)]">
             {commonConclusion}
           </p>
 
-        <div className="mt-3 grid gap-1.5 rounded-[0.95rem] bg-[rgba(255,240,229,0.52)] px-3.5 py-2.5">
+        <div className="mt-3 grid gap-1.5 rounded-[var(--ui-radius-card)] bg-[rgba(241,243,246,0.72)] px-3.5 py-2.5">
           {commonMoves.map((move) => (
             <p key={`${move.title}-${move.body}`} className="text-sm leading-6 text-[var(--foreground)]">
               <span className="font-semibold text-[var(--accent-strong)]">{move.title}：</span>
@@ -404,14 +408,14 @@ function AnalysisBlock({
                   aria-label={`查看《${snippet.noteTitle}》的笔记详情`}
                   onClick={() => setActiveSnippetDetail(snippet)}
                   className={cn(
-                    'group flex h-full flex-col rounded-[1rem] border px-4 py-3 text-left transition hover:-translate-y-0.5 hover:bg-white/88 focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                    'group flex h-full flex-col rounded-[var(--ui-radius-card)] border px-4 py-3 text-left transition hover:bg-white/88 hover:shadow-[0_14px_30px_rgba(48,34,22,0.055)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
                     activeSnippetDetail?.quote === snippet.quote
-                      ? 'border-[rgba(240,122,47,0.22)] bg-white/92 shadow-[0_12px_24px_rgba(48,34,22,0.055)]'
+                      ? 'border-[rgba(15,23,42,0.14)] bg-white/92 shadow-[0_12px_24px_rgba(15,23,42,0.055)]'
                       : 'border-[rgba(31,22,17,0.07)] bg-white/72',
                   )}
                 >
                   <span className="flex items-center justify-between gap-3">
-                    <span className="inline-flex rounded-full bg-[rgba(255,240,229,0.9)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+                    <span className="inline-flex rounded-full bg-[rgba(238,241,245,0.94)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-strong)]">
                       {snippet.label}
                     </span>
                     <span className="text-xs font-semibold text-[var(--soft-foreground)] transition group-hover:text-[var(--accent-strong)]">
@@ -478,15 +482,15 @@ function AssistantBlock({
 
   return (
     <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.24),rgba(255,149,80,0.24))] text-sm font-semibold text-[var(--accent-strong)]">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-sm font-semibold text-[var(--accent-strong)]">
         AI
       </div>
       <div
         className={cn(
           'min-w-0 flex-1',
           isAnalysis
-            ? 'rounded-[2rem] border border-white/82 bg-[linear-gradient(180deg,rgba(255,252,248,0.96),rgba(255,255,255,0.88))] px-6 py-5 shadow-[0_18px_44px_rgba(48,34,22,0.06)]'
-            : 'space-y-4',
+            ? 'rounded-[var(--ui-radius-panel)] border border-white/82 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.9))] px-6 py-5 shadow-[0_18px_44px_rgba(15,23,42,0.06)]'
+            : 'flex flex-col gap-4',
         )}
       >
         {message.title ? (
@@ -494,7 +498,7 @@ function AssistantBlock({
             className={cn(
               'inline-flex rounded-full px-4 py-2 text-sm font-semibold text-[var(--foreground)]',
               isAnalysis
-                ? 'border border-[rgba(240,122,47,0.12)] bg-[rgba(255,240,229,0.9)] text-[var(--accent-strong)] shadow-none'
+                ? 'border border-[var(--border)] bg-[rgba(238,241,245,0.94)] text-[var(--foreground)] shadow-none'
                 : 'border border-[var(--border)] bg-white/86 shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
             )}
           >
@@ -506,7 +510,7 @@ function AssistantBlock({
             <p className="text-[15px] leading-8 text-[var(--foreground)]">{leadLine}</p>
           </div>
         ) : (
-          <div className={cn(isAnalysis ? 'mt-4 space-y-5' : 'space-y-4')}>
+          <div className={cn(isAnalysis ? 'mt-4 flex flex-col gap-5' : 'flex flex-col gap-4')}>
             {trailingLines.map((line) => (
               <p
                 key={line}
@@ -525,7 +529,7 @@ function AssistantBlock({
             {message.highlights?.map((highlight) => (
               <section
                 key={`${highlight.title}-${highlight.body}`}
-                className="rounded-[1.4rem] border border-[rgba(240,122,47,0.12)] bg-[linear-gradient(180deg,rgba(255,244,235,0.88),rgba(255,255,255,0.92))] p-4 shadow-[0_12px_28px_rgba(48,34,22,0.04)]"
+                className="rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.08)] bg-[linear-gradient(180deg,rgba(248,250,252,0.92),rgba(255,255,255,0.94))] p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
               >
                 <div className="inline-flex rounded-full bg-white/86 px-3 py-1 text-xs font-semibold tracking-[0.04em] text-[var(--accent-strong)]">
                   {highlight.title}
@@ -536,7 +540,7 @@ function AssistantBlock({
           </div>
         ) : null}
         {hasHighlights && trailingLines.length > 0 ? (
-          <div className="mt-4 rounded-[1.4rem] border border-white/72 bg-white/72 px-4 py-3">
+          <div className="mt-4 rounded-[var(--ui-radius-card)] border border-white/72 bg-white/72 px-4 py-3">
             {trailingLines.map((line) => (
               <p key={line} className="text-sm leading-7 text-[var(--muted-foreground)]">
                 {line}
@@ -552,7 +556,7 @@ function AssistantBlock({
 function UserBlock({ message }: { message: ChatMessage }) {
   return (
     <article className="ui-chat-row mx-auto flex max-w-5xl justify-end">
-      <div className="max-w-2xl rounded-[1.7rem] rounded-br-[0.6rem] bg-[linear-gradient(135deg,#67c7ff_0%,#efb6d0_54%,#ff9550_100%)] px-5 py-4 text-white shadow-[0_18px_36px_rgba(255,149,80,0.2)]">
+      <div className="max-w-2xl rounded-[var(--ui-radius-panel)] rounded-br-[0.45rem] bg-[var(--foreground)] px-5 py-4 text-white shadow-[0_18px_36px_rgba(15,23,42,0.16)]">
         {message.lines.map((line) => (
           <p key={line} className="text-[15px] leading-7">
             {line}
@@ -563,30 +567,64 @@ function UserBlock({ message }: { message: ChatMessage }) {
   )
 }
 
-function TypingBlock({ title, text }: { title?: string; text?: string }) {
+function TypingBlock({
+  title,
+  text,
+  variant = 'dots',
+}: {
+  title?: string
+  text?: string
+  variant?: 'analysis' | 'dots'
+}) {
   return (
-    <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.24),rgba(255,149,80,0.24))] text-sm font-semibold text-[var(--accent-strong)]">
+    <article
+      aria-live="polite"
+      className="ui-chat-row mx-auto flex max-w-5xl gap-4"
+      role="status"
+    >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-sm font-semibold text-[var(--accent-strong)]">
         AI
       </div>
-      <div className="rounded-[1.6rem] border border-[var(--border)] bg-white/88 px-4 py-3 shadow-[0_8px_18px_rgba(48,34,22,0.04)]">
+      <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-white/88 px-4 py-3 shadow-[0_8px_18px_rgba(48,34,22,0.04)]">
         {title ? (
-          <div className="mb-2 inline-flex rounded-full border border-[rgba(240,122,47,0.12)] bg-[rgba(255,240,229,0.9)] px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+          <div className="mb-2 inline-flex rounded-full border border-[var(--border)] bg-[rgba(238,241,245,0.94)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
             {title}
           </div>
         ) : null}
         {text ? (
           <p className="mb-3 text-[15px] leading-7 text-[var(--foreground)]">{text}</p>
         ) : null}
-        <div className="flex items-center gap-2">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <span
-              key={index}
-              className="h-2.5 w-2.5 rounded-full bg-[var(--accent)] opacity-60 animate-pulse"
-              style={{ animationDelay: `${index * 0.15}s` }}
-            />
-          ))}
-        </div>
+        {variant === 'analysis' ? (
+          <div className="grid gap-3" aria-hidden="true">
+            {['读取参考文案', '提炼写作结构', '整理偏好判断'].map((label, index) => (
+              <div key={label} className="grid gap-1.5">
+                <div className="flex items-center gap-2 text-xs font-semibold text-[var(--soft-foreground)]">
+                  <span
+                    className="draft-thinking-dot h-2 w-2 rounded-full bg-[var(--accent)]"
+                    style={{ animationDelay: `${index * 0.12}s` }}
+                  />
+                  {label}
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-[rgba(226,232,240,0.78)]">
+                  <div
+                    className="draft-thinking-bar h-full rounded-full bg-[linear-gradient(90deg,rgba(103,199,255,0.62),rgba(239,182,208,0.6),rgba(240,122,47,0.52))]"
+                    style={{ animationDelay: `${index * 0.16}s` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2" aria-hidden="true">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <span
+                key={index}
+                className="draft-thinking-dot h-2.5 w-2.5 rounded-full bg-[var(--accent)] opacity-60"
+                style={{ animationDelay: `${index * 0.15}s` }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </article>
   )
@@ -601,7 +639,10 @@ export function LearnWorkspace({
   folders,
   notes,
   snippets,
+  libraryStatus = 'demo',
+  libraryError = '',
   workflowSteps,
+  isAnalyzing = false,
   isStreaming,
   projectName,
   conversations,
@@ -864,6 +905,22 @@ export function LearnWorkspace({
   const isActiveResultFullySelected =
     activeResultItemIds.length > 0 && activeResultSelectedCount === activeResultItemIds.length
 
+  const emptyLibraryMessage = React.useMemo(() => {
+    if (libraryStatus === 'initializing' || libraryStatus === 'loading') {
+      return '正在读取云端文案库。'
+    }
+
+    if (libraryStatus === 'error') {
+      return libraryError ? `云端文案库读取失败：${libraryError}` : '云端文案库读取失败。'
+    }
+
+    if (libraryStatus === 'ready' && notes.length === 0) {
+      return '云端文案库暂无文案。'
+    }
+
+    return '当前筛选下没有文案。可以清空筛选，或换一个文件夹、标签组合。'
+  }, [libraryError, libraryStatus, notes.length])
+
   const filterSummary = React.useMemo(() => {
     if (!isFiltered) return '未筛选'
 
@@ -890,10 +947,19 @@ export function LearnWorkspace({
 
     const latestMessage = chatMessages[chatMessages.length - 1]
 
+    if (isAnalyzing) {
+      return {
+        title: '正在拆解这批文案',
+        text: 'DeepSeek 正在读取已选参考内容，整理共性写法、读者停留原因和你的稳定偏好。',
+        variant: 'analysis' as const,
+      }
+    }
+
     if (!analysisReady) {
       return {
         title: '已记下你的要求',
         text: '你可以继续勾选这一轮要参考的文案，我会带着这个方向一起看。',
+        variant: 'dots' as const,
       }
     }
 
@@ -901,6 +967,7 @@ export function LearnWorkspace({
       return {
         title: '正在整理回答',
         text: '我在结合刚才这轮分析和你的追问补充更准确的判断。',
+        variant: 'dots' as const,
       }
     }
 
@@ -908,24 +975,28 @@ export function LearnWorkspace({
       return {
         title: '正在拆解这批文案',
         text: '我在归纳它们的共性、读者停留原因和你最稳定的偏好，马上给你第一版结论。',
+        variant: 'analysis' as const,
       }
     }
 
     return {
       title: '继续整理读者视角',
       text: '我在把剩下的结论收束成更好落地的判断和下一步建议。',
+      variant: 'dots' as const,
     }
-  }, [analysisMessages.length, analysisReady, chatMessages, isStreaming])
+  }, [analysisMessages.length, analysisReady, chatMessages, isAnalyzing, isStreaming])
 
   const filterControl = (
     <div className="relative">
-      <button
+      <Button
         type="button"
+        variant={isFiltered ? 'subtle' : 'outline'}
+        size="sm"
         className={cn(
-          'inline-flex h-8 min-w-[6.75rem] items-center justify-center gap-2 rounded-full border px-3 text-sm font-semibold shadow-[0_8px_18px_rgba(48,34,22,0.04)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+          'h-[var(--ui-chip-height)] min-w-[6.75rem] px-[var(--ui-chip-px)] text-sm shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
           isFiltered
             ? 'border-[rgba(77,120,242,0.22)] bg-[rgba(103,199,255,0.18)] text-[#566174] hover:bg-[rgba(103,199,255,0.24)]'
-            : 'border-[rgba(240,122,47,0.16)] bg-white/82 text-[var(--foreground)] hover:bg-white/92',
+            : 'border-[var(--border)] bg-white/82 text-[var(--foreground)] hover:bg-white/92',
         )}
         aria-haspopup="dialog"
         aria-expanded={isFilterOpen}
@@ -939,50 +1010,54 @@ export function LearnWorkspace({
         <Funnel
           className={cn(
             'h-4 w-4 shrink-0',
-            isFiltered ? 'text-[#566174]' : 'text-[var(--accent-strong)]',
+            isFiltered ? 'text-[#566174]' : 'text-[var(--soft-foreground)]',
           )}
         />
         <span>{isFiltered ? `${activeFilterCount} 筛选` : '筛选'}</span>
-      </button>
+      </Button>
 
       {isFilterOpen ? (
         <div
-          className="ui-popover-motion absolute right-0 top-[calc(100%+0.65rem)] z-40 w-[min(38rem,calc(100vw-4rem))] rounded-[1.45rem] border border-white/84 bg-white/96 p-4 shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+          className="ui-popover-motion absolute right-0 top-[calc(100%+0.65rem)] z-40 w-[min(38rem,calc(100vw-4rem))] rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/96 p-[var(--ui-panel-inset)] shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
           role="dialog"
           aria-label="筛选文案"
         >
-          <div className="grid gap-4">
+          <div className="grid gap-[var(--ui-panel-gap)]">
             <div>
               <div className="mb-2 text-xs font-semibold text-[var(--soft-foreground)]">
                 按文件夹
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
+                <Button
                   type="button"
                   onClick={() => setFolderFilterId('all')}
+                  variant="ghost"
+                  size="sm"
                   className={cn(
-                    'rounded-full px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                    'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
                     folderFilterId === 'all'
-                      ? 'bg-[var(--foreground)] text-white'
+                      ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                       : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
                   )}
                 >
                   全部文件夹
-                </button>
+                </Button>
                 {folders.map((folder) => (
-                  <button
+                  <Button
                     key={folder.id}
                     type="button"
                     onClick={() => setFolderFilterId(folder.id)}
+                    variant="ghost"
+                    size="sm"
                     className={cn(
-                      'rounded-full px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                      'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
                       folderFilterId === folder.id
-                        ? 'bg-[var(--foreground)] text-white'
+                        ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                         : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
                     )}
                   >
                     {folder.name}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -993,15 +1068,17 @@ export function LearnWorkspace({
               </div>
               <div className="flex flex-wrap gap-2">
                 {tabs.map((tab) => (
-                  <button
+                  <Button
                     key={tab.id}
                     type="button"
                     title={tab.fullLabel}
                     onClick={() => setActiveTab(tab.id)}
+                    variant="ghost"
+                    size="sm"
                     className={cn(
-                      'inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                      'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
                       activeTab === tab.id
-                        ? 'bg-[var(--foreground)] text-white'
+                        ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                         : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
                     )}
                   >
@@ -1012,7 +1089,7 @@ export function LearnWorkspace({
                       />
                     ) : null}
                     {tab.fullLabel}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -1039,8 +1116,8 @@ export function LearnWorkspace({
   )
 
   return (
-    <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#f3f1ea_0%,#f8f4ed_44%,#fffaf3_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
-      <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(31,22,17,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f2eb_0%,#f7f4ee_58%,#faf6ef_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(31,22,17,0.06)]">
+    <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(15,23,42,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(15,23,42,0.06)]">
         <div className="shrink-0 px-6 pb-3 pt-6">
           <div className="flex items-center gap-3 px-1">
             <Button
@@ -1062,20 +1139,21 @@ export function LearnWorkspace({
             </div>
           </div>
 
-          <button
+          <Button
             type="button"
             onClick={onCreateConversation}
-            className="mt-7 flex w-full items-center justify-between gap-3 rounded-full border border-[rgba(240,122,47,0.18)] bg-[rgba(255,240,229,0.64)] px-4 py-3 text-left transition hover:bg-[rgba(255,240,229,0.86)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+            variant="subtle"
+            className="mt-7 w-full justify-between border-[var(--border)] bg-[rgba(241,243,246,0.78)] px-[var(--ui-control-px-lg)] text-left shadow-none hover:bg-[rgba(226,232,240,0.9)]"
           >
             <span className="text-sm font-semibold text-[var(--accent-strong)]">新对话</span>
-          </button>
+          </Button>
           <p className="mt-6 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--soft-foreground)]">
             历史对话
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             {conversations.map((conversation) => {
               const isActive = conversation.id === activeConversationId
               const isRenaming = renamingConversationId === conversation.id
@@ -1100,15 +1178,15 @@ export function LearnWorkspace({
                     }
                   }}
                   className={cn(
-                    'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[0.9rem] border border-transparent px-3 py-2 text-sm leading-6 outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                    'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent px-3 py-2 text-sm leading-6 outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
                     conversation.pinned
-                      ? 'bg-[rgba(255,240,229,0.58)] text-[var(--accent-strong)]'
+                      ? 'bg-[rgba(241,243,246,0.72)] text-[var(--accent-strong)]'
                       : 'bg-transparent',
                     isActive
                       ? cn(
                           'font-semibold text-[var(--foreground)]',
                           conversation.pinned
-                            ? 'bg-[linear-gradient(90deg,rgba(255,240,229,0.78),rgba(255,255,255,0.62))]'
+                            ? 'bg-[linear-gradient(90deg,rgba(238,241,245,0.86),rgba(255,255,255,0.66))]'
                             : 'bg-white/58',
                         )
                       : 'text-[var(--foreground)] hover:bg-white/42',
@@ -1138,7 +1216,7 @@ export function LearnWorkspace({
                           cancelConversationRename()
                         }
                       }}
-                      className="h-9 min-w-0 flex-1 rounded-[0.85rem] bg-white/86 px-3 text-sm font-semibold"
+                      className="h-9 min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-3 text-sm font-semibold"
                       aria-label="重命名对话"
                     />
                   ) : (
@@ -1197,7 +1275,7 @@ export function LearnWorkspace({
                     ? createPortal(
                         <div
                           data-conversation-menu
-                          className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                          className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
                           role="menu"
                           style={{
                             left: conversationMenuPosition.left,
@@ -1214,7 +1292,7 @@ export function LearnWorkspace({
                               onToggleConversationPin(conversation.id)
                               setOpenConversationMenuId(null)
                             }}
-                            className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                            className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
                           >
                             {conversation.pinned ? '取消置顶' : '置顶'}
                           </button>
@@ -1225,7 +1303,7 @@ export function LearnWorkspace({
                               event.stopPropagation()
                               startConversationRename(conversation)
                             }}
-                            className="flex w-full items-center rounded-[0.78rem] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                            className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
                           >
                             重命名
                           </button>
@@ -1240,7 +1318,7 @@ export function LearnWorkspace({
         </div>
       </aside>
 
-      <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(255,176,106,0.08),transparent_34%),linear-gradient(180deg,#fbf7f0_0%,#fffaf4_50%,#fffdf9_100%)]">
+      <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
         {analysisReady ? (
           <header className="grid grid-cols-1 items-center gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-6">
             <div className="min-w-0">
@@ -1277,7 +1355,7 @@ export function LearnWorkspace({
           {!analysisReady ? (
             <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
               {setupMessages.length > 0 || typingState ? (
-                <div className="max-h-[32%] shrink-0 space-y-4 overflow-y-auto pr-1">
+                <div className="flex max-h-[32%] shrink-0 flex-col gap-4 overflow-y-auto pr-1">
                   {setupMessages.map((message) =>
                     message.role === 'user' ? (
                       <UserBlock key={message.id} message={message} />
@@ -1285,7 +1363,13 @@ export function LearnWorkspace({
                       <AssistantBlock key={message.id} message={message} notes={notes} snippets={snippets} />
                     ),
                   )}
-                  {typingState ? <TypingBlock title={typingState.title} text={typingState.text} /> : null}
+                  {typingState ? (
+                    <TypingBlock
+                      title={typingState.title}
+                      text={typingState.text}
+                      variant={typingState.variant}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1310,13 +1394,15 @@ export function LearnWorkspace({
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       {visibleTabs.map((tab) => (
-                        <button
+                        <Button
                           key={tab.id}
                           type="button"
                           title={tab.fullLabel}
                           onClick={() => setActiveTab(tab.id)}
+                          variant="ghost"
+                          size="sm"
                           className={cn(
-                            'rounded-full px-3.5 py-1.5 text-sm transition',
+                            'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
                             activeTab === tab.id
                               ? 'font-semibold text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.04)]'
                               : 'font-medium text-[var(--muted-foreground)]',
@@ -1326,12 +1412,12 @@ export function LearnWorkspace({
                               activeTab === tab.id
                                 ? tab.id === 'all'
                                   ? 'rgba(255,255,255,0.92)'
-                                  : tab.colorValue || '#ffeddc'
+                                  : tab.colorValue || '#e8eef5'
                                 : 'rgba(255,255,255,0.54)',
                           }}
                         >
                           {tab.label}
-                        </button>
+                        </Button>
                       ))}
 
                       {overflowTabs.length > 0 ? (
@@ -1386,11 +1472,18 @@ export function LearnWorkspace({
                       </Button>
                       <Button
                         size="sm"
-                        className="h-8 px-4 text-sm font-semibold"
+                        className="h-8 min-w-[5.5rem] px-4 text-sm font-semibold"
                         disabled={isStreaming || selectedItemIds.length === 0}
                         onClick={onStartAnalysis}
                       >
-                        开始分析
+                        {isAnalyzing ? (
+                          <>
+                            <span className="draft-thinking-dot h-2 w-2 rounded-full bg-current" />
+                            分析中...
+                          </>
+                        ) : (
+                          '开始分析'
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -1405,10 +1498,10 @@ export function LearnWorkspace({
                         <div
                           key={item.id}
                           className={cn(
-                            'group rounded-[1.35rem] p-4 transition-[background-color,border-color,box-shadow]',
+                            'group rounded-[var(--ui-radius-card)] p-4 transition-[background-color,border-color,box-shadow]',
                             item.selectedCount > 0
-                              ? 'border border-[rgba(240,122,47,0.24)] bg-[linear-gradient(180deg,rgba(255,250,246,0.94),rgba(255,255,255,0.88))] shadow-[0_12px_26px_rgba(48,34,22,0.045)]'
-                              : 'border border-[rgba(31,22,17,0.07)] bg-white/66 hover:bg-white/88',
+                              ? 'border border-[rgba(15,23,42,0.14)] bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.9))] shadow-[0_12px_26px_rgba(15,23,42,0.045)]'
+                              : 'border border-[rgba(15,23,42,0.07)] bg-white/66 hover:bg-white/88',
                           )}
                         >
                           <div className="flex items-start gap-3.5">
@@ -1437,7 +1530,7 @@ export function LearnWorkspace({
                                     >
                                       <span
                                         className="h-2 w-2 rounded-full"
-                                        style={{ backgroundColor: tag.colorValue || '#f07a2f' }}
+                                        style={{ backgroundColor: tag.colorValue || '#64748B' }}
                                       />
                                       {tag.label}
                                     </span>
@@ -1446,7 +1539,7 @@ export function LearnWorkspace({
                                   <Badge variant="outline">未标注</Badge>
                                 )}
                               </div>
-                              <p className="mt-3 rounded-[1rem] border border-black/[0.035] bg-white/64 px-4 py-3 text-[15px] leading-8 text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                              <p className="mt-3 rounded-[var(--ui-radius-card)] border border-black/[0.035] bg-white/64 px-4 py-3 text-[15px] leading-8 text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
                                 {item.preview}
                               </p>
                             </label>
@@ -1455,8 +1548,8 @@ export function LearnWorkspace({
                       )
                     })}
                     {activeTabItems.length === 0 ? (
-                      <div className="rounded-[1.35rem] border border-dashed border-[rgba(31,22,17,0.12)] bg-white/54 px-5 py-8 text-sm leading-7 text-[var(--muted-foreground)] xl:col-span-2">
-                        当前筛选下没有文案。可以清空筛选，或换一个文件夹、标签组合。
+                      <div className="rounded-[var(--ui-radius-card)] border border-dashed border-[rgba(31,22,17,0.12)] bg-white/54 px-5 py-8 text-sm leading-7 text-[var(--muted-foreground)] xl:col-span-2">
+                        {emptyLibraryMessage}
                       </div>
                     ) : null}
                   </div>
@@ -1464,7 +1557,7 @@ export function LearnWorkspace({
               </section>
             </div>
           ) : (
-            <div className="mx-auto max-w-5xl space-y-5 pb-8">
+            <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-8">
               {setupMessages.map((message) =>
                 message.role === 'user' ? (
                   <UserBlock key={message.id} message={message} />
@@ -1494,7 +1587,7 @@ export function LearnWorkspace({
             <div className="mx-auto max-w-7xl">
               <div className="relative">
                 <Textarea
-                  className="min-h-[132px] w-full resize-none rounded-[1.35rem] border border-[rgba(31,22,17,0.08)] bg-[rgba(255,250,245,0.78)] px-5 py-4 pb-20 pr-36 text-base leading-7 text-[var(--foreground)] outline-none shadow-[0_10px_24px_rgba(48,34,22,0.035)] focus:!border-[rgba(31,22,17,0.08)] focus:!ring-0 focus:!ring-offset-0 focus:!shadow-[0_18px_42px_rgba(48,34,22,0.08)] focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0"
+                  className="min-h-[var(--ui-chat-input-min)] w-full resize-none rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[var(--ui-chat-input-pb)] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] outline-none shadow-[0_10px_24px_rgba(15,23,42,0.035)] focus:!border-[rgba(15,23,42,0.08)] focus:!ring-0 focus:!ring-offset-0 focus:!shadow-[0_18px_42px_rgba(15,23,42,0.08)] focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0"
                   value={chatInput}
                   onChange={(event) => onChatInputChange(event.target.value)}
                   onKeyDown={(event) => {

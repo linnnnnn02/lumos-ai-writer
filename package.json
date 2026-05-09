@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev:web": "pnpm --filter web dev",
-    "dev:api": "pnpm --filter @lumos-ai/api dev",
+    "dev:api": "PORT=8788 pnpm --filter @lumos-ai/api dev",
     "dev:extension": "pnpm --filter extension dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",

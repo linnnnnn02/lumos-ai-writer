@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal } from '@/components/ui/icon'
 
 export type WorkflowStepId = 'selection' | 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
 
@@ -90,7 +90,7 @@ export function WorkflowTitleMenu({
           updateMenuPosition()
           setIsOpen((current) => !current)
         }}
-        className="inline-flex h-7 w-7 items-center justify-center bg-transparent text-[var(--accent-strong)] outline-none transition hover:text-[var(--foreground)] focus-visible:rounded-[0.45rem] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+        className="inline-flex h-7 w-7 items-center justify-center bg-transparent text-[var(--soft-foreground)] outline-none transition hover:text-[var(--foreground)] focus-visible:rounded-[0.45rem] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
       >
         <MoreHorizontal className="h-5 w-5" />
       </button>
@@ -101,7 +101,7 @@ export function WorkflowTitleMenu({
           role="menu"
           ref={menuRef}
           style={{ left: menuPosition.left, top: menuPosition.top }}
-          className="ui-popover-motion fixed z-[90] grid max-h-[calc(100vh-1.5rem)] w-[min(18.5rem,calc(100vw-1.5rem))] gap-1.5 overflow-y-auto rounded-[1.2rem] border border-white/76 bg-white/90 p-1.5 shadow-[0_20px_56px_rgba(48,34,22,0.1)] backdrop-blur-xl"
+          className="ui-popover-motion fixed z-[90] grid max-h-[calc(100vh-1.5rem)] w-[min(18.5rem,calc(100vw-1.5rem))] gap-1.5 overflow-y-auto rounded-[var(--ui-radius-panel)] border border-white/76 bg-white/90 p-1.5 shadow-[0_20px_56px_rgba(48,34,22,0.1)] backdrop-blur-xl"
         >
           {steps.map((item) => {
             const Icon = item.icon
@@ -119,14 +119,14 @@ export function WorkflowTitleMenu({
                 }}
                 className={
                   isActive
-                    ? 'flex items-center gap-3 rounded-[0.95rem] bg-[rgba(255,240,229,0.86)] px-3 py-2.5 text-left shadow-[0_10px_24px_rgba(48,34,22,0.04)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                    : 'flex items-center gap-3 rounded-[0.95rem] px-3 py-2.5 text-left text-[var(--muted-foreground)] outline-none transition hover:bg-[rgba(255,248,241,0.84)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                    ? 'flex items-center gap-3 rounded-[var(--ui-radius-item)] bg-[rgba(241,243,246,0.92)] px-3 py-2.5 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                    : 'flex items-center gap-3 rounded-[var(--ui-radius-item)] px-3 py-2.5 text-left text-[var(--muted-foreground)] outline-none transition hover:bg-[rgba(241,243,246,0.84)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
                 }
               >
                 <span
                   className={
                     isActive
-                      ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent-strong)]'
+                      ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[var(--foreground)]'
                       : 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--secondary)] text-[var(--soft-foreground)]'
                   }
                 >

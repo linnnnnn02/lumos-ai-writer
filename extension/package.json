@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@radix-ui/react-select": "^2.2.6",
+    "@hugeicons/core-free-icons": "^4.1.2",
+    "@hugeicons/react": "^1.1.6",
     "@lumos-ai/shared": "workspace:*",
-    "lucide-react": "^0.511.0",
+    "@radix-ui/react-select": "^2.2.6",
+    "@supabase/supabase-js": "^2.105.4",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

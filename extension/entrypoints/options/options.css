@@ -1,18 +1,48 @@
 :root {
-  --manager-background: #f4f2ee;
-  --manager-glow: #fffaf4;
-  --manager-surface: rgba(255, 255, 255, 0.86);
+  --manager-background: #f4f5f7;
+  --manager-glow: #fbfcfd;
+  --manager-surface: rgba(255, 255, 255, 0.88);
   --manager-surface-strong: #ffffff;
-  --manager-panel: rgba(255, 248, 241, 0.9);
-  --manager-border: rgba(31, 22, 17, 0.08);
+  --manager-panel: rgba(247, 248, 250, 0.92);
+  --manager-border: rgba(15, 23, 42, 0.09);
   --manager-text: #171311;
-  --manager-text-muted: #6d645d;
-  --manager-text-soft: #93877d;
-  --manager-accent: #f07a2f;
-  --manager-accent-deep: #c95d1d;
-  --manager-accent-wash: #fff0e5;
-  --manager-gradient: linear-gradient(90deg, #67c7ff 0%, #efb6d0 44%, #ff9550 100%);
-  --manager-shadow: 0 20px 56px rgba(48, 34, 22, 0.08);
+  --manager-text-muted: #66707a;
+  --manager-text-soft: #87919d;
+  --manager-accent: #64748b;
+  --manager-accent-deep: #334155;
+  --manager-accent-wash: #eef1f5;
+  --manager-gradient: linear-gradient(135deg, #171311 0%, #334155 100%);
+  --manager-shadow: 0 20px 56px rgba(15, 23, 42, 0.08);
+  --ui-space-1: 4px;
+  --ui-space-1-5: 6px;
+  --ui-space-2: 8px;
+  --ui-space-2-5: 10px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-control-sm: 32px;
+  --ui-control-md: 40px;
+  --ui-control-lg: 44px;
+  --ui-control-xl: 48px;
+  --ui-control-gap: 8px;
+  --ui-control-px-sm: 12px;
+  --ui-control-px-md: 14px;
+  --ui-control-px-lg: 16px;
+  --ui-field-px: 14px;
+  --ui-field-py: 9px;
+  --ui-field-py-compact: 8px;
+  --ui-field-gap: 8px;
+  --ui-radius-item: 8px;
+  --ui-radius-control: 10px;
+  --ui-radius-card: 12px;
+  --ui-radius-panel: 12px;
+  --ui-radius-dialog: 14px;
+  --ui-field-radius: var(--ui-radius-control);
+  --ui-panel-gap: 16px;
+  --ui-panel-inset: 16px;
+  --ui-textarea-sm: 64px;
+  --ui-textarea-md: 88px;
   color: var(--manager-text);
   background: var(--manager-background);
   font-family:
@@ -31,7 +61,7 @@ body {
   margin: 0;
   min-width: 1120px;
   background:
-    linear-gradient(180deg, rgba(255, 250, 244, 0.72), rgba(244, 242, 238, 0.94)),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.74), rgba(244, 245, 247, 0.96)),
     var(--manager-background);
 }
 
@@ -105,11 +135,6 @@ textarea {
     transform 180ms ease;
 }
 
-button:hover:not(:disabled),
-a:hover {
-  transform: translateY(-1px);
-}
-
 .manager-shell {
   display: grid;
   grid-template-columns: var(--manager-sidebar-width, 248px) minmax(0, 1fr);
@@ -173,22 +198,22 @@ a:hover {
 .brand-block {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--ui-space-3);
   padding: 0 4px 22px;
 }
 
 .brand-mark {
   display: inline-flex;
-  width: 42px;
-  height: 42px;
+  width: var(--ui-control-md);
+  height: var(--ui-control-md);
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: var(--manager-gradient);
   color: #fff;
   font-weight: 800;
-  box-shadow: 0 14px 30px rgba(255, 149, 80, 0.2);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
 }
 
 .brand-name {
@@ -209,15 +234,16 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 42px;
+  gap: var(--ui-control-gap);
+  min-height: var(--ui-control-md);
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: var(--manager-gradient);
   color: #fff;
   font-size: 14px;
   font-weight: 760;
-  box-shadow: 0 18px 36px rgba(255, 149, 80, 0.2);
+  padding: 0 var(--ui-control-px-lg);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
 }
 
 .new-folder-button span {
@@ -228,12 +254,12 @@ a:hover {
 .new-folder-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--ui-field-gap);
   margin-top: 10px;
   border: 1px solid var(--manager-border);
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: var(--manager-surface);
-  padding: 8px;
+  padding: var(--ui-space-2);
   animation: manager-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -248,13 +274,14 @@ a:hover {
 }
 
 .new-folder-panel button {
+  min-height: var(--ui-control-sm);
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-item);
   background: var(--manager-accent-wash);
   color: var(--manager-accent-deep);
   font-size: 12px;
   font-weight: 760;
-  padding: 8px 10px;
+  padding: 0 var(--ui-control-px-sm);
 }
 
 .folder-list {
@@ -273,13 +300,13 @@ a:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  min-height: 40px;
+  gap: var(--ui-control-gap);
+  min-height: var(--ui-control-md);
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-muted);
-  padding: 0 10px;
+  padding: 0 var(--ui-control-px-sm);
   text-align: left;
   transition:
     border-color 180ms ease,
@@ -299,7 +326,6 @@ a:hover {
   color: var(--manager-text);
   font-weight: 760;
   box-shadow: 0 8px 18px rgba(48, 34, 22, 0.035);
-  transform: translateX(2px);
 }
 
 .folder-name {
@@ -328,13 +354,13 @@ a:hover {
   width: 100%;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 52px;
+  gap: var(--ui-space-2-5);
+  min-height: var(--ui-control-xl);
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-muted);
-  padding: 8px 11px;
+  padding: var(--ui-space-2) var(--ui-control-px-sm);
   text-align: left;
   transition:
     border-color 180ms ease,
@@ -350,7 +376,6 @@ a:hover {
   background: rgba(255, 255, 255, 0.76);
   color: var(--manager-text);
   box-shadow: 0 10px 24px rgba(48, 34, 22, 0.04);
-  transform: translateX(2px);
 }
 
 .trash-entry:focus-visible {
@@ -364,7 +389,7 @@ a:hover {
   height: 28px;
   align-items: center;
   justify-content: center;
-  border-radius: 9px;
+  border-radius: var(--ui-radius-item);
   background: rgba(31, 22, 17, 0.06);
   color: var(--manager-text-soft);
 }
@@ -419,13 +444,13 @@ a:hover {
 
 .search-shell .library-search-input {
   width: 100%;
-  height: 46px;
+  height: var(--ui-control-lg);
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 18px;
+  border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.78);
   color: var(--manager-text);
   outline: none;
-  padding: 0 82px 0 18px;
+  padding: 0 82px 0 var(--ui-control-px-lg);
   box-shadow: 0 12px 28px rgba(48, 34, 22, 0.04);
 }
 
@@ -444,7 +469,7 @@ a:hover {
   width: 16px;
   height: 16px;
   border: 2px solid var(--manager-text-muted);
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -458,7 +483,7 @@ a:hover {
   height: 22px;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   background: transparent;
   color: rgba(31, 22, 17, 0.36);
   padding: 0;
@@ -482,7 +507,7 @@ a:hover {
   position: absolute;
   width: 9px;
   height: 1.6px;
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   background: currentColor;
   content: '';
 }
@@ -510,12 +535,12 @@ a:hover {
 .sort-shell {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ui-control-gap);
   justify-self: end;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.78);
-  padding: 8px 10px 8px 12px;
+  padding: var(--ui-space-2) var(--ui-space-2-5) var(--ui-space-2) var(--ui-space-3);
   box-shadow: 0 12px 28px rgba(48, 34, 22, 0.04);
 }
 
@@ -588,7 +613,7 @@ a:hover {
 .tag-tabs {
   display: flex;
   min-width: 0;
-  gap: 8px;
+  gap: var(--ui-space-2);
   overflow-x: auto;
   padding: 4px 0;
 }
@@ -596,14 +621,14 @@ a:hover {
 .tag-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
+  gap: var(--ui-space-1-5);
+  min-height: var(--ui-control-sm);
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--manager-text-muted);
-  padding: 0 12px;
+  padding: 0 var(--ui-control-px-sm);
   font-size: 14px;
   font-weight: 700;
   transition:
@@ -630,17 +655,18 @@ a:hover {
 }
 
 .danger-folder-button {
+  min-height: var(--ui-control-sm);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-soft);
   font-size: 13px;
-  padding: 9px 12px;
+  padding: 0 var(--ui-control-px-sm);
 }
 
 .danger-folder-button:hover {
-  background: rgba(255, 240, 229, 0.9);
-  color: var(--manager-accent-deep);
+  background: rgba(214, 90, 60, 0.1);
+  color: #bf5a34;
 }
 
 .danger-folder-button:disabled {
@@ -666,7 +692,7 @@ a:hover {
   display: flex;
   min-width: 0;
   align-items: baseline;
-  gap: 14px;
+  gap: var(--ui-control-px-md);
   flex-wrap: wrap;
 }
 
@@ -707,14 +733,14 @@ a:hover {
 
 .trash-group-list {
   display: grid;
-  gap: 14px;
+  gap: var(--ui-control-px-md);
 }
 
 .trash-folder-icon-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 124px));
   justify-content: start;
-  gap: 24px 18px;
+  gap: var(--ui-space-6) 18px;
   align-items: start;
   padding: 18px 2px 4px;
 }
@@ -722,15 +748,15 @@ a:hover {
 .shadcn-button.trash-folder-tile {
   display: grid;
   justify-items: center;
-  gap: 8px;
+  gap: var(--ui-space-2);
   width: 124px;
   min-height: 0;
   min-width: 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text);
-  padding: 10px 8px 12px;
+  padding: var(--ui-space-2-5) var(--ui-space-2) var(--ui-space-3);
   text-align: center;
   white-space: normal;
   animation: manager-item-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -775,7 +801,7 @@ a:hover {
 .trash-folder-group {
   overflow: hidden;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-item);
   background: rgba(255, 255, 255, 0.76);
   box-shadow: 0 16px 34px rgba(48, 34, 22, 0.05);
   animation: manager-item-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -785,9 +811,9 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 14px;
+  gap: var(--ui-control-px-md);
   border-bottom: 1px solid rgba(31, 22, 17, 0.06);
-  padding: 14px 16px;
+  padding: var(--ui-control-px-md) var(--ui-space-4);
 }
 
 .trash-folder-header > div {
@@ -796,13 +822,14 @@ a:hover {
 
 .trash-back-button {
   flex: 0 0 auto;
+  min-height: var(--ui-control-sm);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   background: rgba(31, 22, 17, 0.06);
   color: var(--manager-text-muted);
   font-size: 12px;
   font-weight: 760;
-  padding: 8px 10px;
+  padding: 0 var(--ui-control-px-sm);
 }
 
 .trash-back-button:hover {
@@ -834,7 +861,7 @@ a:hover {
 .trash-note-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ui-space-2);
 }
 
 .trash-folder-actions {
@@ -843,13 +870,14 @@ a:hover {
 
 .trash-folder-actions button,
 .trash-note-actions button {
+  min-height: var(--ui-control-sm);
   border: 0;
-  border-radius: 999px;
-  background: rgba(255, 248, 241, 0.9);
+  border-radius: var(--ui-field-radius);
+  background: rgba(238, 241, 245, 0.92);
   color: var(--manager-accent-deep);
   font-size: 12px;
   font-weight: 800;
-  padding: 8px 10px;
+  padding: 0 var(--ui-control-px-sm);
 }
 
 .trash-folder-actions button:last-child,
@@ -860,26 +888,26 @@ a:hover {
 
 .trash-folder-actions button:last-child:hover,
 .trash-note-actions button:last-child:hover {
-  background: rgba(255, 240, 229, 0.9);
+  background: rgba(214, 90, 60, 0.1);
   color: #bf5a34;
 }
 
 .trash-note-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 12px;
-  padding: 14px;
+  gap: var(--ui-space-3);
+  padding: var(--ui-control-px-md);
 }
 
 .trash-note-card {
   display: grid;
   grid-template-columns: 74px minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--ui-space-3);
   min-width: 0;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-item);
   background: rgba(255, 255, 255, 0.88);
-  padding: 10px;
+  padding: var(--ui-space-2-5);
   animation: manager-item-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -888,9 +916,9 @@ a:hover {
   overflow: hidden;
   width: 74px;
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-item);
   background:
-    linear-gradient(135deg, rgba(103, 199, 255, 0.18), rgba(255, 240, 229, 0.82)),
+    linear-gradient(135deg, rgba(103, 199, 255, 0.16), rgba(238, 241, 245, 0.9)),
     #fff;
 }
 
@@ -927,7 +955,7 @@ a:hover {
 
 .trash-note-meta span {
   border-radius: 999px;
-  background: rgba(255, 248, 241, 0.9);
+  background: rgba(238, 241, 245, 0.9);
   padding: 5px 7px;
 }
 
@@ -940,20 +968,20 @@ a:hover {
 }
 
 .trash-empty-folder {
-  padding: 20px;
+  padding: var(--ui-space-5);
   color: var(--manager-text-soft);
   font-size: 13px;
   font-weight: 700;
 }
 
 .trash-note-library-grid {
-  padding: 14px;
+  padding: var(--ui-control-px-md);
 }
 
 .note-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: var(--ui-control-px-md);
   align-items: start;
 }
 
@@ -967,7 +995,7 @@ a:hover {
   break-inside: avoid;
   page-break-inside: avoid;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-item);
   background: var(--manager-surface-strong);
   box-shadow: 0 16px 34px rgba(48, 34, 22, 0.06);
   cursor: pointer;
@@ -1020,7 +1048,7 @@ a:hover {
   overflow: hidden;
   aspect-ratio: 4 / 5;
   background:
-    linear-gradient(135deg, rgba(103, 199, 255, 0.22), rgba(255, 240, 229, 0.9)),
+    linear-gradient(135deg, rgba(103, 199, 255, 0.18), rgba(238, 241, 245, 0.92)),
     #fff;
 }
 
@@ -1067,7 +1095,7 @@ a:hover {
 }
 
 .note-card-body {
-  padding: 12px 12px 13px;
+  padding: var(--ui-space-3) var(--ui-space-3) var(--ui-control-px-md);
 }
 
 .note-card h3 {
@@ -1085,7 +1113,7 @@ a:hover {
 .note-card-meta {
   display: flex;
   justify-content: flex-start;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
   margin-top: 7px;
   color: var(--manager-text-soft);
   font-size: 12px;
@@ -1102,7 +1130,7 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--ui-space-1-5);
   margin-top: 10px;
 }
 
@@ -1123,7 +1151,7 @@ a:hover {
   align-items: center;
   gap: 5px;
   border-radius: 999px;
-  background: rgba(255, 248, 241, 0.95);
+  background: rgba(238, 241, 245, 0.95);
   color: var(--manager-text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -1134,7 +1162,7 @@ a:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
   margin-top: 12px;
 }
 
@@ -1146,6 +1174,20 @@ a:hover {
   color: var(--manager-text-soft);
   font-size: 12px;
   text-decoration: none;
+}
+
+.note-card-actions a,
+.note-card-actions button {
+  display: inline-flex;
+  min-height: var(--ui-control-sm);
+  align-items: center;
+  border-radius: var(--ui-radius-item);
+  padding: 0 var(--ui-space-2);
+}
+
+.note-card-actions a:hover,
+.note-card-actions button:hover {
+  background: rgba(15, 23, 42, 0.055);
 }
 
 .note-card-actions a:hover {
@@ -1197,7 +1239,7 @@ a:hover {
   min-width: 136px;
   overflow: hidden;
   border: 1px solid rgba(31, 22, 17, 0.08);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-item);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 42px rgba(48, 34, 22, 0.16);
   padding: 6px;
@@ -1209,9 +1251,9 @@ a:hover {
 .note-card-menu-content button {
   display: flex;
   width: 100%;
-  min-height: 34px;
+  min-height: var(--ui-control-sm);
   align-items: center;
-  border-radius: 7px;
+  border-radius: var(--ui-radius-item);
   color: var(--manager-text-muted);
   font-size: 13px;
   font-weight: 760;
@@ -1223,8 +1265,8 @@ a:hover {
 
 .note-card-menu-content a:hover,
 .note-card-menu-content button:hover {
-  background: rgba(255, 240, 229, 0.72);
-  color: var(--manager-accent-deep);
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--manager-text);
   transform: none;
 }
 
@@ -1234,7 +1276,7 @@ a:hover {
 
 .dialog-backdrop.note-detail-backdrop {
   background:
-    radial-gradient(circle at 18% 12%, rgba(255, 149, 80, 0.13), transparent 28%),
+    radial-gradient(circle at 18% 12%, rgba(148, 163, 184, 0.13), transparent 28%),
     radial-gradient(circle at 76% 18%, rgba(103, 199, 255, 0.12), transparent 24%),
     rgba(23, 19, 17, 0.26);
   overflow: hidden;
@@ -1251,9 +1293,9 @@ a:hover {
   overflow: hidden;
   overscroll-behavior: contain;
   border: 1px solid rgba(255, 255, 255, 0.84);
-  border-radius: 28px;
+  border-radius: var(--ui-radius-dialog);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 244, 0.96)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96)),
     #fff;
   box-shadow:
     0 40px 100px rgba(48, 34, 22, 0.24),
@@ -1266,12 +1308,12 @@ a:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
+  gap: var(--ui-panel-gap);
   border-bottom: 1px solid rgba(31, 22, 17, 0.07);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.98), rgba(255, 248, 241, 0.82)),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.88)),
     #fff;
-  padding: 12px 22px;
+  padding: var(--ui-space-3) 22px;
 }
 
 .note-detail-heading {
@@ -1314,8 +1356,8 @@ a:hover {
   min-height: 0;
   overscroll-behavior: contain;
   background:
-    linear-gradient(135deg, rgba(255, 250, 244, 0.82), rgba(244, 242, 238, 0.62)),
-    rgba(244, 242, 238, 0.58);
+    linear-gradient(135deg, rgba(248, 250, 252, 0.84), rgba(241, 243, 246, 0.68)),
+    rgba(241, 243, 246, 0.62);
   padding: 16px 18px;
 }
 
@@ -1324,7 +1366,7 @@ a:hover {
   min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(31, 22, 17, 0.07);
-  border-radius: 22px;
+  border-radius: var(--ui-radius-panel);
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 24px 60px rgba(48, 34, 22, 0.07);
 }
@@ -1340,7 +1382,7 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(31, 22, 17, 0.06);
-  padding: 14px 20px;
+  padding: var(--ui-control-px-md) var(--ui-space-5);
 }
 
 .note-detail-reader-content,
@@ -1361,7 +1403,7 @@ a:hover {
   overscroll-behavior: contain;
   margin: 14px 16px 16px;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 20px;
+  border-radius: var(--ui-radius-panel);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.76)),
     #fff;
@@ -1377,7 +1419,7 @@ a:hover {
 
 .note-content-highlight {
   border-bottom: 2px solid;
-  border-radius: 9px;
+  border-radius: var(--ui-radius-item);
   color: inherit;
   padding: 1px 5px 3px;
 }
@@ -1394,36 +1436,36 @@ a:hover {
 }
 
 .snippet-add-button {
-  box-shadow: 0 12px 24px rgba(240, 122, 47, 0.08);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
 }
 
 .snippet-editor-list {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 16px 14px;
+  padding: var(--ui-space-3) var(--ui-space-4) var(--ui-control-px-md);
 }
 
 .snippet-editor {
   display: grid;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
   border: 1px solid rgba(31, 22, 17, 0.06);
   border-left: 4px solid var(--manager-accent);
-  border-radius: 18px;
+  border-radius: var(--ui-radius-card);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 244, 0.7)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.78)),
     #fff;
-  padding: 13px;
+  padding: var(--ui-control-px-md);
   box-shadow: 0 18px 42px rgba(48, 34, 22, 0.06);
   animation: manager-item-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .snippet-editor.active {
   border-color: rgba(31, 22, 17, 0.12);
-  background: rgba(255, 250, 244, 0.96);
+  background: rgba(248, 250, 252, 0.96);
   box-shadow:
     0 0 0 2px rgba(31, 22, 17, 0.045),
     0 16px 34px rgba(48, 34, 22, 0.07);
@@ -1433,14 +1475,14 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ui-space-3);
 }
 
 .snippet-editor-title {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--ui-space-2);
   color: var(--manager-text-muted);
   font-size: 13px;
   font-weight: 800;
@@ -1468,23 +1510,23 @@ a:hover {
 }
 
 .snippet-tag-field {
-  gap: 6px;
+  gap: var(--ui-space-1-5);
 }
 
 .snippet-tag-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--ui-field-gap);
 }
 
 .snippet-tag-select {
-  min-height: 40px;
+  min-height: var(--ui-control-md);
   border-color: rgba(31, 22, 17, 0.07);
-  border-radius: 15px;
+  border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: none;
-  padding: 8px 12px;
+  padding: 0 var(--ui-control-px-sm);
 }
 
 .snippet-tag-select:has(.snippet-tag-name-input),
@@ -1498,7 +1540,7 @@ a:hover {
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 9px;
+  gap: var(--ui-field-gap);
 }
 
 .snippet-tag-value {
@@ -1584,13 +1626,13 @@ a:hover {
 }
 
 .snippet-tag-edit-button:hover {
-  background: rgba(255, 240, 229, 0.72);
+  background: rgba(15, 23, 42, 0.06);
   color: var(--manager-accent-deep);
 }
 
 .snippet-field {
   display: grid;
-  gap: 5px;
+  gap: var(--ui-space-1-5);
 }
 
 .snippet-field > span {
@@ -1602,7 +1644,7 @@ a:hover {
 .snippet-textarea {
   min-height: 68px;
   border-color: rgba(31, 22, 17, 0.07);
-  border-radius: 15px;
+  border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: none;
   font-size: 14px;
@@ -1611,28 +1653,28 @@ a:hover {
 }
 
 .snippet-reason-textarea {
-  min-height: 58px;
+  min-height: var(--ui-textarea-sm);
 }
 
 .note-selection-confirm {
   position: fixed;
   z-index: 70;
-  min-height: 34px;
+  min-height: var(--ui-control-sm);
   border: 0;
   border-radius: 999px;
   background: var(--manager-gradient);
   color: #fff;
   font-size: 13px;
   font-weight: 800;
-  padding: 0 13px;
-  box-shadow: 0 14px 30px rgba(255, 149, 80, 0.24);
+  padding: 0 var(--ui-control-px-md);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
   animation: manager-popover-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .note-selection-confirm:hover,
 .note-selection-confirm:focus-visible {
   background: var(--manager-gradient);
-  box-shadow: 0 18px 36px rgba(255, 149, 80, 0.3);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.2);
 }
 
 .snippet-editor-empty {
@@ -1659,12 +1701,12 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--ui-panel-gap);
   border-top: 1px solid rgba(31, 22, 17, 0.07);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.98), rgba(255, 248, 241, 0.86)),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.9)),
     #fff;
-  padding: 12px 22px;
+  padding: var(--ui-space-3) 22px;
 }
 
 .note-detail-feedback {
@@ -1677,11 +1719,11 @@ a:hover {
 .note-detail-actions {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
 }
 
 .primary-dialog-button {
-  box-shadow: 0 18px 34px rgba(255, 149, 80, 0.22);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.16);
 }
 
 .empty-state {
@@ -1689,7 +1731,7 @@ a:hover {
   min-height: 360px;
   place-items: center;
   border: 1px solid rgba(31, 22, 17, 0.06);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-card);
   background: rgba(255, 255, 255, 0.72);
   text-align: center;
 }
@@ -1721,7 +1763,7 @@ a:hover {
 .confirm-dialog {
   width: min(420px, 100%);
   border: 1px solid rgba(255, 255, 255, 0.74);
-  border-radius: 22px;
+  border-radius: var(--ui-radius-dialog);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 80px rgba(48, 34, 22, 0.18);
   padding: 22px;
@@ -1732,7 +1774,7 @@ a:hover {
 .dialog-eyebrow {
   display: inline-flex;
   margin: 0 0 10px;
-  border-radius: 999px;
+  border-radius: var(--ui-field-radius);
   background: var(--manager-accent-wash);
   color: var(--manager-accent-deep);
   font-size: 12px;
@@ -1759,17 +1801,17 @@ a:hover {
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--ui-space-2-5);
   margin-top: 22px;
 }
 
 .secondary-dialog-button,
 .danger-dialog-button {
-  min-height: 38px;
-  border-radius: 999px;
+  min-height: var(--ui-control-md);
+  border-radius: var(--ui-field-radius);
   font-size: 13px;
   font-weight: 760;
-  padding: 0 15px;
+  padding: 0 var(--ui-control-px-lg);
 }
 
 .secondary-dialog-button {
@@ -1780,15 +1822,15 @@ a:hover {
 
 .danger-dialog-button {
   border: 0;
-  background: var(--manager-gradient);
+  background: #bf5a34;
   color: #fff;
-  box-shadow: 0 14px 28px rgba(255, 149, 80, 0.24);
+  box-shadow: 0 14px 28px rgba(191, 90, 52, 0.16);
 }
 
 .danger-dialog-button:hover,
 .danger-dialog-button:focus-visible {
-  background: var(--manager-gradient);
-  box-shadow: 0 18px 36px rgba(255, 149, 80, 0.3);
+  background: #a84d2d;
+  box-shadow: 0 18px 36px rgba(191, 90, 52, 0.2);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1800,11 +1842,6 @@ a:hover {
     transition-duration: 1ms !important;
   }
 
-  button:hover:not(:disabled),
-  a:hover,
-  .folder-row.active,
-  .trash-entry:hover,
-  .trash-entry.active,
   .note-card:hover,
   .note-card:focus-visible {
     transform: none;
@@ -1907,7 +1944,7 @@ a:hover {
   }
 
   .dialog-backdrop.note-detail-backdrop {
-    padding: 14px;
+    padding: var(--ui-control-px-md);
   }
 
   .note-detail-dialog {
@@ -1916,7 +1953,7 @@ a:hover {
 
   .note-detail-header {
     grid-template-columns: minmax(0, 1fr) auto;
-    padding: 10px 12px;
+    padding: var(--ui-space-2-5) var(--ui-space-3);
   }
 
   .note-detail-heading h2 {

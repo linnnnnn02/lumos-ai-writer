@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Folder } from 'lucide-react'
+import { Folder } from './icon'
 import { cn } from './utils'
 
 type FolderIconProps = React.HTMLAttributes<HTMLSpanElement> & {
@@ -15,7 +15,7 @@ const FolderIcon = React.forwardRef<HTMLSpanElement, FolderIconProps>(
       {...props}
     >
       <span className="shadcn-folder-icon-surface">
-        <Folder aria-hidden="true" strokeWidth={1.9} />
+        <Folder aria-hidden="true" />
       </span>
     </span>
   ),

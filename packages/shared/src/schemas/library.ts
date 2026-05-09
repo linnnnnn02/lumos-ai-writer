@@ -53,6 +53,52 @@ export const listSnippetsResponseSchema = z.object({
   snippets: z.array(snippetDtoSchema),
 })
 
+export const createFolderRequestSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+})
+
+export const createFolderResponseSchema = z.object({
+  ok: z.literal(true),
+  folder: folderDtoSchema,
+})
+
+export const upsertNoteRequestSchema = z.object({
+  folderId: z.string().uuid().nullable().optional(),
+  filename: z.string().trim().min(1).max(160),
+  title: z.string().trim().min(1).max(240),
+  authorName: z.string().trim().max(120).optional(),
+  sourceUrl: z.string().trim().min(1).max(2048),
+  coverImageUrl: z.string().trim().max(2048).optional(),
+  contentText: z.string().max(50000).optional(),
+  savedAt: z.string().optional(),
+})
+
+export const upsertNoteResponseSchema = z.object({
+  ok: z.literal(true),
+  note: noteDtoSchema,
+})
+
+export const createSnippetRequestSchema = z.object({
+  noteId: z.string().uuid().optional(),
+  noteUrl: z.string().trim().min(1).max(2048).optional(),
+  selectedText: z.string().trim().min(1).max(10000),
+  reasonText: z.string().trim().max(2000).optional(),
+  colorTagName: z.string().trim().max(80).optional(),
+  colorValue: z.string().trim().max(40).optional(),
+  createdAt: z.string().optional(),
+})
+
+export const createSnippetResponseSchema = z.object({
+  ok: z.literal(true),
+  snippet: snippetDtoSchema,
+})
+
 export type ListFoldersResponse = z.infer<typeof listFoldersResponseSchema>
 export type ListNotesResponse = z.infer<typeof listNotesResponseSchema>
 export type ListSnippetsResponse = z.infer<typeof listSnippetsResponseSchema>
+export type CreateFolderRequest = z.infer<typeof createFolderRequestSchema>
+export type CreateFolderResponse = z.infer<typeof createFolderResponseSchema>
+export type UpsertNoteRequest = z.infer<typeof upsertNoteRequestSchema>
+export type UpsertNoteResponse = z.infer<typeof upsertNoteResponseSchema>
+export type CreateSnippetRequest = z.infer<typeof createSnippetRequestSchema>
+export type CreateSnippetResponse = z.infer<typeof createSnippetResponseSchema>

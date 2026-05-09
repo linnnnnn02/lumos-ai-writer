@@ -1,6 +1,6 @@
 import * as React from 'react'
 import * as SelectPrimitive from '@radix-ui/react-select'
-import { Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp } from '@/components/ui/icon'
 import { cn } from '@/lib/utils'
 
 const Select = SelectPrimitive.Root
@@ -15,7 +15,7 @@ function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'flex h-10 w-full items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--input)] px-3.5 py-2 text-sm text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] motion-safe:data-[state=open]:-translate-y-px focus:border-[rgba(240,122,47,0.24)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(240,122,47,0.24)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
+        'flex h-[var(--ui-control-md)] w-full items-center justify-between gap-[var(--ui-control-gap)] rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--input)] px-[var(--ui-field-px)] py-0 text-sm text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(15,23,42,0.18)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(15,23,42,0.18)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
         className,
       )}
       {...props}
@@ -66,7 +66,7 @@ function SelectContent({
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         className={cn(
-          'shadcn-popover-content relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[1rem] border border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)] shadow-[var(--shadow-soft)] backdrop-blur-xl',
+          'shadcn-popover-content relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)] shadow-[var(--shadow-soft)] backdrop-blur-xl',
           position === 'popper' &&
             'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
           className,
@@ -110,7 +110,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex w-full cursor-default select-none items-center rounded-[0.8rem] py-2 pl-8 pr-2 text-sm text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--accent-strong)] motion-safe:data-[highlighted]:translate-x-0.5 data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--accent-strong)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex min-h-[var(--ui-control-sm)] w-full cursor-default select-none items-center rounded-[var(--ui-radius-item)] py-[var(--ui-space-1-5)] pl-8 pr-[var(--ui-space-2)] text-sm text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--foreground)] data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--foreground)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

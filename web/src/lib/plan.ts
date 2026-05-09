@@ -7,7 +7,7 @@ type PlanInput = {
   snippets: SavedSnippetRecord[]
 }
 
-const blockColors = ['#F1B24A', '#DD6C32', '#2A9D8F', '#4D78F2']
+const blockColors = ['#64748B', '#4D78F2', '#2A9D8F', '#8B5CF6']
 
 function getLengthHint(length: ProjectLength) {
   if (length === 'short') return '控制在轻量表达里，优先抓最强的一两个点。'

@@ -38,6 +38,34 @@ export const healthResponseSchema = z.object({
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>
 
+export const configStatusResponseSchema = z.object({
+  ok: z.literal(true),
+  env: z.string(),
+  supabaseConfigured: z.boolean(),
+  ai: z.object({
+    provider: z.literal('deepseek'),
+    configured: z.boolean(),
+    dailyBudgetCny: z.number().nonnegative().nullable(),
+    model: z.string(),
+  }),
+})
+
+export type ConfigStatusResponse = z.infer<typeof configStatusResponseSchema>
+
+export const oauthProviderSchema = z.enum(['github', 'google'])
+
+export type OAuthProvider = z.infer<typeof oauthProviderSchema>
+
+export const publicConfigResponseSchema = z.object({
+  ok: z.literal(true),
+  authConfigured: z.boolean(),
+  supabaseUrl: z.string().url().nullable(),
+  supabaseAnonKey: z.string().nullable(),
+  oauthProviders: z.array(oauthProviderSchema),
+})
+
+export type PublicConfigResponse = z.infer<typeof publicConfigResponseSchema>
+
 export const currentUserSchema = z.object({
   id: z.string(),
   email: z.string().email().nullable(),

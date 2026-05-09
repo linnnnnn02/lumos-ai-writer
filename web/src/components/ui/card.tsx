@@ -7,7 +7,7 @@ export function Card({ className, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-card)] border border-white/72 bg-[var(--card)] text-[var(--card-foreground)] shadow-[var(--shadow-card)] backdrop-blur-xl transition-[background-color,border-color,box-shadow,transform] duration-300 motion-safe:will-change-transform',
+        'rounded-[var(--radius-card)] border border-white/72 bg-[var(--card)] text-[var(--card-foreground)] shadow-[var(--shadow-card)] backdrop-blur-xl transition-[background-color,border-color,box-shadow,transform] duration-300',
         className,
       )}
       {...props}
@@ -16,7 +16,7 @@ export function Card({ className, ...props }: CardProps) {
 }
 
 export function CardHeader({ className, ...props }: CardProps) {
-  return <div className={cn('flex flex-col gap-2 p-6', className)} {...props} />
+  return <div className={cn('flex flex-col gap-[var(--ui-space-2)] p-[var(--ui-space-6)]', className)} {...props} />
 }
 
 export function CardTitle({ className, ...props }: CardProps) {
@@ -33,9 +33,9 @@ export function CardDescription({ className, ...props }: CardProps) {
 }
 
 export function CardContent({ className, ...props }: CardProps) {
-  return <div className={cn('p-6 pt-0', className)} {...props} />
+  return <div className={cn('p-[var(--ui-space-6)] pt-0', className)} {...props} />
 }
 
 export function CardFooter({ className, ...props }: CardProps) {
-  return <div className={cn('flex items-center gap-3 p-6 pt-0', className)} {...props} />
+  return <div className={cn('flex items-center gap-[var(--ui-space-3)] p-[var(--ui-space-6)] pt-0', className)} {...props} />
 }

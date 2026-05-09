@@ -1,4 +1,9 @@
-import type { ProjectLength, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
+import type {
+  AiAnalysisResult,
+  ProjectLength,
+  SavedNoteRecord,
+  SavedSnippetRecord,
+} from '@lumos-ai/shared'
 
 type AnalysisInput = {
   folderName: string
@@ -52,7 +57,7 @@ function getSnippetLearningPoint(snippet: SavedSnippetRecord, index: number) {
   }
 }
 
-export function buildDemoAnalysis(input: AnalysisInput) {
+export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
   const snippetTags = topTagNames(input.snippets)
   const reasonLines = topReasonLines(input.snippets)
   const noteTitles = input.notes.map((note) => note.filename).slice(0, 3)

@@ -110,11 +110,11 @@ const COLOR_TAG_NAMES_STORAGE_KEY = 'colorTagNames'
 const FLOATING_ROOT_ID = 'xhs-ai-selection-root'
 const PANEL_MARGIN = 20
 const COLOR_PRESETS = [
-  { value: '#DD6C32' },
-  { value: '#E9C46A' },
-  { value: '#2A9D8F' },
+  { value: '#64748B' },
   { value: '#4D78F2' },
+  { value: '#2A9D8F' },
   { value: '#8B5CF6' },
+  { value: '#E9C46A' },
   { value: '#E56B6F' },
 ]
 
@@ -1157,6 +1157,30 @@ function createSelectionUi() {
     <style>
       #${FLOATING_ROOT_ID} {
         all: initial;
+        --ui-space-1: 4px;
+        --ui-space-2: 8px;
+        --ui-space-2-5: 10px;
+        --ui-space-3: 12px;
+        --ui-space-4: 16px;
+        --ui-control-sm: 32px;
+        --ui-control-md: 40px;
+        --ui-control-lg: 44px;
+        --ui-control-gap: 8px;
+        --ui-control-px-sm: 12px;
+        --ui-control-px-md: 14px;
+        --ui-control-px-lg: 16px;
+        --ui-field-px: 14px;
+        --ui-field-py: 9px;
+        --ui-radius-item: 8px;
+        --ui-radius-control: 10px;
+        --ui-radius-card: 12px;
+        --ui-radius-panel: 12px;
+        --ui-radius-dialog: 14px;
+        --ui-field-radius: var(--ui-radius-control);
+        --ui-field-gap: 8px;
+        --ui-panel-inset: 16px;
+        --ui-textarea-sm: 64px;
+        --ui-textarea-md: 88px;
       }
 
       #${FLOATING_ROOT_ID} * {
@@ -1170,12 +1194,13 @@ function createSelectionUi() {
         display: none;
         border: 0;
         border-radius: 999px;
-        padding: 11px 18px;
-        background: linear-gradient(90deg, #67c7ff 0%, #efb6d0 44%, #ff9550 100%);
+        min-height: var(--ui-control-md);
+        padding: 0 var(--ui-control-px-lg);
+        background: linear-gradient(135deg, #171311 0%, #334155 100%);
         color: #fff;
         font-size: 14px;
         font-weight: 760;
-        box-shadow: 0 16px 34px rgba(255, 149, 80, 0.24);
+        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
         cursor: pointer;
         pointer-events: auto;
         touch-action: manipulation;
@@ -1191,11 +1216,11 @@ function createSelectionUi() {
         z-index: 2147483646;
         width: 360px;
         display: none;
-        border-radius: 20px;
-        border: 1px solid rgba(86, 58, 39, 0.12);
-        background: linear-gradient(180deg, rgba(255, 249, 242, 0.98), rgba(247, 239, 227, 0.98));
-        box-shadow: 0 24px 60px rgba(61, 35, 18, 0.16);
-        padding: 16px;
+        border-radius: var(--ui-radius-panel);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
+        padding: var(--ui-panel-inset);
         color: #1f1712;
       }
 
@@ -1203,7 +1228,7 @@ function createSelectionUi() {
         display: flex;
         align-items: start;
         justify-content: flex-start;
-        margin-bottom: 8px;
+        margin-bottom: var(--ui-field-gap);
         cursor: move;
         user-select: none;
       }
@@ -1222,10 +1247,10 @@ function createSelectionUi() {
       }
 
       .xhs-ai-preview {
-        margin-bottom: 12px;
-        border-radius: 14px;
+        margin-bottom: var(--ui-space-3);
+        border-radius: var(--ui-field-radius);
         background: rgba(255, 255, 255, 0.78);
-        padding: 12px;
+        padding: var(--ui-space-3);
         font-size: 13px;
         line-height: 1.65;
         color: #2d2019;
@@ -1236,7 +1261,7 @@ function createSelectionUi() {
 
       .xhs-ai-label {
         display: block;
-        margin: 0 0 8px;
+        margin: 0 0 var(--ui-field-gap);
         color: #7b6150;
         font-size: 12px;
         font-weight: 600;
@@ -1246,10 +1271,10 @@ function createSelectionUi() {
       .xhs-ai-shadcn-textarea {
         width: 100%;
         border: 1px solid rgba(110, 80, 62, 0.16);
-        border-radius: 14px;
+        border-radius: var(--ui-field-radius);
         background: rgba(255, 255, 255, 0.88);
         color: #1f1712;
-        padding: 12px;
+        padding: var(--ui-field-py) var(--ui-field-px);
         font-size: 13px;
         outline: none;
         box-shadow: 0 10px 24px rgba(48, 34, 22, 0.03);
@@ -1266,22 +1291,22 @@ function createSelectionUi() {
 
       .xhs-ai-shadcn-input:focus,
       .xhs-ai-shadcn-textarea:focus {
-        border-color: rgba(240, 122, 47, 0.24);
-        box-shadow: 0 0 0 4px rgba(240, 122, 47, 0.14);
+        border-color: rgba(15, 23, 42, 0.18);
+        box-shadow: 0 0 0 4px rgba(100, 116, 139, 0.14);
       }
 
       .xhs-ai-shadcn-textarea {
-        min-height: 92px;
+        min-height: var(--ui-textarea-md);
         resize: vertical;
       }
 
       .xhs-ai-field {
-        margin-bottom: 12px;
+        margin-bottom: var(--ui-space-3);
       }
 
       .xhs-ai-color-row {
         display: flex;
-        gap: 10px;
+        gap: var(--ui-space-2-5);
         flex-wrap: wrap;
       }
 
@@ -1301,14 +1326,15 @@ function createSelectionUi() {
       .xhs-ai-actions {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 10px;
+        gap: var(--ui-space-2-5);
         margin-top: 4px;
       }
 
       .xhs-ai-button {
         border: 0;
-        border-radius: 14px;
-        padding: 12px 14px;
+        border-radius: var(--ui-field-radius);
+        min-height: var(--ui-control-md);
+        padding: 0 var(--ui-field-px);
         font-size: 14px;
         font-weight: 700;
         cursor: pointer;
@@ -1321,9 +1347,9 @@ function createSelectionUi() {
       }
 
       .xhs-ai-button.primary {
-        background: linear-gradient(90deg, #67c7ff 0%, #efb6d0 44%, #ff9550 100%);
+        background: linear-gradient(135deg, #171311 0%, #334155 100%);
         color: #fff;
-        box-shadow: 0 14px 28px rgba(255, 149, 80, 0.22);
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.16);
       }
 
       .xhs-ai-toast {
@@ -1334,7 +1360,7 @@ function createSelectionUi() {
         z-index: 2147483647;
         display: none;
         border-radius: 999px;
-        padding: 10px 14px;
+        padding: var(--ui-space-2-5) var(--ui-field-px);
         background: rgba(32, 23, 18, 0.92);
         color: #fff;
         font-size: 12px;
@@ -1355,10 +1381,10 @@ function createSelectionUi() {
         top: 24px;
         width: min(520px, calc(100vw - 40px));
         max-height: calc(100vh - 48px);
-        border-radius: 16px;
-        border: 1px solid rgba(86, 58, 39, 0.12);
-        background: linear-gradient(180deg, rgba(255, 249, 242, 0.98), rgba(247, 239, 227, 0.98));
-        box-shadow: 0 24px 60px rgba(61, 35, 18, 0.16);
+        border-radius: var(--ui-radius-dialog);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
         color: #1f1712;
         overflow: hidden;
       }
@@ -1375,13 +1401,13 @@ function createSelectionUi() {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 14px;
+        gap: var(--ui-space-3);
+        margin-bottom: var(--ui-control-px-md);
       }
 
       .xhs-ai-result-title {
         margin: 0;
-        color: #c95d1d;
+        color: #171311;
         font-size: 16px;
         font-weight: 700;
         line-height: 1.2;
@@ -1390,7 +1416,8 @@ function createSelectionUi() {
       .xhs-ai-result-close {
         border: 1px solid rgba(110, 80, 62, 0.16);
         border-radius: 999px;
-        padding: 8px 14px;
+        min-height: var(--ui-control-sm);
+        padding: 0 var(--ui-control-px-md);
         background: rgba(255, 255, 255, 0.9);
         color: #6b5548;
         font-size: 12px;
@@ -1400,7 +1427,7 @@ function createSelectionUi() {
 
       .xhs-ai-result-grid {
         display: grid;
-        gap: 12px;
+        gap: var(--ui-space-3);
       }
 
       .xhs-ai-result-item {

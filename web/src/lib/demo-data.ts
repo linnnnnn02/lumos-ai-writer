@@ -100,7 +100,7 @@ export const demoSnippets: SavedSnippetRecord[] = [
     noteAuthorName: '桔点设计商店',
     selectedText: '在各位股东热情的关怀中样品已马上排产',
     colorTagName: '整体调性',
-    colorValue: '#DD6C32',
+    colorValue: '#64748B',
     reasonText: '把用户叫成股东，互动感很强，也不油。',
     createdAt: '2026-04-30T21:06:00.000Z',
   },

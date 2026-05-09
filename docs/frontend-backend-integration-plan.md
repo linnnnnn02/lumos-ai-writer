@@ -3,6 +3,16 @@
 更新时间：2026-05-09  
 适用范围：`web`、`extension`、`packages/shared`、`server/functions`
 
+当前本地联调进度：
+
+- 已建立 `server/api` Hono API，并通过 `/api/health`、`/api/v1/me`、`/api/v1/folders`、`/api/v1/notes`、`/api/v1/snippets` 跑通 Supabase。
+- Web 端已接入 Supabase 邮箱密码登录，登录后可看到云端文案库数量。
+- 插件 sidepanel 已接入 MVP 级云端同步：同一测试账号邮箱密码登录；保存标注时先写 `chrome.storage.local`，再同步到云端 API。
+- Web 学习拆解已接入 `/api/v1/ai/analyze`，并已用 DeepSeek 跑通真实模型调用。
+- Web 初版文案已接入 `/api/v1/ai/draft`；计划页进入后先显示“生成初版文案”，不再自动展示本地假稿。
+- `ai_runs` 已开始记录 `analyze` / `draft` 的成功或失败、模型和 token 用量，方便 MVP 阶段观察成本与稳定性。
+- 本地开发端口固定为：Web `http://localhost:5173`，API `http://localhost:8788/api`。
+
 这份文档的目标不是做一个泛泛的技术选型表，而是把 Lumos AI Writer 从“本地前端原型 + 浏览器本地存储插件”推进到：
 
 - 插件和网页端共用同一套账号体系。
@@ -27,6 +37,7 @@
 - DNS：MVP 初期优先继续用阿里云 DNS；必要时再把特定子域名或整站 DNS 切到 Cloudflare。
 - Web/API：Cloudflare Pages + Pages Functions，优先把 API 放在同一域名的 `/api/*` 下，减少跨域和额外域名配置。
 - 数据库/Auth/Storage：Supabase Free。
+- 登录方式：MVP 先用 Supabase 默认邮件服务 + 邮箱密码；GitHub + Google OAuth 作为后续开启项，不要求用户再手动绑定一个邮箱密码账号。
 - AI：DeepSeek API，所有 Key 只放后端环境变量。
 - 成本目标：除 AI 调用和可能的一次性浏览器商店账号费用外，MVP 阶段尽量保持 0 固定月成本。
 
@@ -360,12 +371,12 @@ staging.yourdomain.com  预发布环境
 
 建议分阶段：
 
-#### Phase 1：邮箱验证码登录
+#### Phase 1：邮箱密码登录
 
 最推荐第一版先做：
 
-- 用户输入邮箱。
-- 收到验证码或 Magic Link。
+- 用户输入邮箱和密码。
+- Supabase 用默认邮件服务处理注册确认和找回密码。
 - 登录网页端。
 - 插件通过同一账号授权。
 
@@ -376,13 +387,21 @@ staging.yourdomain.com  预发布环境
 - 不依赖微信开放平台审核。
 - 对海外方案也通用。
 
-#### Phase 2：手机号登录
+MVP 小范围测试前再评估是否继续使用 Supabase 默认邮件，还是切到自定义 SMTP/邮件服务，避免送达率和品牌可信度影响测试反馈。
+
+#### Phase 2：GitHub + Google OAuth
+
+产品体验上可以只开放三方登录，不要求用户额外绑定邮箱密码；但 OAuth provider 通常仍会向 Supabase 返回 email，Supabase 会把它作为账号资料和同邮箱身份合并线索保存。
+
+适合英文路线或开发者用户测试。国内正式路线再评估微信/手机号。
+
+#### Phase 3：手机号登录
 
 大陆用户熟悉，但短信成本、风控和实名通道会更复杂。
 
 建议等第一批用户试用后再加。
 
-#### Phase 3：微信登录
+#### Phase 4：微信登录
 
 非常适合中国大陆用户，但需要：
 
@@ -400,7 +419,8 @@ staging.yourdomain.com  预发布环境
 优点：
 
 - 和 Supabase Postgres/RLS 集成自然。
-- 邮箱 Magic Link 或邮箱密码能快速上线。
+- 邮箱密码能快速上线，默认邮件服务可以支撑早期开发联调。
+- GitHub/Google OAuth 可以后续接入同一套 Supabase 用户体系。
 - Free 阶段足够 MVP 验证。
 - Web 端接入成本低。
 
@@ -426,22 +446,23 @@ staging.yourdomain.com  预发布环境
 
 第一版建议：
 
-- **MVP 验证：Supabase Auth 邮箱登录。**
+- **MVP 验证：Supabase Auth 邮箱密码登录。**
+- **MVP 后续：GitHub + Google OAuth。**
 - **国内正式生产：再评估 Authing 或自建邮箱验证码。**
 
 本文后续按“Supabase Auth + 后端校验 Supabase JWT”设计，同时保留国内账号体系的迁移口。
 
 ### 5.3 Web 登录流程
 
-MVP 推荐先用 Supabase Auth 的邮箱 Magic Link 或邮箱密码。
+MVP 推荐先用 Supabase Auth 的邮箱密码，使用 Supabase 默认邮件处理注册确认。
 
 流程：
 
 ```text
 1. 用户打开 web app。
-2. 未登录时跳转到 /login。
-3. 用户输入邮箱。
-4. Supabase 发送 Magic Link 或校验邮箱密码。
+2. 未登录时可打开登录弹窗。
+3. 用户输入邮箱和密码。
+4. Supabase 注册或校验邮箱密码。
 5. 登录成功后 Web 获得 Supabase session。
 6. 前端调用 /api/v1/me。
 7. API 校验 Supabase JWT。
@@ -1115,13 +1136,13 @@ packages/shared/src/
 建议默认组合：
 
 ```text
-学习拆解: deepseek-chat / deepseek-reasoner 按质量需求选择
-初稿生成: deepseek-chat
-局部改写: deepseek-chat
-读者预演: deepseek-chat / deepseek-reasoner 按质量需求选择
+学习拆解: deepseek-v4-flash
+初稿生成: deepseek-v4-flash
+局部改写: deepseek-v4-flash
+读者预演: deepseek-v4-flash / deepseek-v4-pro 按质量需求选择
 ```
 
-实际模型名和价格以接入当日 DeepSeek 控制台/官方文档为准。
+接入时按 DeepSeek 2026-05 官方文档使用 OpenAI 兼容 Chat Completions，并通过 `response_format: { type: "json_object" }` 要求结构化 JSON 输出。旧模型名需以官方 deprecation 说明为准。
 
 后续迁回国内生产时，可以再补：
 
@@ -1342,6 +1363,15 @@ MVP 推荐：
 - Supabase SQL migration。
 - Vitest 单元测试。
 
+本地开发端口：
+
+```bash
+corepack pnpm dev:api  # http://localhost:8788
+corepack pnpm dev:web  # http://localhost:5173，/api 代理到 8788
+```
+
+说明：当前本机 `8787` 可能被 Codex 本地服务占用，因此 Lumos API 本地默认使用 `8788`。
+
 国内生产迁移后可补：
 
 - Node.js 20+。
@@ -1430,8 +1460,10 @@ web/src/hooks/use-ai-run.ts
 需要新增：
 
 ```text
-extension/lib/api-client.ts
-extension/lib/auth.ts
+extension/lib/cloud-api.ts
+extension/lib/cloud-auth.ts
+extension/lib/api-client.ts        后续可合并抽象
+extension/lib/auth.ts              后续设备码绑定时补充
 extension/lib/repository.ts
 extension/lib/sync-queue.ts
 extension/components/login-banner.tsx
@@ -1439,10 +1471,10 @@ extension/components/login-banner.tsx
 
 改造顺序：
 
-1. 插件展示登录状态。
-2. 登录后绑定设备。
-3. 保存笔记改为调用 API。
-4. 保存片段改为调用 API。
+1. 插件展示登录状态。已完成 MVP 版。
+2. 登录后绑定设备。MVP 先用插件内邮箱密码登录，设备码绑定后续补。
+3. 保存笔记改为调用 API。已完成 MVP 版。
+4. 保存片段改为调用 API。已完成 MVP 版。
 5. 管理页读取云端数据。
 6. 本地缓存作为 fallback。
 7. 增加同步队列和重试提示。
@@ -1677,17 +1709,19 @@ AI_DAILY_BUDGET_CNY=...
 
 任务：
 
-- 接 Supabase Auth 邮箱登录。
-- Web 增加登录页。
+- 接 Supabase Auth 邮箱密码登录。
+- Web 增加登录入口。
 - 数据库创建 users/profile 映射。
 - API 校验 Supabase JWT。
 - `/api/v1/me` 返回当前用户。
 
 验收：
 
-- 未登录访问工作台会进入登录。
+- 未登录可以继续看本地 demo 工作台，并可打开登录入口。
 - 登录后可看到用户信息。
 - 退出后 session 失效。
+
+当前本地状态：已完成。测试账号可通过 Web 登录，`/api/v1/me` 能识别用户并 upsert profile。
 
 ### Phase 3：插件设备绑定
 
@@ -1707,6 +1741,8 @@ AI_DAILY_BUDGET_CNY=...
 - 网页端可看到已绑定插件设备。
 - 网页端能撤销插件登录。
 
+当前本地状态：MVP 先完成“插件内邮箱密码登录 + token 存本地”。正式设备码绑定、设备表和撤销登录后移。
+
 ### Phase 4：云端文案库
 
 目标：插件保存的笔记和片段能出现在网页端。
@@ -1725,6 +1761,8 @@ AI_DAILY_BUDGET_CNY=...
 - 打开网页端，能看到这篇笔记。
 - 保存一个标注片段。
 - 网页端学习拆解页能选中这个片段。
+
+当前本地状态：API 与插件 sidepanel 保存链路已跑通。Web 目前先显示云端数量，文案库详情页仍需从 demo data 迁到 API 数据。
 
 ### Phase 5：本地数据迁移
 
@@ -1751,10 +1789,10 @@ AI_DAILY_BUDGET_CNY=...
 任务：
 
 - 建立 `analyze-v1.md` prompt。
-- 实现 `/api/v1/ai/analyze`。
+- 实现 `/api/v1/ai/analyze`。已完成 MVP 版。
 - 保存 ai_runs。
 - 保存 assistant chat message。
-- 前端展示真实返回。
+- 前端展示真实返回。已完成 MVP 版，等待 `DEEPSEEK_API_KEY` 做真实调用验收。
 
 验收：
 
@@ -2109,26 +2147,24 @@ Lumos AI Writer
 2. 域名继续在阿里云。
 3. 腾讯云备案接入先保留，暂不作为 MVP 阻塞项。
 4. 默认 AI 使用 DeepSeek。
-5. 非 AI 固定月成本尽量保持 0。
+5. MVP 先用 Supabase 默认邮件 + 邮箱密码，后续开启 GitHub + Google OAuth。
+6. 非 AI 固定月成本尽量保持 0。
 
 ### 21.2 仍需用户确认
 
 1. MVP 子域名是否使用 `app.yourdomain.com`。
-2. Supabase 登录方式先用 magic link，还是邮箱密码。
-3. 插件内测优先本地加载 zip，还是尽早注册 Chrome Web Store。
+2. 插件内测优先本地加载 zip，还是尽早注册 Chrome Web Store。
 
 ### 21.3 工程下一步
 
 建议下一轮直接开始：
 
-1. 新建 Cloudflare Pages/Functions API 入口。
-2. 增加 `packages/shared` API schema。
-3. 设计 Supabase SQL schema 和 RLS。
-4. 写 `/api/health`、`/api/v1/me`、folders/notes/snippets API。
-5. 给 Web 增加 Supabase/Auth/API client。
-6. 给 extension 增加 cloud repository 抽象。
-7. 实现 DeepSeek provider。
-8. 配置 Cloudflare Pages 自动部署和 GitHub Actions build/test。
+1. 填入 `DEEPSEEK_API_KEY`，验收真实学习拆解调用。
+2. 保存 ai_runs，记录 provider/model/token/status，便于后续成本控制。
+3. 接入真实初稿生成 `/api/v1/ai/draft`。
+4. 配置 Cloudflare Pages 自动部署和 GitHub Actions build/test。
+5. 补插件同步队列：云端失败时可重试，避免用户重复点保存。
+6. 后续再做正式插件设备码绑定、设备列表和撤销登录。
 
 ---
 

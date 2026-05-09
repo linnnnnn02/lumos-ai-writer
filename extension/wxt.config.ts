@@ -6,10 +6,14 @@ export default defineConfig({
     name: 'Lumos AI Writer',
     description: '采集小红书笔记，沉淀参考库，并在网页端完成 AI 文案学习、生成与改写。',
     permissions: ['storage', 'tabs', 'activeTab', 'scripting', 'sidePanel'],
-    host_permissions: ['https://www.xiaohongshu.com/*'],
+    host_permissions: [
+      'https://www.xiaohongshu.com/*',
+      'http://localhost:8788/*',
+      'https://*.supabase.co/*',
+    ],
     content_security_policy: {
       extension_pages:
-        "script-src 'self' 'wasm-unsafe-eval' http://localhost:3000 http://localhost:3001; object-src 'self';",
+        "script-src 'self' 'wasm-unsafe-eval' http://localhost:3000 http://localhost:3001; connect-src 'self' http://localhost:8788 https://*.supabase.co; object-src 'self';",
       sandbox:
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000 http://localhost:3001; sandbox allow-scripts allow-forms allow-popups allow-modals; child-src 'self';",
     },

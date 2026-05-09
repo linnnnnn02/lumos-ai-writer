@@ -11,7 +11,7 @@ for (const envPath of [path.resolve(process.cwd(), '.env'), path.resolve(process
   break
 }
 
-const port = Number(process.env.PORT || 8787)
+const port = Number(process.env.PORT || 8788)
 const app = new Hono()
 
 app.get('/', (c) =>

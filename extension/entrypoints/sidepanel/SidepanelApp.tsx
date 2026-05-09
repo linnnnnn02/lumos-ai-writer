@@ -31,11 +31,20 @@ import {
   SelectValue,
 } from '../../components/ui/select'
 import { Textarea } from '../../components/ui/textarea'
+import {
+  getCloudAuthState,
+  getValidCloudAccessToken,
+  signInToCloud,
+  signOutFromCloud,
+  type CloudAuthState,
+} from '../../lib/cloud-auth'
+import { syncAnnotationToCloud } from '../../lib/cloud-api'
 
 const defaultFolders = createDefaultFolders()
 const UNTITLED_NOTE_TITLE = '无标题'
-const COLOR_PRESETS = ['#DD6C32', '#E9C46A', '#2A9D8F', '#4D78F2', '#8B5CF6', '#E56B6F']
+const COLOR_PRESETS = ['#64748B', '#4D78F2', '#2A9D8F', '#8B5CF6', '#E9C46A', '#E56B6F']
 const colorNameMap: Record<string, string> = {
+  '#64748B': '灰色',
   '#DD6C32': '红色',
   '#E9C46A': '黄色',
   '#2A9D8F': '绿色',
@@ -115,6 +124,10 @@ function normalizeTagName(text: string) {
   return cleanText(text)
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : '未知错误'
+}
+
 async function getActiveTab() {
   if (typeof chrome === 'undefined' || !chrome.tabs?.query) return null
 
@@ -149,6 +162,16 @@ export function SidepanelApp() {
   const [isEditingTagName, setIsEditingTagName] = useState(true)
   const [reasonText, setReasonText] = useState('')
   const [annotationFeedback, setAnnotationFeedback] = useState('')
+  const [cloudAuthState, setCloudAuthState] = useState<CloudAuthState>({
+    status: 'unauthenticated',
+    user: null,
+  })
+  const [cloudEmail, setCloudEmail] = useState('')
+  const [cloudPassword, setCloudPassword] = useState('')
+  const [cloudFeedback, setCloudFeedback] = useState('')
+  const [isCloudSigningIn, setIsCloudSigningIn] = useState(false)
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false)
+  const [isAnnotationSaving, setIsAnnotationSaving] = useState(false)
   const [extractState, setExtractState] = useState<ExtractState>({
     status: 'idle',
     note: null,
@@ -269,6 +292,27 @@ export function SidepanelApp() {
     void loadFolders()
     void loadAnnotationData()
     void handleExtract()
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    void getCloudAuthState()
+      .then((state) => {
+        if (!isMounted) return
+        setCloudAuthState(state)
+        if (state.status === 'authenticated' && state.user.email) {
+          setCloudEmail(state.user.email)
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return
+        setCloudAuthState({ status: 'unauthenticated', user: null })
+      })
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   useEffect(() => {
@@ -451,6 +495,37 @@ export function SidepanelApp() {
     })
   }
 
+  async function handleCloudSignIn() {
+    const email = cloudEmail.trim()
+    const password = cloudPassword
+
+    if (!email || !password) {
+      setCloudFeedback('请输入邮箱和密码。')
+      return
+    }
+
+    setIsCloudSigningIn(true)
+    setCloudFeedback('')
+
+    try {
+      const nextAuthState = await signInToCloud(email, password)
+      setCloudAuthState(nextAuthState)
+      setCloudPassword('')
+      setCloudFeedback('云端已连接。')
+    } catch (error) {
+      setCloudFeedback(`登录失败：${getErrorMessage(error)}`)
+    } finally {
+      setIsCloudSigningIn(false)
+    }
+  }
+
+  async function handleCloudSignOut() {
+    await signOutFromCloud()
+    setCloudAuthState({ status: 'unauthenticated', user: null })
+    setCloudPassword('')
+    setCloudFeedback('已退出云端同步。')
+  }
+
   async function handleSaveTagName() {
     const nextTagName = normalizeTagName(tagNameDraft)
     const nextColorTagNames = {
@@ -478,6 +553,8 @@ export function SidepanelApp() {
   }
 
   async function handleSaveAnnotation() {
+    if (isSavingAnnotationRef.current) return
+
     if (!pendingSelection) {
       const currentFolder = folders.find((folder) => folder.id === folderId)
       setAnnotationFeedback(
@@ -558,6 +635,7 @@ export function SidepanelApp() {
     const nextSnippets = [record, ...updatedSnippets]
 
     isSavingAnnotationRef.current = true
+    setIsAnnotationSaving(true)
     try {
       if (isEditingTagName) {
         await Promise.all([
@@ -576,10 +654,41 @@ export function SidepanelApp() {
       setPendingSelection(null)
       setTagNameDraft(nextTagName)
       setIsEditingTagName(false)
-      setAnnotationFeedback(
-        `已保存到「${activeFolder?.name || '文案库'}」，可在文案库查看或继续选择新的片段。`,
-      )
+      const localSavedMessage = `已保存到「${activeFolder?.name || '文案库'}」。`
+
+      if (cloudAuthState.status !== 'authenticated') {
+        setAnnotationFeedback(`${localSavedMessage} 登录后可同步到网页端。`)
+        return
+      }
+
+      setIsCloudSyncing(true)
+      setAnnotationFeedback(`${localSavedMessage} 正在同步云端...`)
+
+      try {
+        const token = await getValidCloudAccessToken()
+        if (!token) {
+          setCloudAuthState({ status: 'unauthenticated', user: null })
+          setCloudFeedback('云端登录已过期，请重新登录。')
+          setAnnotationFeedback(`${localSavedMessage} 云端登录已过期，请重新登录。`)
+          return
+        }
+
+        await syncAnnotationToCloud(token, {
+          folder: activeFolder ?? null,
+          note: nextNote,
+          snippet: record,
+        })
+        setCloudFeedback('刚刚保存的标注已同步到云端。')
+        setAnnotationFeedback(`${localSavedMessage} 已同步到云端。`)
+      } catch (error) {
+        const message = getErrorMessage(error)
+        setCloudFeedback(`云端同步失败：${message}`)
+        setAnnotationFeedback(`${localSavedMessage} 云端同步失败：${message}`)
+      } finally {
+        setIsCloudSyncing(false)
+      }
     } finally {
+      setIsAnnotationSaving(false)
       window.setTimeout(() => {
         isSavingAnnotationRef.current = false
       }, 300)
@@ -663,6 +772,81 @@ export function SidepanelApp() {
           前往文案库
         </button>
       </div>
+    )
+  }
+
+  function renderCloudSyncPanel() {
+    const cloudUserLabel =
+      cloudAuthState.status === 'authenticated'
+        ? cloudAuthState.user.email || cloudAuthState.user.displayName || '已登录账号'
+        : ''
+    const cloudFeedbackIsError =
+      cloudFeedback.includes('失败') || cloudFeedback.includes('过期')
+
+    return (
+      <section className="cloud-sync-panel" aria-label="云端同步">
+        {cloudAuthState.status === 'authenticated' ? (
+          <div className="cloud-sync-row">
+            <div className="cloud-sync-account">
+              <span
+                className={isCloudSyncing ? 'cloud-sync-dot syncing' : 'cloud-sync-dot'}
+                aria-hidden="true"
+              />
+              <div className="cloud-sync-copy">
+                <span className="cloud-sync-title">云端同步</span>
+                <span className="cloud-sync-user">{cloudUserLabel}</span>
+              </div>
+            </div>
+            <button
+              className="cloud-sync-text-button"
+              type="button"
+              onClick={() => {
+                void handleCloudSignOut()
+              }}
+            >
+              退出
+            </button>
+          </div>
+        ) : (
+          <form
+            className="cloud-login-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleCloudSignIn()
+            }}
+          >
+            <div className="cloud-login-title">云端同步</div>
+            <Input
+              className="cloud-login-input"
+              type="email"
+              value={cloudEmail}
+              placeholder="邮箱"
+              autoComplete="email"
+              onChange={(event) => setCloudEmail(event.target.value)}
+            />
+            <Input
+              className="cloud-login-input"
+              type="password"
+              value={cloudPassword}
+              placeholder="密码"
+              autoComplete="current-password"
+              onChange={(event) => setCloudPassword(event.target.value)}
+            />
+            <button
+              className="cloud-login-button"
+              type="submit"
+              disabled={isCloudSigningIn}
+            >
+              {isCloudSigningIn ? '登录中...' : '登录同步'}
+            </button>
+          </form>
+        )}
+        {cloudFeedback ? (
+          <p className={cloudFeedbackIsError ? 'cloud-feedback error' : 'cloud-feedback'}>
+            {cloudFeedback}
+          </p>
+        ) : null}
+      </section>
     )
   }
 
@@ -767,6 +951,7 @@ export function SidepanelApp() {
     return (
       <main className="sidepanel-shell">
         {renderPanelTabs()}
+        {renderCloudSyncPanel()}
 
         <section className="sidepanel-card result-card">
           {extractState.note ? (
@@ -912,6 +1097,7 @@ export function SidepanelApp() {
   return (
     <main className="sidepanel-shell">
       {renderPanelTabs()}
+      {renderCloudSyncPanel()}
 
       <section
         className={
@@ -1037,11 +1223,14 @@ export function SidepanelApp() {
                 }
                 type="button"
                 aria-label={annotationStatus === 'saved' ? '保存标注，已保存' : '保存标注'}
+                disabled={isAnnotationSaving}
                 onClick={() => {
                   void handleSaveAnnotation()
                 }}
               >
-                <span className="annotation-save-button-label">保存标注</span>
+                <span className="annotation-save-button-label">
+                  {isAnnotationSaving ? (isCloudSyncing ? '同步中...' : '保存中...') : '保存标注'}
+                </span>
                 {annotationStatus === 'saved' ? (
                   <span className="annotation-save-badge" aria-hidden="true">
                     <span className="annotation-save-badge-check" />
@@ -1053,6 +1242,7 @@ export function SidepanelApp() {
                 {annotationStatus === 'saved' ? '已保存' : ''}
               </span>
             </div>
+            {annotationFeedback ? <p className="feedback annotation-feedback">{annotationFeedback}</p> : null}
           </>
         ) : (
           <div className="annotation-empty">
