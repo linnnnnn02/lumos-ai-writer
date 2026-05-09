@@ -1728,7 +1728,7 @@ export function OptionsApp() {
     >
       <aside className="manager-sidebar" aria-label="笔记库文件夹">
         <div className="brand-block">
-          <span className="brand-mark">L</span>
+          <img className="brand-mark" src="/icon/48.png" alt="" aria-hidden="true" />
           <div>
             <p className="brand-name">Lumos AI Writer</p>
             <h1>笔记库</h1>

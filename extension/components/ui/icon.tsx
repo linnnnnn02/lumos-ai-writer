@@ -7,21 +7,21 @@ import {
   WasteIcon,
 } from '@hugeicons/core-free-icons'
 
-type IconProps = Omit<HugeiconsIconProps, 'icon' | 'altIcon'>
+type IconProps = Omit<HugeiconsIconProps, 'icon' | 'altIcon' | 'strokeWidth'>
 
 const DEFAULT_ICON_SIZE = 16
 const DEFAULT_ICON_STROKE = 1.75
 
 function createIcon(icon: IconSvgElement, displayName: string) {
   const Component = React.forwardRef<SVGSVGElement, IconProps>(
-    ({ size = DEFAULT_ICON_SIZE, strokeWidth = DEFAULT_ICON_STROKE, color = 'currentColor', ...props }, ref) => (
+    ({ size = DEFAULT_ICON_SIZE, color = 'currentColor', ...props }, ref) => (
       <HugeiconsIcon
+        {...props}
         ref={ref}
         icon={icon}
         size={size}
-        strokeWidth={strokeWidth}
+        strokeWidth={DEFAULT_ICON_STROKE}
         color={color}
-        {...props}
       />
     ),
   )

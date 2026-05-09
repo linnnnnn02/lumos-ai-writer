@@ -7,7 +7,7 @@ export function Card({ className, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-[var(--radius-card)] border border-white/72 bg-[var(--card)] text-[var(--card-foreground)] shadow-[var(--shadow-card)] backdrop-blur-xl transition-[background-color,border-color,box-shadow,transform] duration-300',
+        'rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-[var(--shadow-muted)] transition-[background-color,border-color,box-shadow,transform] duration-300',
         className,
       )}
       {...props}
@@ -22,14 +22,14 @@ export function CardHeader({ className, ...props }: CardProps) {
 export function CardTitle({ className, ...props }: CardProps) {
   return (
     <div
-      className={cn('text-2xl font-semibold tracking-[-0.045em] text-[var(--foreground)]', className)}
+      className={cn('text-[length:var(--ui-text-title)] font-semibold leading-[var(--ui-leading-tight)] tracking-[-0.03em] text-[var(--foreground)]', className)}
       {...props}
     />
   )
 }
 
 export function CardDescription({ className, ...props }: CardProps) {
-  return <div className={cn('text-sm leading-6 text-[var(--muted-foreground)]', className)} {...props} />
+  return <div className={cn('text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]', className)} {...props} />
 }
 
 export function CardContent({ className, ...props }: CardProps) {

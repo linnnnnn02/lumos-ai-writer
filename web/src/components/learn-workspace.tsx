@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
+import type { AiUsage, SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +56,9 @@ type LearnWorkspaceProps = {
   libraryStatus?: 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
   libraryError?: string
   workflowSteps: WorkflowTitleMenuStep[]
+  analysisError?: string
+  analysisUsage?: AiUsage | null
+  analysisWaitSeconds?: number
   isAnalyzing?: boolean
   isStreaming: boolean
   projectName: string
@@ -263,7 +266,7 @@ function NoteCover({ note }: { note?: SavedNoteRecord }) {
         />
       ) : (
         <div className="flex h-full items-center justify-center p-8">
-          <p className="rounded-full bg-white/56 px-4 py-2 text-sm font-semibold text-[#6a7680]">
+          <p className="rounded-full bg-[var(--surface-muted)] px-4 py-2 text-sm font-semibold text-[#6a7680]">
             未抓到封面
           </p>
         </div>
@@ -346,7 +349,7 @@ function NoteDetailDialog({
             </h2>
           </div>
 
-          <article className="mt-6 whitespace-pre-wrap text-[17px] leading-9 text-[var(--foreground)]">
+          <article className="mt-6 whitespace-pre-wrap text-[length:var(--ui-text-body-lg)] leading-[var(--ui-leading-body)] text-[var(--foreground)]">
             {highlightDetailSnippets(content, highlightedSnippets, activeSnippet.quote)}
           </article>
         </section>
@@ -383,8 +386,8 @@ function AnalysisBlock({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.2),rgba(226,232,240,0.86))] text-xs font-semibold text-[var(--accent-strong)]">
           AI
         </div>
-        <div className="min-w-0 flex-1 rounded-[var(--ui-radius-panel)] border border-white/82 bg-white/88 px-5 py-4 shadow-[0_14px_34px_rgba(48,34,22,0.04)]">
-          <p className="max-w-5xl text-[15px] leading-7 text-[var(--foreground)]">
+        <div className="min-w-0 flex-1 rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-5 py-4 shadow-none">
+          <p className="max-w-5xl text-[length:var(--ui-text-body)] leading-7 text-[var(--foreground)]">
             {commonConclusion}
           </p>
 
@@ -408,10 +411,10 @@ function AnalysisBlock({
                   aria-label={`查看《${snippet.noteTitle}》的笔记详情`}
                   onClick={() => setActiveSnippetDetail(snippet)}
                   className={cn(
-                    'group flex h-full flex-col rounded-[var(--ui-radius-card)] border px-4 py-3 text-left transition hover:bg-white/88 hover:shadow-[0_14px_30px_rgba(48,34,22,0.055)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                    'group ui-hover-surface flex h-full flex-col rounded-[var(--ui-radius-card)] border px-4 py-3 text-left focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
                     activeSnippetDetail?.quote === snippet.quote
-                      ? 'border-[rgba(15,23,42,0.14)] bg-white/92 shadow-[0_12px_24px_rgba(15,23,42,0.055)]'
-                      : 'border-[rgba(31,22,17,0.07)] bg-white/72',
+                      ? 'border-[rgba(15,23,42,0.14)] bg-[var(--surface-raised)] shadow-[var(--shadow-muted)]'
+                      : 'border-[rgba(31,22,17,0.07)] bg-[var(--surface-muted)]',
                   )}
                 >
                   <span className="flex items-center justify-between gap-3">
@@ -422,15 +425,15 @@ function AnalysisBlock({
                       查看详情
                     </span>
                   </span>
-                  <blockquote className="mt-2 text-[14.5px] font-semibold leading-6 text-[var(--foreground)]">
+                  <blockquote className="mt-2 text-[length:var(--ui-text-body)] font-semibold leading-6 text-[var(--foreground)]">
                     “{snippet.quote}”
                   </blockquote>
-                  <p className="mt-2 text-[13.5px] leading-6 text-[var(--foreground)]">
+                  <p className="mt-2 text-[length:var(--ui-text-control)] leading-6 text-[var(--foreground)]">
                     <span className="font-semibold">处理方式：</span>
                     {snippet.description}
                   </p>
                   {snippet.reason ? (
-                    <p className="mt-1 text-[13.5px] leading-6 text-[var(--muted-foreground)]">
+                    <p className="mt-1 text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]">
                       <span className="font-semibold text-[var(--foreground)]">标注理由：</span>
                       {snippet.reason}
                     </p>
@@ -489,7 +492,7 @@ function AssistantBlock({
         className={cn(
           'min-w-0 flex-1',
           isAnalysis
-            ? 'rounded-[var(--ui-radius-panel)] border border-white/82 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.9))] px-6 py-5 shadow-[0_18px_44px_rgba(15,23,42,0.06)]'
+            ? 'rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-6 py-5 shadow-none'
             : 'flex flex-col gap-4',
         )}
       >
@@ -499,7 +502,7 @@ function AssistantBlock({
               'inline-flex rounded-full px-4 py-2 text-sm font-semibold text-[var(--foreground)]',
               isAnalysis
                 ? 'border border-[var(--border)] bg-[rgba(238,241,245,0.94)] text-[var(--foreground)] shadow-none'
-                : 'border border-[var(--border)] bg-white/86 shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
+                : 'border border-[var(--border)] bg-[var(--surface-raised)] shadow-none',
             )}
           >
             {message.title}
@@ -507,7 +510,7 @@ function AssistantBlock({
         ) : null}
         {leadLine ? (
           <div className="mt-4">
-            <p className="text-[15px] leading-8 text-[var(--foreground)]">{leadLine}</p>
+            <p className="text-[length:var(--ui-text-body)] leading-8 text-[var(--foreground)]">{leadLine}</p>
           </div>
         ) : (
           <div className={cn(isAnalysis ? 'mt-4 flex flex-col gap-5' : 'flex flex-col gap-4')}>
@@ -515,7 +518,7 @@ function AssistantBlock({
               <p
                 key={line}
                 className={cn(
-                  'text-[15px] text-[var(--foreground)]',
+                  'text-[length:var(--ui-text-body)] text-[var(--foreground)]',
                   isAnalysis ? 'leading-8' : 'leading-8',
                 )}
               >
@@ -529,7 +532,7 @@ function AssistantBlock({
             {message.highlights?.map((highlight) => (
               <section
                 key={`${highlight.title}-${highlight.body}`}
-                className="rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.08)] bg-[linear-gradient(180deg,rgba(248,250,252,0.92),rgba(255,255,255,0.94))] p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]"
+                className="rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.08)] bg-[var(--surface-subtle)] p-4 shadow-none"
               >
                 <div className="inline-flex rounded-full bg-white/86 px-3 py-1 text-xs font-semibold tracking-[0.04em] text-[var(--accent-strong)]">
                   {highlight.title}
@@ -540,7 +543,7 @@ function AssistantBlock({
           </div>
         ) : null}
         {hasHighlights && trailingLines.length > 0 ? (
-          <div className="mt-4 rounded-[var(--ui-radius-card)] border border-white/72 bg-white/72 px-4 py-3">
+          <div className="mt-4 rounded-[var(--ui-radius-card)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3">
             {trailingLines.map((line) => (
               <p key={line} className="text-sm leading-7 text-[var(--muted-foreground)]">
                 {line}
@@ -558,7 +561,7 @@ function UserBlock({ message }: { message: ChatMessage }) {
     <article className="ui-chat-row mx-auto flex max-w-5xl justify-end">
       <div className="max-w-2xl rounded-[var(--ui-radius-panel)] rounded-br-[0.45rem] bg-[var(--foreground)] px-5 py-4 text-white shadow-[0_18px_36px_rgba(15,23,42,0.16)]">
         {message.lines.map((line) => (
-          <p key={line} className="text-[15px] leading-7">
+          <p key={line} className="text-[length:var(--ui-text-body)] leading-7">
             {line}
           </p>
         ))}
@@ -567,13 +570,40 @@ function UserBlock({ message }: { message: ChatMessage }) {
   )
 }
 
+const DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION = 1
+const DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION = 2
+
+function formatUsageNumber(value: number) {
+  return value.toLocaleString('zh-CN')
+}
+
+function formatCny(value: number) {
+  if (value <= 0) return '¥0'
+  if (value < 0.01) return `¥${value.toFixed(4)}`
+  return `¥${value.toFixed(2)}`
+}
+
+function formatAiUsageSummary(usage?: AiUsage | null) {
+  if (!usage?.totalTokens) return ''
+  const promptTokens = usage.promptTokens ?? 0
+  const completionTokens = usage.completionTokens ?? 0
+  const estimatedCny =
+    (promptTokens * DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION +
+      completionTokens * DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION) /
+    1_000_000
+
+  return `${formatUsageNumber(usage.totalTokens)} tokens · 约 ${formatCny(estimatedCny)}`
+}
+
 function TypingBlock({
   title,
   text,
+  elapsedSeconds = 0,
   variant = 'dots',
 }: {
   title?: string
   text?: string
+  elapsedSeconds?: number
   variant?: 'analysis' | 'dots'
 }) {
   return (
@@ -585,14 +615,21 @@ function TypingBlock({
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-sm font-semibold text-[var(--accent-strong)]">
         AI
       </div>
-      <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-white/88 px-4 py-3 shadow-[0_8px_18px_rgba(48,34,22,0.04)]">
+      <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 shadow-none">
         {title ? (
-          <div className="mb-2 inline-flex rounded-full border border-[var(--border)] bg-[rgba(238,241,245,0.94)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
-            {title}
+          <div className="mb-2 inline-flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[var(--border)] bg-[rgba(238,241,245,0.94)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
+              {title}
+            </span>
+            {elapsedSeconds > 0 ? (
+              <span className="rounded-full border border-[rgba(15,23,42,0.08)] bg-white/76 px-2.5 py-1 text-xs font-semibold text-[var(--muted-foreground)]">
+                {elapsedSeconds >= 30 ? `已等待 ${elapsedSeconds}s` : `${elapsedSeconds}s`}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {text ? (
-          <p className="mb-3 text-[15px] leading-7 text-[var(--foreground)]">{text}</p>
+          <p className="mb-3 text-[length:var(--ui-text-body)] leading-7 text-[var(--foreground)]">{text}</p>
         ) : null}
         {variant === 'analysis' ? (
           <div className="grid gap-3" aria-hidden="true">
@@ -642,6 +679,9 @@ export function LearnWorkspace({
   libraryStatus = 'demo',
   libraryError = '',
   workflowSteps,
+  analysisError = '',
+  analysisUsage = null,
+  analysisWaitSeconds = 0,
   isAnalyzing = false,
   isStreaming,
   projectName,
@@ -948,9 +988,12 @@ export function LearnWorkspace({
     const latestMessage = chatMessages[chatMessages.length - 1]
 
     if (isAnalyzing) {
+      const isLongWait = analysisWaitSeconds >= 30
       return {
-        title: '正在拆解这批文案',
-        text: 'DeepSeek 正在读取已选参考内容，整理共性写法、读者停留原因和你的稳定偏好。',
+        title: isLongWait ? 'DeepSeek 还在处理' : '正在拆解这批文案',
+        text: isLongWait
+          ? '这次参考内容可能稍多，模型仍在整理结构和偏好判断。你可以继续等待，完成后会自动显示结果。'
+          : 'DeepSeek 正在读取已选参考内容，整理共性写法、读者停留原因和你的稳定偏好。',
         variant: 'analysis' as const,
       }
     }
@@ -984,7 +1027,7 @@ export function LearnWorkspace({
       text: '我在把剩下的结论收束成更好落地的判断和下一步建议。',
       variant: 'dots' as const,
     }
-  }, [analysisMessages.length, analysisReady, chatMessages, isAnalyzing, isStreaming])
+  }, [analysisMessages.length, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
 
   const filterControl = (
     <div className="relative">
@@ -1224,7 +1267,7 @@ export function LearnWorkspace({
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="block min-w-0 truncate">{conversation.title}</span>
                         {conversation.finalizedAt ? (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#17675b]">
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-1.5 py-0.5 text-[length:var(--ui-text-caption)] font-semibold leading-none text-[#17675b]">
                             <CheckCircle2 className="h-3 w-3" />
                             完成
                           </span>
@@ -1326,6 +1369,9 @@ export function LearnWorkspace({
                 <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                   文案分析
                 </h1>
+                {analysisUsage ? (
+                  <Badge variant="outline">{formatAiUsageSummary(analysisUsage)}</Badge>
+                ) : null}
                 <WorkflowTitleMenu
                   activeStep={activeWorkflowStep}
                   steps={workflowSteps}
@@ -1365,6 +1411,7 @@ export function LearnWorkspace({
                   )}
                   {typingState ? (
                     <TypingBlock
+                      elapsedSeconds={isAnalyzing ? analysisWaitSeconds : 0}
                       title={typingState.title}
                       text={typingState.text}
                       variant={typingState.variant}
@@ -1377,7 +1424,7 @@ export function LearnWorkspace({
                 <div className="shrink-0">
                   <div className="grid gap-1">
                     <div className="flex flex-wrap items-center gap-4">
-                      <h2 className="text-[1.35rem] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+                      <h2 className="text-[length:var(--ui-text-section)] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                         选择文案
                       </h2>
                       <WorkflowTitleMenu
@@ -1482,11 +1529,16 @@ export function LearnWorkspace({
                             分析中...
                           </>
                         ) : (
-                          '开始分析'
+                          analysisError ? '重试分析' : '开始分析'
                         )}
                       </Button>
                     </div>
                   </div>
+                  {analysisError ? (
+                    <p className="mt-2 text-right text-xs leading-5 text-[rgb(185,28,28)]">
+                      {analysisError} 可以点击重试。
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1.5">
@@ -1498,10 +1550,10 @@ export function LearnWorkspace({
                         <div
                           key={item.id}
                           className={cn(
-                            'group rounded-[var(--ui-radius-card)] p-4 transition-[background-color,border-color,box-shadow]',
+                            'group ui-hover-surface rounded-[var(--ui-radius-card)] p-4',
                             item.selectedCount > 0
-                              ? 'border border-[rgba(15,23,42,0.14)] bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.9))] shadow-[0_12px_26px_rgba(15,23,42,0.045)]'
-                              : 'border border-[rgba(15,23,42,0.07)] bg-white/66 hover:bg-white/88',
+                              ? 'border border-[rgba(15,23,42,0.14)] bg-[var(--surface-raised)] shadow-[var(--shadow-muted)]'
+                              : 'border border-[rgba(15,23,42,0.07)] bg-[var(--surface-muted)]',
                           )}
                         >
                           <div className="flex items-start gap-3.5">
@@ -1539,7 +1591,7 @@ export function LearnWorkspace({
                                   <Badge variant="outline">未标注</Badge>
                                 )}
                               </div>
-                              <p className="mt-3 rounded-[var(--ui-radius-card)] border border-black/[0.035] bg-white/64 px-4 py-3 text-[15px] leading-8 text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+                              <p className="mt-3 rounded-[var(--ui-radius-card)] border border-black/[0.035] bg-[var(--surface-subtle)] px-4 py-3 text-[length:var(--ui-text-body)] leading-8 text-[var(--foreground)] shadow-none">
                                 {item.preview}
                               </p>
                             </label>
@@ -1548,7 +1600,7 @@ export function LearnWorkspace({
                       )
                     })}
                     {activeTabItems.length === 0 ? (
-                      <div className="rounded-[var(--ui-radius-card)] border border-dashed border-[rgba(31,22,17,0.12)] bg-white/54 px-5 py-8 text-sm leading-7 text-[var(--muted-foreground)] xl:col-span-2">
+                      <div className="rounded-[var(--ui-radius-card)] border border-dashed border-[rgba(31,22,17,0.12)] bg-[var(--surface-muted)] px-5 py-8 text-sm leading-7 text-[var(--muted-foreground)] xl:col-span-2">
                         {emptyLibraryMessage}
                       </div>
                     ) : null}
@@ -1576,7 +1628,14 @@ export function LearnWorkspace({
                   <AssistantBlock key={message.id} message={message} notes={notes} snippets={snippets} />
                 ),
               )}
-              {typingState ? <TypingBlock title={typingState.title} text={typingState.text} /> : null}
+              {typingState ? (
+                <TypingBlock
+                  elapsedSeconds={isAnalyzing ? analysisWaitSeconds : 0}
+                  title={typingState.title}
+                  text={typingState.text}
+                  variant={typingState.variant}
+                />
+              ) : null}
               <div ref={scrollAnchorRef} />
             </div>
           )}

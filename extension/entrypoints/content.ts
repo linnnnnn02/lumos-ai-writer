@@ -1179,6 +1179,14 @@ function createSelectionUi() {
         --ui-field-radius: var(--ui-radius-control);
         --ui-field-gap: 8px;
         --ui-panel-inset: 16px;
+        --ui-text-caption: 12px;
+        --ui-text-meta: 13px;
+        --ui-text-control: 13px;
+        --ui-text-body: 14px;
+        --ui-text-readable: 16px;
+        --ui-text-section: 18px;
+        --ui-leading-control: 1.35;
+        --ui-leading-body: 1.65;
         --ui-textarea-sm: 64px;
         --ui-textarea-md: 88px;
       }
@@ -1198,7 +1206,7 @@ function createSelectionUi() {
         padding: 0 var(--ui-control-px-lg);
         background: linear-gradient(135deg, #171311 0%, #334155 100%);
         color: #fff;
-        font-size: 14px;
+        font-size: var(--ui-text-body);
         font-weight: 760;
         box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
         cursor: pointer;
@@ -1235,14 +1243,14 @@ function createSelectionUi() {
 
       .xhs-ai-panel h3 {
         margin: 0;
-        font-size: 20px;
+        font-size: var(--ui-text-section);
         line-height: 1.2;
       }
 
       .xhs-ai-help {
         margin: 0 0 14px;
         color: #6b5548;
-        font-size: 12px;
+        font-size: var(--ui-text-caption);
         line-height: 1.5;
       }
 
@@ -1251,7 +1259,7 @@ function createSelectionUi() {
         border-radius: var(--ui-field-radius);
         background: rgba(255, 255, 255, 0.78);
         padding: var(--ui-space-3);
-        font-size: 13px;
+        font-size: var(--ui-text-control);
         line-height: 1.65;
         color: #2d2019;
         max-height: 100px;
@@ -1263,7 +1271,7 @@ function createSelectionUi() {
         display: block;
         margin: 0 0 var(--ui-field-gap);
         color: #7b6150;
-        font-size: 12px;
+        font-size: var(--ui-text-caption);
         font-weight: 600;
       }
 
@@ -1275,7 +1283,7 @@ function createSelectionUi() {
         background: rgba(255, 255, 255, 0.88);
         color: #1f1712;
         padding: var(--ui-field-py) var(--ui-field-px);
-        font-size: 13px;
+        font-size: var(--ui-text-control);
         outline: none;
         box-shadow: 0 10px 24px rgba(48, 34, 22, 0.03);
         transition:
@@ -1335,7 +1343,7 @@ function createSelectionUi() {
         border-radius: var(--ui-field-radius);
         min-height: var(--ui-control-md);
         padding: 0 var(--ui-field-px);
-        font-size: 14px;
+        font-size: var(--ui-text-body);
         font-weight: 700;
         cursor: pointer;
       }
@@ -1363,7 +1371,7 @@ function createSelectionUi() {
         padding: var(--ui-space-2-5) var(--ui-field-px);
         background: rgba(32, 23, 18, 0.92);
         color: #fff;
-        font-size: 12px;
+        font-size: var(--ui-text-caption);
         line-height: 1;
       }
 
@@ -1408,7 +1416,7 @@ function createSelectionUi() {
       .xhs-ai-result-title {
         margin: 0;
         color: #171311;
-        font-size: 16px;
+        font-size: var(--ui-text-readable);
         font-weight: 700;
         line-height: 1.2;
       }
@@ -1420,7 +1428,7 @@ function createSelectionUi() {
         padding: 0 var(--ui-control-px-md);
         background: rgba(255, 255, 255, 0.9);
         color: #6b5548;
-        font-size: 12px;
+        font-size: var(--ui-text-caption);
         font-weight: 700;
         cursor: pointer;
       }
@@ -1437,13 +1445,13 @@ function createSelectionUi() {
       .xhs-ai-result-key {
         margin: 0 0 4px;
         color: #93877d;
-        font-size: 12px;
+        font-size: var(--ui-text-caption);
       }
 
       .xhs-ai-result-value {
         margin: 0;
         color: #1f1712;
-        font-size: 13px;
+        font-size: var(--ui-text-control);
         line-height: 1.65;
         word-break: break-word;
       }

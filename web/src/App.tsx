@@ -12,7 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import type { AiAnalysisResult, ProjectLength } from '@lumos-ai/shared'
+import type { AiAnalysisResult, AiUsage, ProjectLength } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -250,6 +250,8 @@ const initialProjects: ProjectRecord[] = [
 ]
 
 const defaultConversationTitle = '新的文案对话'
+const DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION = 1
+const DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION = 2
 
 type InitialDraftCopy = {
   title: string
@@ -556,6 +558,28 @@ function formatDraftCopyForClipboard(draft: InitialDraftCopy) {
     .join('\n\n')
 }
 
+function formatUsageNumber(value: number) {
+  return value.toLocaleString('zh-CN')
+}
+
+function formatCny(value: number) {
+  if (value <= 0) return '¥0'
+  if (value < 0.01) return `¥${value.toFixed(4)}`
+  return `¥${value.toFixed(2)}`
+}
+
+function formatAiUsageSummary(usage?: AiUsage | null) {
+  if (!usage?.totalTokens) return ''
+  const promptTokens = usage.promptTokens ?? 0
+  const completionTokens = usage.completionTokens ?? 0
+  const estimatedCny =
+    (promptTokens * DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION +
+      completionTokens * DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION) /
+    1_000_000
+
+  return `${formatUsageNumber(usage.totalTokens)} tokens · 约 ${formatCny(estimatedCny)}`
+}
+
 async function copyTextToClipboard(text: string) {
   if (!text.trim()) return false
 
@@ -756,7 +780,7 @@ function buildReaderPreviewFeedback(input: {
 
 function ShellStepPills({ step }: { step: PageStep }) {
   return (
-    <div className="hidden items-center gap-1 rounded-full border border-white/76 bg-white/66 p-1 shadow-[0_10px_24px_rgba(48,34,22,0.04)] lg:flex">
+    <div className="hidden items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] p-1 shadow-none lg:flex">
       {shellSteps.map((item) => (
         <span
           key={item.id}
@@ -780,6 +804,15 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [isChatStreaming, setIsChatStreaming] = useState(false)
   const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
+  const [analysisWaitStartedAt, setAnalysisWaitStartedAt] = useState<number | null>(null)
+  const [draftWaitStartedAt, setDraftWaitStartedAt] = useState<number | null>(null)
+  const [aiWaitTick, setAiWaitTick] = useState(Date.now())
+  const [analysisErrorByConversation, setAnalysisErrorByConversation] = useState<
+    Record<string, string>
+  >({})
+  const [analysisUsageByConversation, setAnalysisUsageByConversation] = useState<
+    Record<string, AiUsage | null>
+  >({})
   const [newProjectName, setNewProjectName] = useState('深圳周末路线项目')
   const [newProjectFolderId, setNewProjectFolderId] = useState(demoFolders[0].id)
   const [showCreateProjectCard, setShowCreateProjectCard] = useState(false)
@@ -806,6 +839,9 @@ function App() {
   const [finalCopyToast, setFinalCopyToast] = useState('')
   const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>({})
   const [draftCopyByConversation, setDraftCopyByConversation] = useState<Record<string, InitialDraftCopy>>({})
+  const [draftUsageByConversation, setDraftUsageByConversation] = useState<
+    Record<string, AiUsage | null>
+  >({})
   const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
   const [draftGenerationErrorByConversation, setDraftGenerationErrorByConversation] = useState<
     Record<string, string>
@@ -1163,8 +1199,29 @@ function App() {
   const hasDraftReady = hasPlanReady && Boolean(draftReadyByConversation[activeConversation.id])
   const isAnalyzing = analysisPendingConversationId === activeConversation.id
   const isDraftGenerating = draftGeneratingConversationId === activeConversation.id
+  const analysisWaitSeconds =
+    isAnalyzing && analysisWaitStartedAt
+      ? Math.max(0, Math.floor((aiWaitTick - analysisWaitStartedAt) / 1000))
+      : 0
+  const draftWaitSeconds =
+    isDraftGenerating && draftWaitStartedAt
+      ? Math.max(0, Math.floor((aiWaitTick - draftWaitStartedAt) / 1000))
+      : 0
+  const analysisError = analysisErrorByConversation[activeConversation.id] ?? ''
+  const analysisUsage = analysisUsageByConversation[activeConversation.id] ?? null
   const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
+  const draftUsage = draftUsageByConversation[activeConversation.id] ?? null
   const effectiveLength = activeConversation.length ?? 'medium'
+
+  useEffect(() => {
+    if (!analysisWaitStartedAt && !draftWaitStartedAt) return
+
+    const intervalId = window.setInterval(() => {
+      setAiWaitTick(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [analysisWaitStartedAt, draftWaitStartedAt])
 
   const selectedSnippetIds = useMemo(
     () =>
@@ -1644,6 +1701,16 @@ function App() {
   }
 
   function handleSelectItems(itemIds: string[]) {
+    setAnalysisErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
+    setAnalysisUsageByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
     updateConversation(activeProject.id, activeConversation.id, (conversation) => {
       const currentIds = new Set(conversation.selectedItemIds)
       itemIds.forEach((itemId) => currentIds.add(itemId))
@@ -1657,6 +1724,16 @@ function App() {
   }
 
   function handleDeselectItems(itemIds: string[]) {
+    setAnalysisErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
+    setAnalysisUsageByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
     updateConversation(activeProject.id, activeConversation.id, (conversation) => {
       const currentIds = new Set(conversation.selectedItemIds)
       itemIds.forEach((itemId) => currentIds.delete(itemId))
@@ -1677,6 +1754,18 @@ function App() {
 
     setIsChatStreaming(true)
     setAnalysisPendingConversationId(conversationId)
+    setAnalysisWaitStartedAt(Date.now())
+    setAiWaitTick(Date.now())
+    setAnalysisErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setAnalysisUsageByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
     setDraftReadyByConversation((current) => ({
       ...current,
       [conversationId]: false,
@@ -1687,6 +1776,11 @@ function App() {
       return next
     })
     setDraftGenerationErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setDraftUsageByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
       return next
@@ -1710,6 +1804,10 @@ function App() {
           snippets: selectedSnippets,
         })
         nextAnalysis = response.analysis
+        setAnalysisUsageByConversation((current) => ({
+          ...current,
+          [conversationId]: response.usage,
+        }))
       }
 
       const analysisMessages = buildAnalysisChat(nextAnalysis)
@@ -1731,6 +1829,13 @@ function App() {
       }
     } catch (error) {
       const message = getErrorMessage(error)
+      const friendlyMessage = message.includes('DeepSeek API key')
+        ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型完成学习拆解。'
+        : message
+      setAnalysisErrorByConversation((current) => ({
+        ...current,
+        [conversationId]: friendlyMessage,
+      }))
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
         analysisReady: false,
@@ -1741,17 +1846,14 @@ function App() {
             role: 'assistant',
             stage: 'setup',
             title: '真实 AI 暂未跑通',
-            lines: [
-              message.includes('DeepSeek API key')
-                ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型完成学习拆解。'
-                : message,
-            ],
+            lines: [friendlyMessage, '可以直接点击“重试分析”再跑一次。'],
           },
         ],
       }))
     } finally {
       setIsChatStreaming(false)
       setAnalysisPendingConversationId((current) => (current === conversationId ? '' : current))
+      setAnalysisWaitStartedAt(null)
     }
   }
 
@@ -1762,11 +1864,18 @@ function App() {
     const conversationId = activeConversation.id
 
     setDraftGeneratingConversationId(conversationId)
+    setDraftWaitStartedAt(Date.now())
+    setAiWaitTick(Date.now())
     setDraftReadyByConversation((current) => ({
       ...current,
       [conversationId]: false,
     }))
     setDraftGenerationErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setDraftUsageByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
       return next
@@ -1800,6 +1909,10 @@ function App() {
           brief: creationBrief,
         })
         nextDraft = response.draft
+        setDraftUsageByConversation((current) => ({
+          ...current,
+          [conversationId]: response.usage,
+        }))
       }
 
       setDraftCopyByConversation((current) => ({
@@ -1836,10 +1949,11 @@ function App() {
         ...current,
         [conversationId]: message.includes('DeepSeek API key')
           ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型生成初版文案。'
-          : message,
+          : `${message} 可以直接重试。`,
       }))
     } finally {
       setDraftGeneratingConversationId((current) => (current === conversationId ? '' : current))
+      setDraftWaitStartedAt(null)
     }
   }
 
@@ -3118,6 +3232,7 @@ function App() {
   function renderDraftGenerationSkeleton() {
     const lengthLabel =
       effectiveLength === 'short' ? '短篇幅' : effectiveLength === 'medium' ? '中篇幅' : '长篇幅'
+    const isLongWait = draftWaitSeconds >= 30
 
     return (
       <div
@@ -3127,9 +3242,11 @@ function App() {
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm leading-6 text-[var(--foreground)]">
-            <p className="font-semibold">正在生成初版</p>
+            <p className="font-semibold">{isLongWait ? 'DeepSeek 还在生成' : '正在生成初版'}</p>
             <p className="mt-1 text-[var(--muted-foreground)]">
-              DeepSeek 正在把学习拆解整理成 {lengthLabel} 可编辑文案
+              {isLongWait
+                ? `已等待 ${draftWaitSeconds}s，模型仍在整理标题和正文。完成后会自动替换这里。`
+                : `DeepSeek 正在把学习拆解整理成 ${lengthLabel} 可编辑文案`}
             </p>
           </div>
           <div className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[rgba(15,23,42,0.08)] bg-[rgba(241,243,246,0.8)] px-3 text-xs font-semibold text-[var(--muted-foreground)]">
@@ -3390,7 +3507,7 @@ function App() {
                 ].join(' ')}
               >
                 {value.slice(range.startIndex, range.endIndex)}
-                <span className="ml-1 inline-flex h-5 min-w-5 translate-y-[-0.08em] items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-bold leading-none text-[var(--foreground)] shadow-[0_0_0_1px_rgba(31,22,17,0.08)]">
+                <span className="ml-1 inline-flex h-5 min-w-5 translate-y-[-0.08em] items-center justify-center rounded-full bg-white/90 px-1 text-[length:var(--ui-text-caption)] font-bold leading-none text-[var(--foreground)] shadow-[0_0_0_1px_rgba(31,22,17,0.08)]">
                   {range.noteNumber}
                 </span>
               </mark>,
@@ -3478,7 +3595,7 @@ function App() {
             onPaste={isRewrite ? handleRewriteDraftFieldPaste : undefined}
             onPointerUp={isRewrite ? handleCaptureRewriteSelection : undefined}
             className={[
-              'text-[20px] font-semibold leading-[1.48] tracking-normal text-[#25211e]',
+              'text-[length:var(--ui-text-section)] font-semibold leading-[1.48] tracking-normal text-[#25211e]',
               isRewrite
                 ? '-mx-1 min-h-[1.45em] cursor-text whitespace-pre-wrap px-1 py-1 caret-[var(--accent-strong)] outline-none'
                 : '',
@@ -3486,7 +3603,7 @@ function App() {
           >
             {renderDraftText(initialDraftCopy.title, 'title')}
           </h3>
-          <div className="mt-7 space-y-5 text-[16px] font-normal leading-[1.88] tracking-normal text-[#332f2b]">
+          <div className="mt-7 space-y-5 text-[length:var(--ui-text-body-lg)] font-normal leading-[1.88] tracking-normal text-[#332f2b]">
             {initialDraftCopy.body.map((paragraph, index) => (
               <div key={`body-${index}`}>
                 <p
@@ -3637,7 +3754,7 @@ function App() {
               <p className="text-sm leading-7 text-[var(--muted-foreground)]">
                 我把刚才移动到{message.targetLabel}的内容接顺了一下，重点是补出前后关系，不改变原本的小红书口吻。
               </p>
-              <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.62)] px-4 py-3 text-[15px] leading-7 text-[#2e3430]">
+              <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.62)] px-4 py-3 text-[length:var(--ui-text-body)] leading-7 text-[#2e3430]">
                 {message.beforeText ? <span>{message.beforeText}</span> : null}
                 <span>{message.movedText}</span>
                 <mark className="mx-1 rounded-[0.45rem] bg-[rgba(42,157,143,0.2)] px-1.5 py-0.5 text-[#17675b] shadow-[0_0_0_1px_rgba(42,157,143,0.14)]">
@@ -3674,7 +3791,7 @@ function App() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--soft-foreground)]" />
                 <Input
-                  className="h-12 rounded-[var(--ui-field-radius)] border-white/80 bg-white/82 pl-11 shadow-[0_14px_34px_rgba(48,34,22,0.06)]"
+                  className="h-12 rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pl-11 shadow-none"
                   value={projectSearch}
                   onChange={(event) => setProjectSearch(event.target.value)}
                   placeholder="搜索项目或参考文件夹"
@@ -3689,8 +3806,8 @@ function App() {
         </section>
 
         <section className="mx-auto flex min-h-0 w-full max-w-6xl flex-1">
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] shadow-[var(--shadow-soft)]">
-            <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-[var(--border)] bg-white/76 px-5 py-4 lg:px-6">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] bg-[var(--surface-muted)] shadow-none">
+            <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-b border-[var(--border)] bg-transparent px-5 py-4 lg:px-6">
               <div>
                 <h2 className="text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">
                   项目列表
@@ -3728,11 +3845,11 @@ function App() {
                       event.preventDefault()
                       handleOpenProject(project.id)
                     }}
-                    className="ui-list-item-motion grid cursor-pointer gap-4 bg-white/72 px-5 py-4 outline-none transition hover:bg-white/92 focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
+                    className="ui-list-item-motion ui-hover-surface grid cursor-pointer gap-4 bg-transparent px-5 py-4 outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
                           <FolderOpen className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
@@ -3806,7 +3923,7 @@ function App() {
               })}
 
               {filteredProjects.length === 0 ? (
-                <div className="ui-surface-enter bg-white/72 px-6 py-14 text-center">
+                <div className="ui-surface-enter bg-transparent px-6 py-14 text-center">
                   <p className="text-base font-semibold text-[var(--foreground)]">当前没有匹配到项目</p>
                   <p className="mt-2 text-sm text-[var(--muted-foreground)]">
                     换一个关键词，或者新建项目继续。
@@ -3927,6 +4044,9 @@ function App() {
         libraryStatus={libraryStatus}
         libraryError={libraryError}
         workflowSteps={workflowSteps}
+        analysisError={analysisError}
+        analysisUsage={analysisUsage}
+        analysisWaitSeconds={analysisWaitSeconds}
         isAnalyzing={isAnalyzing}
         isStreaming={isChatStreaming}
         projectName={activeProject.name}
@@ -4019,7 +4139,7 @@ function App() {
             <span className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 truncate">{conversation.title}</span>
               {conversation.finalizedAt ? (
-                <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#17675b]">
+                <span className="inline-flex shrink-0 items-center rounded-full border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-1.5 py-0.5 text-[length:var(--ui-text-caption)] font-semibold leading-none text-[#17675b]">
                   完成
                 </span>
               ) : null}
@@ -4313,6 +4433,11 @@ function App() {
                         delete next[activeConversation.id]
                         return next
                       })
+                      setDraftUsageByConversation((current) => {
+                        const next = { ...current }
+                        delete next[activeConversation.id]
+                        return next
+                      })
                       setDraftBridgeMessagesByConversation((current) => {
                         const next = { ...current }
                         delete next[activeConversation.id]
@@ -4366,11 +4491,11 @@ function App() {
                               : 'relative z-10 shrink-0 bg-[rgba(255,254,252,1)] px-6 pb-4 pt-6 text-left'
                           }
                         >
-                          <p className="whitespace-nowrap pr-8 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[15px] font-semibold leading-[1.45] tracking-normal text-[#333333] sm:text-[18px]">
+                          <p className="whitespace-nowrap pr-8 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body)] font-semibold leading-[1.45] tracking-normal text-[#333333] sm:text-[length:var(--ui-text-section)]">
                             {card.title}
                           </p>
                           {scenarioLine ? (
-                            <p className="mt-3 whitespace-pre-line font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[16px] font-normal leading-[1.68] tracking-normal text-[#333333]">
+                            <p className="mt-3 whitespace-pre-line font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body-lg)] font-normal leading-[1.68] tracking-normal text-[#333333]">
                               {scenarioLine}
                             </p>
                           ) : null}
@@ -4392,7 +4517,7 @@ function App() {
                             }
                           />
                           <div className="h-full overflow-y-auto px-2 pb-7 pr-4 pt-7 text-left overscroll-contain [scrollbar-gutter:stable]">
-                            <div className="space-y-3 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[16px] font-normal leading-[1.68] tracking-normal text-[#333333]">
+                            <div className="space-y-3 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body-lg)] font-normal leading-[1.68] tracking-normal text-[#333333]">
                               {contentLines.map((line, index) => (
                                 <p className="whitespace-pre-line" key={`${card.value}-${index}`}>{line}</p>
                               ))}
@@ -4545,6 +4670,9 @@ function App() {
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="accent">初版方案</Badge>
                         <Badge variant="outline">标题 + 正文</Badge>
+                        {draftUsage ? (
+                          <Badge variant="outline">{formatAiUsageSummary(draftUsage)}</Badge>
+                        ) : null}
                       </div>
                       <p className="mt-4 text-sm leading-7 text-[var(--muted-foreground)]">
                         {hasDraftReady ? '先确认整体方向；认可后进入编辑细调。' : '根据已选参考内容和学习拆解生成。'}
@@ -4604,7 +4732,7 @@ function App() {
                               disabled={isDraftGenerating}
                             >
                               <WandSparkles className="h-4 w-4" />
-                              {isDraftGenerating ? '生成中...' : '生成初版文案'}
+                              {draftGenerationError ? '重新生成初版' : '生成初版文案'}
                             </Button>
                           </div>
                           {draftGenerationError ? (
@@ -4743,7 +4871,7 @@ function App() {
                       onKeyUp={handleCaptureRewriteSelection}
                     >
                       <div className="mx-auto max-w-[52rem] px-1 py-1 lg:px-2 lg:py-2">
-                        <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[rgba(74,50,28,0.08)] pb-3 text-[11px] font-medium text-[var(--soft-foreground)]">
+                        <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[rgba(74,50,28,0.08)] pb-3 text-[length:var(--ui-text-caption)] font-medium text-[var(--soft-foreground)]">
                           <span className="inline-flex h-6 items-center gap-1.5">
                             <PenLine className="h-3.5 w-3.5 text-[var(--accent-strong)]" aria-hidden="true" />
                             点击文字直接编辑
@@ -4787,7 +4915,7 @@ function App() {
                             <p className="mb-1 text-xs font-medium text-[var(--soft-foreground)]">
                               正在修改
                             </p>
-                            <p className="max-h-[4.5rem] overflow-hidden text-[13px] leading-6 text-[var(--muted-foreground)]">
+                            <p className="max-h-[4.5rem] overflow-hidden text-[length:var(--ui-text-meta)] leading-6 text-[var(--muted-foreground)]">
                               {selectedRewriteText}
                             </p>
                           </div>
@@ -5050,8 +5178,8 @@ function App() {
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-6">
             {hasDraftReady ? (
               <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,0.88fr)_minmax(24rem,1fr)]">
-                <section className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
-                  <div className="shrink-0 border-b border-white/72 px-6 py-4 lg:px-7">
+                <section className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none">
+                  <div className="shrink-0 border-b border-[var(--border)] px-6 py-4 lg:px-7">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="accent">最终文案</Badge>
                       <span className="text-sm font-medium text-[var(--muted-foreground)]">
@@ -5066,7 +5194,7 @@ function App() {
                   </div>
                 </section>
 
-                <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/72 shadow-[var(--shadow-soft)]">
+                <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none">
                   <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-6">
                     <div className="grid gap-4">
                       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -5076,7 +5204,7 @@ function App() {
                             按编号对应左侧标注
                           </span>
                         </div>
-                        <span className="rounded-full bg-white/72 px-3 py-1 text-xs font-medium text-[var(--soft-foreground)]">
+                        <span className="rounded-full bg-[rgba(236,239,243,0.86)] px-3 py-1 text-xs font-medium text-[var(--soft-foreground)]">
                           {readerPreviewFeedback.annotations.length} 条
                         </span>
                       </div>
@@ -5092,7 +5220,7 @@ function App() {
                       )}
                     </div>
                   </div>
-                  <div className="shrink-0 border-t border-white/72 bg-white/78 px-5 py-4 backdrop-blur-xl lg:px-6">
+                  <div className="shrink-0 border-t border-[var(--border)] bg-[rgba(236,239,243,0.62)] px-5 py-4 lg:px-6">
                     <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                       <Button variant="secondary" onClick={handleSendReaderSuggestionsToRewrite}>
                         <PenLine className="h-4 w-4" />

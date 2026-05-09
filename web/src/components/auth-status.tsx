@@ -44,7 +44,7 @@ const providerLabels: Record<OAuthProvider, string> = {
 function getProviderIcon(provider: OAuthProvider) {
   if (provider === 'github') return <Github className="h-4 w-4" />
   return (
-    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[11px] font-bold text-[#4285f4]">
+    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[length:var(--ui-text-caption)] font-bold text-[#4285f4]">
       G
     </span>
   )
@@ -280,7 +280,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
               <p className="max-w-[13rem] truncate text-xs font-semibold text-[var(--foreground)]">
                 {displayName}
               </p>
-              <p className="max-w-[13rem] truncate text-[11px] text-[var(--soft-foreground)]">
+              <p className="max-w-[13rem] truncate text-[length:var(--ui-text-caption)] text-[var(--soft-foreground)]">
                 {backendStatus === 'ready' && cloudCounts
                   ? `云端 ${cloudCounts.folders} 文件夹 · ${cloudCounts.notes} 文案`
                   : backendStatus === 'checking'

@@ -15,7 +15,7 @@ function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'flex h-[var(--ui-control-md)] w-full items-center justify-between gap-[var(--ui-control-gap)] rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--input)] px-[var(--ui-field-px)] py-0 text-sm text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(15,23,42,0.18)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(15,23,42,0.18)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
+        'flex h-[var(--ui-control-md)] w-full items-center justify-between gap-[var(--ui-control-gap)] rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--input)] px-[var(--ui-field-px)] py-0 text-[length:var(--ui-text-control)] leading-[var(--ui-leading-control)] text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(15,23,42,0.18)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(15,23,42,0.18)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
         className,
       )}
       {...props}
@@ -96,7 +96,7 @@ function SelectLabel({
 }: React.ComponentProps<typeof SelectPrimitive.Label>) {
   return (
     <SelectPrimitive.Label
-      className={cn('px-2 py-1.5 text-xs font-semibold text-[var(--soft-foreground)]', className)}
+      className={cn('px-2 py-1.5 text-[length:var(--ui-text-caption)] font-semibold text-[var(--soft-foreground)]', className)}
       {...props}
     />
   )
@@ -110,7 +110,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex min-h-[var(--ui-control-sm)] w-full cursor-default select-none items-center rounded-[var(--ui-radius-item)] py-[var(--ui-space-1-5)] pl-8 pr-[var(--ui-space-2)] text-sm text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--foreground)] data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--foreground)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex min-h-[var(--ui-control-sm)] w-full cursor-default select-none items-center rounded-[var(--ui-radius-item)] py-[var(--ui-space-1-5)] pl-8 pr-[var(--ui-space-2)] text-[length:var(--ui-text-control)] text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--foreground)] data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--foreground)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

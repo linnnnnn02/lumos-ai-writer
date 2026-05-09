@@ -10,6 +10,7 @@
 - 插件 sidepanel 已接入 MVP 级云端同步：同一测试账号邮箱密码登录；保存标注时先写 `chrome.storage.local`，再同步到云端 API。
 - Web 学习拆解已接入 `/api/v1/ai/analyze`，并已用 DeepSeek 跑通真实模型调用。
 - Web 初版文案已接入 `/api/v1/ai/draft`；计划页进入后先显示“生成初版文案”，不再自动展示本地假稿。
+- Web AI 等待体验已补齐：分析和初版生成都有 skeleton/等待动画，超过 30 秒显示长等待提示；失败后可直接重试，成功后显示 token 用量和人民币成本估算。
 - `ai_runs` 已开始记录 `analyze` / `draft` 的成功或失败、模型和 token 用量，方便 MVP 阶段观察成本与稳定性。
 - 本地开发端口固定为：Web `http://localhost:5173`，API `http://localhost:8788/api`。
 
