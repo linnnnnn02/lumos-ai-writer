@@ -312,14 +312,14 @@ function NoteDetailDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,22,17,0.24)] p-5 backdrop-blur-sm md:p-8"
+      className="ui-dialog-backdrop fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,22,17,0.24)] p-5 backdrop-blur-sm md:p-8"
       role="dialog"
       aria-modal="true"
       aria-label="笔记详情"
       onMouseDown={onClose}
     >
       <div
-        className="grid max-h-[90vh] w-[calc(100vw-2.5rem)] overflow-hidden rounded-[1.65rem] border border-[rgba(31,22,17,0.08)] bg-[#fffdf9] shadow-[0_28px_90px_rgba(31,22,17,0.18)] md:w-[calc(100vw-4rem)] lg:w-[clamp(54rem,63vw,80rem)] lg:grid-cols-[49%_51%]"
+        className="ui-dialog-card grid max-h-[90vh] w-[calc(100vw-2.5rem)] overflow-hidden rounded-[1.65rem] border border-[rgba(31,22,17,0.08)] bg-[#fffdf9] shadow-[0_28px_90px_rgba(31,22,17,0.18)] md:w-[calc(100vw-4rem)] lg:w-[clamp(54rem,63vw,80rem)] lg:grid-cols-[49%_51%]"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <NoteCover note={note} />
@@ -375,7 +375,7 @@ function AnalysisBlock({
 
   return (
     <>
-      <article className="mx-auto flex max-w-7xl gap-3">
+      <article className="ui-chat-row mx-auto flex max-w-7xl gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.2),rgba(255,149,80,0.22))] text-xs font-semibold text-[var(--accent-strong)]">
           AI
         </div>
@@ -477,7 +477,7 @@ function AssistantBlock({
   }
 
   return (
-    <article className="mx-auto flex max-w-5xl gap-4">
+    <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.24),rgba(255,149,80,0.24))] text-sm font-semibold text-[var(--accent-strong)]">
         AI
       </div>
@@ -551,7 +551,7 @@ function AssistantBlock({
 
 function UserBlock({ message }: { message: ChatMessage }) {
   return (
-    <article className="mx-auto flex max-w-5xl justify-end">
+    <article className="ui-chat-row mx-auto flex max-w-5xl justify-end">
       <div className="max-w-2xl rounded-[1.7rem] rounded-br-[0.6rem] bg-[linear-gradient(135deg,#67c7ff_0%,#efb6d0_54%,#ff9550_100%)] px-5 py-4 text-white shadow-[0_18px_36px_rgba(255,149,80,0.2)]">
         {message.lines.map((line) => (
           <p key={line} className="text-[15px] leading-7">
@@ -565,7 +565,7 @@ function UserBlock({ message }: { message: ChatMessage }) {
 
 function TypingBlock({ title, text }: { title?: string; text?: string }) {
   return (
-    <article className="mx-auto flex max-w-5xl gap-4">
+    <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(103,199,255,0.24),rgba(255,149,80,0.24))] text-sm font-semibold text-[var(--accent-strong)]">
         AI
       </div>
@@ -947,7 +947,7 @@ export function LearnWorkspace({
 
       {isFilterOpen ? (
         <div
-          className="absolute right-0 top-[calc(100%+0.65rem)] z-40 w-[min(38rem,calc(100vw-4rem))] rounded-[1.45rem] border border-white/84 bg-white/96 p-4 shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+          className="ui-popover-motion absolute right-0 top-[calc(100%+0.65rem)] z-40 w-[min(38rem,calc(100vw-4rem))] rounded-[1.45rem] border border-white/84 bg-white/96 p-4 shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
           role="dialog"
           aria-label="筛选文案"
         >
@@ -1197,7 +1197,7 @@ export function LearnWorkspace({
                     ? createPortal(
                         <div
                           data-conversation-menu
-                          className="fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                          className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
                           role="menu"
                           style={{
                             left: conversationMenuPosition.left,

@@ -1,3 +1,32 @@
+@keyframes shadcn-ui-popover-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shadcn-ui-check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+
+  70% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .shadcn-button {
   display: inline-flex;
   min-width: 0;
@@ -19,6 +48,7 @@
     background-color 180ms ease,
     color 180ms ease,
     transform 180ms ease;
+  will-change: transform;
 }
 
 .shadcn-button[data-size='sm'] {
@@ -74,6 +104,10 @@
   transform: translateY(-1px);
 }
 
+.shadcn-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
 .shadcn-button:focus-visible {
   box-shadow: 0 0 0 3px rgba(31, 22, 17, 0.1);
 }
@@ -99,6 +133,11 @@
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 18px 48px rgba(48, 34, 22, 0.06);
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 220ms ease,
+    transform 220ms ease;
 }
 
 .shadcn-card-header {
@@ -228,7 +267,8 @@
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
-    background-color 180ms ease;
+    background-color 180ms ease,
+    transform 180ms ease;
 }
 
 .shadcn-input {
@@ -254,6 +294,7 @@
 .shadcn-input:focus,
 .shadcn-textarea:focus,
 .shadcn-select-trigger:focus {
+  transform: translateY(-1px);
   border-color: rgba(31, 22, 17, 0.12);
   box-shadow:
     0 10px 24px rgba(48, 34, 22, 0.035),
@@ -274,6 +315,14 @@
   transform: none;
 }
 
+.shadcn-select-trigger[data-state='open'] {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 14px 30px rgba(48, 34, 22, 0.06),
+    inset 0 0 0 1px rgba(31, 22, 17, 0.035);
+}
+
 .shadcn-select-trigger span:first-child {
   min-width: 0;
   overflow: hidden;
@@ -288,6 +337,11 @@
   border-right: 2px solid var(--panel-text-soft, var(--manager-text-soft, #93877d));
   border-bottom: 2px solid var(--panel-text-soft, var(--manager-text-soft, #93877d));
   transform: translateY(-2px) rotate(45deg);
+  transition: transform 180ms ease;
+}
+
+.shadcn-select-trigger[data-state='open'] .shadcn-select-icon {
+  transform: translateY(2px) rotate(225deg);
 }
 
 .shadcn-select-content {
@@ -302,6 +356,11 @@
   background: rgba(255, 255, 255, 0.96);
   color: var(--panel-text, var(--manager-text, #171311));
   box-shadow: 0 22px 54px rgba(48, 34, 22, 0.16);
+  transform-origin: var(--radix-select-content-transform-origin, top center);
+}
+
+.shadcn-select-content[data-state='open'] {
+  animation: shadcn-ui-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .shadcn-select-viewport {
@@ -352,11 +411,16 @@
   font-size: 13px;
   outline: none;
   padding: 8px 10px 8px 32px;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
 }
 
 .shadcn-select-item[data-highlighted] {
   background: var(--manager-accent-wash, #fff0e5);
   color: var(--panel-accent-deep, var(--manager-accent-deep, #c95d1d));
+  transform: translateX(2px);
 }
 
 .shadcn-select-item[data-disabled] {
@@ -381,6 +445,7 @@
   border-left: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
   transform: translateY(-1px) rotate(-45deg);
+  animation: shadcn-ui-check-pop 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .shadcn-alert {
@@ -422,4 +487,32 @@
 
 .shadcn-alert[data-variant='success'] .shadcn-alert-description {
   color: rgba(20, 90, 50, 0.76);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shadcn-button,
+  .shadcn-card,
+  .shadcn-input,
+  .shadcn-textarea,
+  .shadcn-select-trigger,
+  .shadcn-select-icon,
+  .shadcn-select-item {
+    transition-duration: 1ms;
+  }
+
+  .shadcn-button:hover:not(:disabled),
+  .shadcn-button:focus-visible,
+  .shadcn-button:active:not(:disabled),
+  .shadcn-input:focus,
+  .shadcn-textarea:focus,
+  .shadcn-select-trigger:focus,
+  .shadcn-select-trigger[data-state='open'],
+  .shadcn-select-item[data-highlighted] {
+    transform: none;
+  }
+
+  .shadcn-select-content[data-state='open'],
+  .shadcn-select-check {
+    animation: none;
+  }
 }

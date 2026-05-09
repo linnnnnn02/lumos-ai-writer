@@ -10,9 +10,40 @@
 - 网页端不再使用 `demo-data`，而是读取真实用户数据。
 - AI 分析、生成、改写、读者预演由真实模型完成。
 - 开发、测试、预览、发版不依赖每次手动在本机开终端。
-- 优先保证中国大陆用户访问速度和可用性，同时保留海外免费/低成本方案用于开发、演示或后续国际化。
+- MVP 阶段优先用海外免费/低成本路线验证产品闭环；验证成功后再决定是否迁回国内云做正式生产。
 
 > 说明：本文是工程计划，不构成法律意见。涉及备案、个人信息、数据跨境、生成式 AI 服务等事项时，需要以官方规定、平台合同和专业合规意见为准。
+
+---
+
+## 0. 当前 MVP 决策
+
+当前目标是 **MVP 验证**，不是一开始就按正式生产环境做完整云资源采购。
+
+已确定：
+
+- 部署路线：海外免费/低成本路线优先。
+- 域名：继续使用阿里云注册和已备案域名，不做域名转出。
+- DNS：MVP 初期优先继续用阿里云 DNS；必要时再把特定子域名或整站 DNS 切到 Cloudflare。
+- Web/API：Cloudflare Pages + Pages Functions，优先把 API 放在同一域名的 `/api/*` 下，减少跨域和额外域名配置。
+- 数据库/Auth/Storage：Supabase Free。
+- AI：DeepSeek API，所有 Key 只放后端环境变量。
+- 成本目标：除 AI 调用和可能的一次性浏览器商店账号费用外，MVP 阶段尽量保持 0 固定月成本。
+
+建议域名规划：
+
+```text
+app.yourdomain.com        MVP Web + API，同源 /api/*
+preview.yourdomain.com    可选，长期预览环境
+```
+
+暂不建议 MVP 直接使用根域名，因为根域名接 Cloudflare Pages 时 DNS 约束更多；先用 `app.` 子域名足够验证产品。
+
+保留国内路线的原因：
+
+- 如果核心用户主要在中国大陆，海外服务访问稳定性仍可能影响体验。
+- 已备案域名和腾讯云备案接入可以作为后续国内正式生产的迁移基础。
+- MVP 跑通后，可以把 Cloudflare/Supabase 迁到阿里云/腾讯云 + 国内数据库 + 国内 CDN。
 
 ---
 
@@ -66,9 +97,44 @@
 
 ## 2. 总体架构建议
 
-### 2.1 推荐主线：大陆正式生产环境
+### 2.1 MVP 推荐主线：海外 0 成本验证环境
 
-优先推荐这一套作为正式产品主线：
+当前推荐先用这一套做 MVP：
+
+```text
+用户浏览器
+  ├─ Web App: React SPA
+  └─ Browser Extension: WXT MV3
+
+阿里云域名
+  └─ app.yourdomain.com CNAME 到 Cloudflare Pages
+
+账号体系
+  ├─ Supabase Auth 邮箱登录
+  └─ 插件通过 Web 登录态/设备码绑定同一账号
+
+海外免费/低成本云资源
+  ├─ Web 静态站: Cloudflare Pages
+  ├─ API: Cloudflare Pages Functions，同源 /api/*
+  ├─ 数据库: Supabase Postgres Free
+  ├─ 文件存储: Supabase Storage Free，早期尽量只保存图片 URL
+  └─ 日志: Cloudflare/Supabase 基础日志 + 应用内 ai_runs 记录
+
+AI 服务
+  ├─ 默认: DeepSeek API
+  └─ 后端通过统一 AI Provider Adapter 调用，前端和插件永不接触 API Key
+```
+
+MVP 阶段的核心判断：
+
+- 先验证“插件采集 -> 云端文案库 -> Web 选择素材 -> DeepSeek 生成/改写”的闭环。
+- 不先采购国内 RDS、对象存储、短信、Authing 或正式 CDN。
+- 不为了长期生产架构提前承担固定月成本。
+- 代码仍保持可迁移，后端接口和共享 schema 不写死在某个前端组件里。
+
+### 2.2 验证成功后的大陆正式生产环境
+
+如果 MVP 证明用户愿意用，再迁移到国内生产主线：
 
 ```text
 用户浏览器
@@ -88,14 +154,14 @@
   └─ 后端统一签发并校验用户 session
 
 AI 服务
-  ├─ 默认: 阿里云百炼 Qwen / DeepSeek 官方 API / 火山方舟
-  ├─ 备用: OpenAI API，仅用于海外或用户明确允许的场景
+  ├─ 默认: DeepSeek API
+  ├─ 可选: 阿里云百炼 Qwen / 火山方舟
   └─ 后端通过统一 AI Provider Adapter 调用，前端和插件永不接触 API Key
 ```
 
-### 2.2 为什么不继续只用 Firebase/Supabase
+### 2.3 为什么 MVP 不先上国内正式资源
 
-Firebase、Supabase、Vercel、Cloudflare 很适合快速试验和海外免费部署，但如果第一批核心用户在中国大陆，会有三个现实问题：
+Firebase、Supabase、Vercel、Cloudflare 很适合快速试验和海外免费部署。如果第一批核心用户在中国大陆，仍然有三个现实问题：
 
 1. 访问稳定性不可控。  
    大陆用户访问海外服务时，DNS、跨境链路、第三方脚本、验证码、OAuth 回调都有不确定性。
@@ -106,7 +172,14 @@ Firebase、Supabase、Vercel、Cloudflare 很适合快速试验和海外免费�
 3. AI 请求链路可能变慢。  
    真实 AI 生成如果走海外模型，大陆用户会明显感觉等待时间和失败率。
 
-因此，正式产品建议大陆主线先走国内云和国内可采购模型，海外免费方案只作为开发、演示和备选。
+但是当前目标是 MVP 验证，不是正式大规模服务。因此第一阶段接受这些限制，换取：
+
+- 0 固定月成本。
+- 自动 preview/staging。
+- 更快打通数据库、Auth、部署和 AI 调用。
+- 更少运维和备案接入操作。
+
+一旦出现真实用户留存、频繁使用或国内访问稳定性问题，再启动国内迁移。
 
 ---
 
@@ -118,18 +191,53 @@ Firebase、Supabase、Vercel、Cloudflare 很适合快速试验和海外免费�
 
 | 档位 | 用途 | 推荐组合 | 适合阶段 |
 |---|---|---|---|
-| A. 大陆正式主线 | 面向中国大陆用户正式使用 | 阿里云 OSS/CDN + FC/SAE + RDS PostgreSQL + 百炼/DeepSeek + Authing | MVP 正式试用到生产 |
-| B. 大陆快速低运维 | 尽快把云端打通 | 腾讯云 CloudBase/SCF + 云数据库 + COS/CDN + Authing | 早期小流量验证 |
-| C. 海外免费/低成本 | 开发、演示、海外用户 | Cloudflare Workers/Pages 或 Vercel + Supabase/Firebase + OpenAI/DeepSeek | 原型、PR 预览、海外 demo |
+| A. 海外免费 MVP | 尽快验证产品闭环 | Cloudflare Pages/Functions + Supabase Free + DeepSeek + 阿里云域名 | 当前阶段 |
+| B. 大陆正式主线 | 面向中国大陆用户正式使用 | 阿里云 OSS/CDN + FC/SAE + RDS PostgreSQL + DeepSeek/Authing | MVP 验证成功后 |
+| C. 大陆快速低运维 | 尽快把云端打通 | 腾讯云 CloudBase/SCF + 云数据库 + COS/CDN + DeepSeek | 如果想回国内但继续少运维 |
 
-### 3.2 首选：阿里云主线
+### 3.2 当前首选：Cloudflare + Supabase
+
+推荐理由：
+
+- Cloudflare Pages 可以免费部署 Web，并自动生成 preview。
+- Pages Functions 可以承载轻量 API，MVP 可以把接口放在同源 `/api/*` 下。
+- Supabase Free 自带 Postgres、Auth、Storage 和基础管理界面。
+- DeepSeek API 兼容 OpenAI 风格调用，适合先快速接入真实 AI。
+- 阿里云域名无需转出，只要给 `app.` 子域名增加 CNAME。
+
+建议资源：
+
+- Web 静态站点：Cloudflare Pages。
+- API：Cloudflare Pages Functions，路径 `/api/*`。
+- 数据库：Supabase Postgres。
+- Auth：Supabase Auth 邮箱登录。
+- Storage：Supabase Storage，MVP 只存必要附件；小红书封面先保存 URL，不搬运图片。
+- Secrets：Cloudflare Pages 环境变量。
+- AI：DeepSeek API。
+
+MVP 阶段建议：
+
+- 普通业务 CRUD 尽量走后端 API，前端不直接接触服务端密钥。
+- Auth 可以用 Supabase 用户 session，API 通过 Supabase JWT 识别用户。
+- 数据库 schema 先用 Supabase SQL migration；Drizzle 可以后续迁移国内 Node/RDS 时再引入。
+- API 写成清晰 service/repository 边界，避免未来迁移时全量重写前端。
+
+限制：
+
+- Cloudflare Workers/Pages Functions 有运行时和请求限制，不适合长时间任务。
+- Supabase Free 有容量和休眠限制，适合 MVP，不适合长期正式生产。
+- 大陆用户访问海外服务可能不稳定。
+
+### 3.3 验证成功后：阿里云主线
+
+适合产品已经验证、需要面向中国大陆用户稳定访问时启用。
 
 推荐理由：
 
 - 中国大陆访问稳定。
 - 静态托管、CDN、函数计算、RDS、OSS、日志、密钥管理都齐。
-- 阿里云百炼模型服务提供中国内地部署范围，适合中文写作产品的默认 AI 通道。
 - 域名备案、CDN、HTTPS、监控链路相对完整。
+- 已有阿里云域名和腾讯云备案接入，后续国内切换条件较好。
 
 建议资源：
 
@@ -139,27 +247,9 @@ Firebase、Supabase、Vercel、Cloudflare 很适合快速试验和海外免费�
 - 对象存储：OSS。
 - 日志：SLS。
 - 密钥：KMS 或函数计算环境变量 + RAM 最小权限。
-- AI：阿里云百炼 Qwen 系列 + DeepSeek 备用。
+- AI：DeepSeek 默认；必要时增加百炼 Qwen 作为国内备用。
 
-FC 的好处：
-
-- 无需长期维护服务器。
-- 适合 API 请求、AI 调用、轻量后台任务。
-- 按量计费，初期成本可控。
-
-SAE 的好处：
-
-- 更像传统 Node 服务，长连接、SSE、较复杂 API 更自然。
-- 部署 Docker/Node 应用更直观。
-- 对后续队列、后台任务、连接池更友好。
-
-我的建议：
-
-- **MVP 第一阶段用 FC**：更轻、更快、更便宜。
-- **如果 AI 流式输出、长任务、队列开始复杂，再迁到 SAE**。
-- 代码层用 Hono/Fastify 这类普通 HTTP 框架，不要把业务写死在某一家云函数 SDK 上。
-
-### 3.3 备选：腾讯云 CloudBase 主线
+### 3.4 备选：腾讯云 CloudBase 主线
 
 适合想尽快打通产品闭环，并且不想一开始维护 RDS/ORM 的情况。
 
@@ -177,71 +267,81 @@ SAE 的好处：
 
 建议：
 
-- 如果目标是“最快让用户试用”，可以选 CloudBase。
+- 如果海外 MVP 的访问体验不行，但仍希望低运维，可以选 CloudBase。
 - 如果目标是“长期产品化、账号体系、AI 用量、项目版本历史都要沉淀”，更推荐 PostgreSQL。
-
-### 3.4 海外免费/低成本方案
-
-推荐只作为 dev/staging/demo，不作为大陆正式生产默认方案。
-
-可选组合：
-
-- Cloudflare Pages/Workers + Supabase Postgres + DeepSeek/OpenAI。
-- Vercel + Supabase + OpenAI/DeepSeek。
-- Firebase Hosting/Auth/Firestore + Cloud Functions。
-
-优点：
-
-- 免费额度友好。
-- GitHub 集成和预览部署方便。
-- 适合不想维护本地终端的开发预览。
-
-限制：
-
-- Cloudflare Workers Free 有每日请求限制和 CPU 时间限制。
-- Vercel Hobby 对函数运行时长、构建频率等有限制。
-- Firebase Spark/Blaze 适合海外，但大陆访问不稳定。
-- Supabase 免费层适合 demo，但正式用户数据默认海外不适合作大陆主线。
 
 ---
 
 ## 4. 域名、备案与访问策略
 
-### 4.1 大陆用户优先的域名策略
+### 4.1 MVP 域名策略
 
-推荐至少准备两个域名或子域名：
+当前域名在阿里云，腾讯云已经导入备案。MVP 阶段不需要转出域名，也不需要立刻把整站 DNS 迁到 Cloudflare。
+
+推荐先用子域名：
 
 ```text
-app.yourdomain.cn      正式网页端
-api.yourdomain.cn      正式 API
-assets.yourdomain.cn   静态资源/附件/导出文件
-staging.yourdomain.cn  预发布环境
+app.yourdomain.com      MVP Web + API，同源 /api/*
+preview.yourdomain.com  可选，长期预览环境
 ```
 
-如果使用中国内地 CDN 或内地服务器，域名通常需要 ICP 备案。阿里云 CDN 文档也明确提到，加速区域为中国内地或全球时，加速域名要求备案。
+DNS 操作：
 
-建议流程：
+1. 在 Cloudflare Pages 创建项目。
+2. 绑定 `app.yourdomain.com`。
+3. 在阿里云 DNS 中给 `app` 增加 CNAME，指向 Cloudflare Pages 提供的目标地址。
+4. 等待 HTTPS 证书签发完成。
+5. Extension 的 `WXT_PUBLIC_WEB_APP_URL` 和 `WXT_PUBLIC_API_BASE_URL` 指向这个子域名。
 
-1. 购买域名。
-2. 完成企业或个人实名认证。
-3. 选择大陆云厂商作为接入服务商。
-4. 提交 ICP 备案。
-5. 备案完成后配置 CDN 和 HTTPS。
-6. 站点正式开通后按要求处理公安备案。
+API 域名策略：
 
-### 4.2 没备案前怎么开发
+- MVP 优先不单独开 `api.` 子域名。
+- 使用 `https://app.yourdomain.com/api/*`，让 Web 和 API 同源，减少 CORS、Cookie 和插件配置复杂度。
+- 如果后面 API 独立部署成 Worker 或国内 API，再切到 `api.yourdomain.com`。
 
-没备案前不要卡住开发。
+### 4.2 备案的角色
 
-可以这样推进：
+当前已经有备案是好事，但海外 MVP 不依赖备案。
 
-- Web 预览用 Vercel/Cloudflare/Netlify 临时域名。
-- API 预览用云函数默认域名。
-- 插件 dev 构建指向 staging API。
-- 用户小范围测试先用海外/临时域名。
-- 备案完成后切换正式域名。
+需要区分：
 
-### 4.3 大陆正式上线前必须补齐
+- 域名注册在阿里云：只影响购买、续费、实名认证和 DNS 管理入口。
+- 腾讯云导入备案：主要用于以后接腾讯云中国内地资源。
+- Cloudflare/Supabase 海外服务：不因为已有备案而自动获得国内访问加速。
+
+MVP 阶段：
+
+- 可以正常把子域名解析到海外服务。
+- 保留腾讯云备案接入，作为以后国内部署基础。
+- 不把备案作为当前开发阻塞项。
+
+正式国内上线前：
+
+- 如果使用中国内地 CDN、OSS/COS 静态托管、FC/SCF/CloudBase 等，域名通常需要备案接入到对应服务商。
+- 需要确认备案主体、接入服务商、加速域名和实际部署资源一致。
+- 如果长期完全不使用国内接入资源，接入商可能做接入核查；这不影响海外 MVP 技术可行性，但后续正式国内路线要重新核对。
+
+### 4.3 国内迁移时的域名策略
+
+如果 MVP 成功，需要迁回国内生产，推荐域名规划：
+
+```text
+app.yourdomain.com      正式网页端
+api.yourdomain.com      正式 API
+assets.yourdomain.com   静态资源/附件/导出文件
+staging.yourdomain.com  预发布环境
+```
+
+迁移流程：
+
+1. 创建国内 Web/API/DB 资源。
+2. 从 Supabase 导出数据并迁入国内 PostgreSQL。
+3. 切换 `api.` 到国内 API。
+4. 切换 `app.` 到国内静态站/CDN。
+5. 更新插件生产环境 API base URL。
+6. 保留海外环境作为 preview 或海外 demo。
+
+### 4.4 正式上线前必须补齐
 
 - ICP 备案。
 - 隐私政策。
@@ -293,66 +393,66 @@ staging.yourdomain.cn  预发布环境
 
 建议作为正式增长阶段能力，不挡 MVP。
 
-### 5.2 Authing vs 自建登录
+### 5.2 Supabase Auth vs 后续国内登录
 
-#### Authing
-
-优点：
-
-- 国内访问更友好。
-- 对微信、企业微信、手机号、邮箱、SSO 的支持更完整。
-- 少写很多账号安全逻辑。
-
-缺点：
-
-- 免费/付费边界要以采购当日为准。
-- 用户核心登录链路依赖第三方。
-- 深度自定义会受平台约束。
-
-#### 自建邮箱验证码登录
+#### MVP：Supabase Auth
 
 优点：
 
-- 数据完全掌控。
-- 成本低。
-- 不受第三方 Auth SaaS 限制。
+- 和 Supabase Postgres/RLS 集成自然。
+- 邮箱 Magic Link 或邮箱密码能快速上线。
+- Free 阶段足够 MVP 验证。
+- Web 端接入成本低。
 
 缺点：
 
-- 要自己做验证码、频控、防刷、密码/会话安全。
-- 后续接微信、手机号、多因素会变复杂。
+- 大陆邮箱送达和访问稳定性需要实际测试。
+- 如果后续迁回国内云，需要迁移用户身份或做账号绑定。
+- 插件端不能直接假设网页 Cookie 可用，需要单独绑定流程。
+
+#### 后续国内路线：Authing 或自建邮箱验证码
+
+优点：
+
+- Authing 国内访问和微信/手机号扩展更友好。
+- 自建邮箱验证码成本可控，数据更可控。
+
+缺点：
+
+- Authing 免费/付费边界要以采购当日为准。
+- 自建要自己做验证码、频控、防刷、密码/会话安全。
 
 #### 推荐
 
 第一版建议：
 
-- **如果你希望最快上线并且能接受采购第三方账号服务：选 Authing。**
-- **如果你希望成本最低且功能先简单：自建邮箱验证码登录。**
+- **MVP 验证：Supabase Auth 邮箱登录。**
+- **国内正式生产：再评估 Authing 或自建邮箱验证码。**
 
-本文后续按“Authing/OIDC + 后端会话”设计，同时保留自建邮箱验证码的替换口。
+本文后续按“Supabase Auth + 后端校验 Supabase JWT”设计，同时保留国内账号体系的迁移口。
 
 ### 5.3 Web 登录流程
 
-推荐采用授权码 + PKCE 或后端交换 code 的方式。
+MVP 推荐先用 Supabase Auth 的邮箱 Magic Link 或邮箱密码。
 
 流程：
 
 ```text
 1. 用户打开 web app。
 2. 未登录时跳转到 /login。
-3. 点击登录，进入 Authing 托管登录页或自建邮箱验证码页。
-4. 登录成功后回调 /auth/callback?code=xxx。
-5. 后端用 code 换取用户身份。
-6. 后端创建/更新本地 users 表。
-7. 后端写入 httpOnly Secure SameSite Cookie。
-8. 前端调用 /api/me 获取用户信息。
+3. 用户输入邮箱。
+4. Supabase 发送 Magic Link 或校验邮箱密码。
+5. 登录成功后 Web 获得 Supabase session。
+6. 前端调用 /api/v1/me。
+7. API 校验 Supabase JWT。
+8. API 创建/更新本地 profile/users 映射并返回用户信息。
 ```
 
-为什么 Web 用 Cookie：
+为什么 MVP 接受 Supabase session：
 
-- access token 不暴露给前端 JS。
-- 降低 XSS 窃取 token 的风险。
-- API 权限统一由后端 session 判断。
+- 接入最快。
+- 与 Supabase RLS 和用户表自然集成。
+- 后续如果迁回国内，可以在 API 层替换 session 校验方式，前端调用路径不大改。
 
 ### 5.4 插件登录流程
 
@@ -362,76 +462,41 @@ staging.yourdomain.cn  预发布环境
 - sidepanel/options/content script 上下文不同。
 - Cookie、CORS、权限和刷新 token 都要单独处理。
 
-推荐两种方案。
-
-#### 方案 A：Chrome Identity + OAuth PKCE
+MVP 推荐设备码/一次性绑定码。
 
 流程：
 
 ```text
 1. 插件点击登录。
-2. 插件调用 chrome.identity.launchWebAuthFlow。
-3. 打开 Authing/OIDC 授权页面。
-4. 用户登录。
-5. 授权服务回调到 Chrome extension redirect URL。
-6. 插件拿到 authorization code。
-7. 插件发给后端 /auth/extension/exchange。
-8. 后端换 token 并签发插件专用 refresh token。
-9. 插件把 refresh token 存到 chrome.storage.local。
-10. 插件后续请求 API 时携带短期 access token。
+2. 插件请求 /api/v1/auth/extension/link/start。
+3. 后端返回一次性 deviceCode 和绑定链接。
+4. 插件打开 Web 绑定页。
+5. 用户在 Web 端用 Supabase 登录。
+6. Web 确认绑定 deviceCode。
+7. 插件轮询 /api/v1/auth/extension/link/poll。
+8. 后端签发插件专用 token 或 refresh token。
+9. 插件把 token 存到 chrome.storage.local。
+10. 插件后续请求 API 时携带 token。
 ```
 
 需要修改：
 
-- `extension/wxt.config.ts` 增加 `identity` 权限。
 - 增加 `extension/lib/auth.ts`。
 - sidepanel/options 顶部增加登录状态。
-
-优点：
-
-- OAuth 标准。
-- 用户体验完整。
-
-缺点：
-
-- 配置略复杂。
-- 不同浏览器扩展 ID、redirect URI 要分环境配置。
-
-#### 方案 B：设备码/一次性绑定码
-
-流程：
-
-```text
-1. 插件生成 deviceId + nonce。
-2. 插件打开网页 /extension/link?nonce=xxx。
-3. 用户在网页登录。
-4. 网页端确认“绑定此浏览器插件”。
-5. 后端创建一次性 device session。
-6. 插件轮询 /auth/extension/poll?nonce=xxx。
-7. 成功后拿到插件专用 token。
-```
+- API 增加 extension_devices、device_code、token refresh/revoke。
 
 优点：
 
 - 跨 Chrome/Edge/国产浏览器更稳。
 - 不强依赖 `chrome.identity`。
 - 插件端实现更可控。
+- 后端可以清楚记录“这个插件设备属于哪个用户”。
 
 缺点：
 
 - 需要多一步“绑定确认”。
 - 轮询和过期逻辑要做严谨。
-
-#### 推荐
-
-第一版推荐 **方案 B：设备码/一次性绑定码**。
-
-原因：
-
-- 更容易解释给用户。
-- 对国内浏览器更兼容。
-- 后端可以清楚记录“这个插件设备属于哪个用户”。
-- 以后再升级 OAuth PKCE 也不难。
+- 以后如果要改成 OAuth PKCE，需要再补浏览器扩展 redirect URI 配置。
 
 ### 5.5 插件 token 安全
 
@@ -450,7 +515,7 @@ staging.yourdomain.cn  预发布环境
 
 ### 6.1 数据库选择
 
-推荐 PostgreSQL。
+MVP 推荐 Supabase Postgres，本质仍是 PostgreSQL。
 
 原因：
 
@@ -458,10 +523,19 @@ staging.yourdomain.cn  预发布环境
 - 查询、筛选、分页、全文搜索、统计更自然。
 - 未来做付费、团队空间、权限、导出更稳。
 - 可以用 JSONB 存放 AI 分析结构，不牺牲关系模型。
+- Supabase 自带 Auth、RLS、SQL Editor 和基础管理面板，适合 0 成本 MVP。
 
 ### 6.2 ORM/迁移工具
 
-推荐：
+MVP 推荐：
+
+- Supabase SQL migration。
+- Supabase RLS。
+- Zod 做 API 输入输出 schema。
+
+暂不在 Cloudflare Pages Functions runtime 里强依赖 Drizzle，因为边缘运行时连接 PostgreSQL 的方式和 Node/RDS 不完全一样。
+
+国内正式生产迁移后，可以改为：
 
 - ORM：Drizzle ORM。
 - Schema 校验：Zod。
@@ -1027,30 +1101,45 @@ packages/shared/src/
 | 局部改写 | 选中文本、上下文、用户要求 | 替代表达或改写说明 | 低延迟、便宜、能保持局部范围 |
 | 读者预演 | 当前稿、目标读者 | 批注、风险点、修改优先级 | 分析和审稿能力强 |
 
-### 9.2 大陆默认模型池
+### 9.2 MVP 默认模型池
 
-推荐优先考虑：
+当前 MVP 默认只接 DeepSeek。
 
-1. 阿里云百炼 Qwen 系列  
-   优点：大陆采购、网络稳定、中文能力强、可与阿里云资源同账号管理。阿里云百炼文档显示中国内地部署范围支持华北 2（北京），模型推理计算资源限于中国内地，适合大陆默认链路。
+推荐原因：
 
-2. DeepSeek API  
-   优点：成本低、OpenAI 格式兼容、长上下文能力强。DeepSeek 官方文档提供 OpenAI Format Base URL，并列出 DeepSeek-V4-Flash/Pro 的价格和上下文能力。
+- 成本低，适合 MVP 高频试错。
+- OpenAI 格式兼容，后端 provider adapter 容易写。
+- 中文写作、拆解和改写能力足够先验证产品价值。
+- 不需要同时维护多家模型配置和预算。
 
-3. 火山方舟  
-   优点：国内云厂商、模型选择多，适合后续做多模型路由。
-
-推荐默认组合：
+建议默认组合：
 
 ```text
-学习拆解: qwen3-max / qwen3.6-max-preview / deepseek-v4-pro
-初稿生成: qwen3-max / deepseek-v4-pro
-局部改写: qwen-plus / qwen3-max 低档 / deepseek-v4-flash
-读者预演: qwen3-max / deepseek-v4-pro
-兜底模型: deepseek-v4-flash
+学习拆解: deepseek-chat / deepseek-reasoner 按质量需求选择
+初稿生成: deepseek-chat
+局部改写: deepseek-chat
+读者预演: deepseek-chat / deepseek-reasoner 按质量需求选择
 ```
 
-实际模型名以采购当日 API 控制台为准。
+实际模型名和价格以接入当日 DeepSeek 控制台/官方文档为准。
+
+后续迁回国内生产时，可以再补：
+
+1. 阿里云百炼 Qwen 系列  
+   优点：大陆采购、网络稳定、中文能力强、可与阿里云资源同账号管理。
+
+2. 火山方舟  
+   优点：国内云厂商、模型选择多，适合后续做多模型路由。
+
+迁移后的多模型组合可以是：
+
+```text
+学习拆解: deepseek-chat / qwen-max
+初稿生成: deepseek-chat / qwen-max
+局部改写: deepseek-chat / qwen-plus
+读者预演: deepseek-chat / qwen-max
+兜底模型: deepseek-chat
+```
 
 ### 9.3 海外模型池
 
@@ -1068,24 +1157,20 @@ packages/shared/src/
 
 ### 9.4 AI 采购步骤
 
-#### 国内模型采购
+#### MVP DeepSeek 采购
 
-1. 注册平台账号。
-2. 完成实名认证。
-3. 开通模型服务。
+1. 注册 DeepSeek 平台账号。
+2. 开通 API 服务。
+3. 设置预算告警或充值上限。
 4. 创建 API Key。
-5. 设置预算告警。
-6. 设置每日调用上限。
-7. 后端环境变量配置：
+5. 后端环境变量配置：
 
 ```text
-AI_PROVIDER_PRIMARY=aliyun-bailian
-AI_PROVIDER_FALLBACK=deepseek
-ALIYUN_BAILIAN_API_KEY=...
+AI_PROVIDER_PRIMARY=deepseek
 DEEPSEEK_API_KEY=...
 ```
 
-8. 后端保存每次调用：
+6. 后端保存每次调用：
    - provider
    - model
    - input tokens
@@ -1094,7 +1179,7 @@ DEEPSEEK_API_KEY=...
    - latency
    - status
 
-#### 海外模型采购
+#### 后续海外增强模型采购
 
 1. 注册 OpenAI Platform。
 2. 绑定付款方式。
@@ -1137,11 +1222,13 @@ Provider 实现：
 
 ```text
 providers/
-  aliyun-bailian.ts
   deepseek.ts
+  aliyun-bailian.ts
   openai.ts
   volc-ark.ts
 ```
+
+MVP 第一版只实现 `deepseek.ts`，其他 provider 先保留接口位置。
 
 ### 9.6 Prompt 规则
 
@@ -1207,7 +1294,7 @@ server/
   api/
     src/
       app.ts
-      index.ts
+      worker.ts
       routes/
         auth.ts
         folders.ts
@@ -1225,12 +1312,11 @@ server/
         ai-service.ts
       providers/
         ai/
-          aliyun-bailian.ts
           deepseek.ts
+          aliyun-bailian.ts
           openai.ts
       db/
-        schema.ts
-        client.ts
+        supabase-server.ts
         migrations/
       middleware/
         require-auth.ts
@@ -1241,11 +1327,22 @@ server/
     package.json
 ```
 
-也可以保留 `server/functions`，但建议改名为 `server/api`，因为它不应该被某一家函数平台绑定。
+MVP 可以把 Cloudflare Pages Functions 的入口放在 `web/functions/api/[[path]].ts`，再复用 `server/api/src/app.ts` 的 Hono app。这样开发目录清晰，部署又能贴合 Cloudflare Pages。
+
+也可以保留 `server/functions` 的旧占位，但真实 API 建议迁到 `server/api`，因为它不应该被某一家国内云函数平台绑定。
 
 ### 10.2 技术栈
 
-推荐：
+MVP 推荐：
+
+- TypeScript。
+- Hono。
+- Zod。
+- Supabase JS server client。
+- Supabase SQL migration。
+- Vitest 单元测试。
+
+国内生产迁移后可补：
 
 - Node.js 20+。
 - TypeScript。
@@ -1256,8 +1353,7 @@ server/
 - OpenAPI 文档。
 - Vitest 单元测试。
 
-Hono 更轻，适合 serverless；Fastify 插件生态更成熟。  
-本项目 API 初期不复杂，推荐 Hono。
+Hono 更轻，适合 Cloudflare Pages Functions/Workers；Fastify 插件生态更成熟，但更适合后续 Node 服务。
 
 ### 10.3 后端中间件
 
@@ -1277,8 +1373,8 @@ Hono 更轻，适合 serverless；Fastify 插件生态更成熟。
 允许来源：
 
 ```text
-https://app.yourdomain.cn
-https://staging.yourdomain.cn
+https://app.yourdomain.com
+https://preview.yourdomain.com
 chrome-extension://<production-extension-id>
 chrome-extension://<staging-extension-id>
 ```
@@ -1294,9 +1390,9 @@ Access-Control-Allow-Origin: *
 严禁出现在前端和插件：
 
 - AI API Key。
-- Authing Client Secret。
-- DB URL。
-- OSS Secret。
+- Supabase service role key。
+- Supabase JWT secret。
+- DeepSeek API Key。
 - JWT signing secret。
 
 只允许在后端环境变量/密钥管理里。
@@ -1320,13 +1416,13 @@ web/src/hooks/use-ai-run.ts
 
 改造顺序：
 
-1. 增加登录页和 `/api/me`。
+1. 增加登录页和 `/api/v1/me`。
 2. 项目页从 API 读取 projects。
 3. 文案选择页从 API 读取 folders/notes/snippets。
-4. 学习拆解调用 `/ai/analyze`。
-5. 文案创作调用 `/ai/draft`。
-6. 编辑细调调用 `/ai/rewrite`。
-7. 读者预演调用 `/ai/reader-preview`。
+4. 学习拆解调用 `/api/v1/ai/analyze`。
+5. 文案创作调用 `/api/v1/ai/draft`。
+6. 编辑细调调用 `/api/v1/ai/rewrite`。
+7. 读者预演调用 `/api/v1/ai/reader-preview`。
 8. 草稿编辑实时保存或手动保存。
 
 ### 11.2 插件端
@@ -1402,9 +1498,12 @@ GitHub Actions
 - GitHub Actions 构建后上传到阿里云 OSS staging bucket。
 - 自动刷新 CDN。
 
-海外免费：
+MVP 海外免费主线：
 
-- Vercel/Cloudflare 自动 PR preview。
+- Cloudflare Pages 连接 GitHub 仓库。
+- PR 自动生成 preview deployment。
+- `main` 自动部署到 production/staging。
+- API 使用 Pages Functions，同仓库同域名部署。
 
 ### 12.3 API 预览
 
@@ -1490,95 +1589,98 @@ Web：
 
 ```text
 VITE_APP_ENV=staging
-VITE_API_BASE_URL=https://api-staging.yourdomain.cn
+VITE_API_BASE_URL=/api
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
 ```
 
 Extension：
 
 ```text
 WXT_PUBLIC_APP_ENV=staging
-WXT_PUBLIC_API_BASE_URL=https://api-staging.yourdomain.cn
-WXT_PUBLIC_WEB_APP_URL=https://staging.yourdomain.cn
+WXT_PUBLIC_API_BASE_URL=https://app.yourdomain.com/api
+WXT_PUBLIC_WEB_APP_URL=https://app.yourdomain.com
+WXT_PUBLIC_SUPABASE_URL=...
+WXT_PUBLIC_SUPABASE_ANON_KEY=...
 ```
 
 API：
 
 ```text
 APP_ENV=staging
-DATABASE_URL=...
-AUTH_PROVIDER=authing
-AUTHING_ISSUER=...
-AUTHING_CLIENT_ID=...
-AUTHING_CLIENT_SECRET=...
-SESSION_SECRET=...
-AI_PROVIDER_PRIMARY=aliyun-bailian
-ALIYUN_BAILIAN_API_KEY=...
+PUBLIC_APP_URL=https://app.yourdomain.com
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_JWT_SECRET=...
+AI_PROVIDER_PRIMARY=deepseek
 DEEPSEEK_API_KEY=...
-OSS_BUCKET=...
+AI_DAILY_BUDGET_CNY=...
 ```
 
 ---
 
 ## 14. 联调阶段计划
 
-### Phase 0：账号和云资源准备
+### Phase 0：MVP 账号和云资源准备
 
 目标：把必须由用户亲自操作的外部资源准备好。
 
 用户需要做：
 
-- 注册云平台账号。
-- 完成实名认证。
-- 准备域名。
-- 决定是否先备案。
-- 注册 AI 平台账号。
-- 注册账号服务账号。
-- 准备付款方式或充值。
+- 确认阿里云域名可添加 DNS 记录。
+- 注册 Cloudflare 账号。
+- 注册 Supabase 账号。
+- 注册 DeepSeek 平台账号并创建 API Key。
+- 准备 GitHub 仓库权限，用于 Cloudflare Pages 自动部署。
+- 可选：如果插件要发布商店，准备 Chrome Web Store 开发者账号。
 
 工程输出：
 
-- 云资源清单。
+- Cloudflare Pages 项目。
+- Supabase 项目。
+- DeepSeek provider 配置。
 - 环境变量模板。
 - 成本预估表。
 
 验收标准：
 
-- 有 staging API 可访问。
-- 有 staging web 可访问。
-- 有数据库连接串。
+- `https://app.yourdomain.com` 可访问。
+- `https://app.yourdomain.com/api/health` 可访问。
+- Supabase 数据库可连接。
 - 有 AI Key。
 
-### Phase 1：后端骨架
+### Phase 1：MVP 后端/API 骨架
 
 目标：建立真实 API 服务。
 
 任务：
 
-- 创建 `server/api`。
-- 接入 Hono/Fastify。
+- 创建 `server/api` 或 Cloudflare Pages Functions API 入口。
+- 接入 Hono。
 - 接入 Zod。
-- 接入 Drizzle。
+- 接入 Supabase server client。
 - 建立 users/folders/notes/snippets 基础表。
 - 增加 `/health` 和 `/api/v1/me`。
-- 增加 OpenAPI 文档。
+- 增加 API schema 文档。
 
 验收：
 
-- `GET /health` 返回 ok。
-- staging 部署成功。
+- `GET /api/health` 返回 ok。
+- Cloudflare Pages 部署成功。
 - CI 能 typecheck/build。
-- DB migration 可自动执行。
+- Supabase SQL migration 可重复执行。
 
-### Phase 2：账号登录
+### Phase 2：Supabase 账号登录
 
 目标：Web 端能登录，后端能识别用户。
 
 任务：
 
-- 接 Authing/OIDC 或自建邮箱验证码。
+- 接 Supabase Auth 邮箱登录。
 - Web 增加登录页。
-- 后端创建 users/user_identities。
-- Cookie session。
+- 数据库创建 users/profile 映射。
+- API 校验 Supabase JWT。
 - `/api/v1/me` 返回当前用户。
 
 验收：
@@ -1596,7 +1698,7 @@ OSS_BUCKET=...
 - 实现设备码绑定。
 - 插件打开绑定页。
 - Web 登录后确认绑定。
-- 插件拿到 refresh token。
+- 插件拿到可刷新登录状态或插件专用 token。
 - 后端记录 extension_devices。
 
 验收：
@@ -1808,7 +1910,8 @@ OSS_BUCKET=...
 ### 16.1 必须遵守的工程规则
 
 - AI Key 只放后端。
-- DB 不暴露公网白名单以外访问。
+- Supabase service role key 只放后端。
+- 前端和插件只能使用 Supabase anon key，并依赖 RLS/API 鉴权。
 - API 必须鉴权。
 - 所有用户数据查询必须带 `user_id`。
 - 所有写接口必须做 rate limit。
@@ -1818,15 +1921,17 @@ OSS_BUCKET=...
 
 ### 16.2 个人信息与数据出境
 
-如果默认使用大陆云和大陆模型，合规压力较小。
+MVP 默认使用 Cloudflare/Supabase 海外服务和 DeepSeek API，需要把它当作海外/跨境处理来设计。
 
-如果使用 OpenAI 等海外模型：
+必须做到：
 
-- 明确告知用户其输入内容可能发送到境外服务。
-- 需要用户单独同意。
-- 提供关闭海外模型的选项。
-- 默认不要自动把用户整个文案库发往海外。
-- 记录每次使用海外模型的 provider/model。
+- 小范围测试时明确告知用户这是 MVP 测试环境。
+- 隐私政策里说明数据存储和模型调用服务。
+- 不收集和处理不必要的敏感个人信息。
+- 默认不要自动把用户整个文案库发给模型；只发送本次选择的参考内容。
+- 记录每次 AI 调用的 provider/model、token、成本和状态。
+
+如果后续迁回大陆云和大陆模型，合规压力会降低，但仍需要隐私政策、用户协议、数据删除/导出和账号注销入口。
 
 ### 16.3 生成式 AI 服务注意点
 
@@ -1868,7 +1973,8 @@ API：
 - 每日 AI 费用估算。
 - 单用户成本排行。
 - 异常高频用户。
-- OSS/CDN 流量。
+- Supabase 存储/出站流量。
+- Cloudflare Functions 请求量。
 
 ### 17.2 告警
 
@@ -1876,9 +1982,9 @@ API：
 
 - AI 日成本超过阈值。
 - API 5xx 超过阈值。
-- DB 连接失败。
-- DB 存储超过阈值。
-- 云函数错误率升高。
+- Supabase 请求或 DB 错误升高。
+- Supabase DB/Storage 接近 Free 限制。
+- Cloudflare Functions 错误率升高。
 - 余额不足。
 
 ---
@@ -1935,12 +2041,10 @@ Lumos AI Writer
 
 可能包括：
 
-- 域名。
-- 云数据库最低规格。
-- 对象存储少量费用。
-- CDN 少量流量费用。
-- 账号服务费用。
-- AI 预充值。
+- 域名续费，当前已有域名则不算新增月成本。
+- Supabase Free，MVP 阶段 0 固定月成本。
+- Cloudflare Pages/Functions Free，MVP 阶段 0 固定月成本。
+- DeepSeek API 预充值或按量费用。
 - 浏览器插件商店开发者账号费用。
 
 ### 19.2 变动成本
@@ -1948,21 +2052,21 @@ Lumos AI Writer
 主要来自：
 
 - AI token。
-- CDN 流量。
-- OSS/COS 存储和请求。
-- 数据库规格。
-- 云函数调用。
-- 短信验证码，如果启用手机号登录。
+- Supabase 超出 Free 后的数据库、存储和出站流量。
+- Cloudflare 超出 Free 后的请求或高级能力。
+- 浏览器商店发布费用。
+- 邮件服务，如果需要自定义 SMTP 或更稳定送达。
 
 ### 19.3 成本控制原则
 
 - 先邮箱登录，不先短信登录。
-- AI 默认用国内性价比模型。
-- 海外高价模型做高级开关。
+- AI 默认用 DeepSeek。
+- 暂不接 OpenAI 等更高价模型。
 - 单用户每日额度。
 - 长文输入截断和摘要。
 - 分析结果缓存。
 - 同一批参考素材重复分析时复用结果。
+- 只保存小红书图片 URL，不在 MVP 阶段搬运封面图片到自有存储。
 
 ---
 
@@ -1970,16 +2074,16 @@ Lumos AI Writer
 
 为了避免方案过大，第一轮只做这些：
 
-1. 后端 API 骨架。
-2. PostgreSQL 数据库。
-3. 邮箱/Authing 登录。
-4. 插件设备绑定。
-5. folders/notes/snippets 云同步。
-6. Web 读取真实文案库。
-7. `/ai/analyze` 真实 AI。
-8. `/ai/draft` 真实 AI。
-9. staging 自动部署。
-10. 插件 CI artifact。
+1. Cloudflare Pages 部署 Web。
+2. 阿里云 DNS 绑定 `app.` 子域名。
+3. Cloudflare Pages Functions / API 骨架。
+4. Supabase Auth 邮箱登录。
+5. Supabase Postgres schema、RLS 和基础 migration。
+6. 插件设备绑定或最小登录态桥接。
+7. folders/notes/snippets 云同步。
+8. Web 读取真实文案库。
+9. DeepSeek `/ai/analyze` 和 `/ai/draft`。
+10. GitHub 自动部署和插件 CI artifact。
 
 第一轮暂不做：
 
@@ -1991,31 +2095,40 @@ Lumos AI Writer
 - 向量数据库。
 - 自动训练个人模型。
 - 多平台内容采集。
+- 国内云迁移。
+- 独立 `api.` 子域名。
+- 图片搬运和自有对象存储。
 
 ---
 
 ## 21. 立即行动清单
 
-### 21.1 需要用户决策
+### 21.1 已确定决策
 
-1. 大陆正式云选阿里云还是腾讯云。
-2. 是否现在开始备案。
-3. 账号体系先用 Authing 还是自建邮箱验证码。
-4. 默认 AI 先用阿里云百炼还是 DeepSeek。
-5. 是否允许海外模型作为增强选项。
-6. 插件优先发布 Chrome 还是 Edge。
+1. MVP 阶段使用海外免费/低成本路线。
+2. 域名继续在阿里云。
+3. 腾讯云备案接入先保留，暂不作为 MVP 阻塞项。
+4. 默认 AI 使用 DeepSeek。
+5. 非 AI 固定月成本尽量保持 0。
 
-### 21.2 工程下一步
+### 21.2 仍需用户确认
+
+1. MVP 子域名是否使用 `app.yourdomain.com`。
+2. Supabase 登录方式先用 magic link，还是邮箱密码。
+3. 插件内测优先本地加载 zip，还是尽早注册 Chrome Web Store。
+
+### 21.3 工程下一步
 
 建议下一轮直接开始：
 
-1. 新建 `server/api`。
+1. 新建 Cloudflare Pages/Functions API 入口。
 2. 增加 `packages/shared` API schema。
-3. 设计 Drizzle schema。
-4. 写 `/health`、`/me`、folders/notes/snippets API。
-5. 给 web 增加 API client。
+3. 设计 Supabase SQL schema 和 RLS。
+4. 写 `/api/health`、`/api/v1/me`、folders/notes/snippets API。
+5. 给 Web 增加 Supabase/Auth/API client。
 6. 给 extension 增加 cloud repository 抽象。
-7. 配置 GitHub Actions build/test。
+7. 实现 DeepSeek provider。
+8. 配置 Cloudflare Pages 自动部署和 GitHub Actions build/test。
 
 ---
 
@@ -2029,8 +2142,12 @@ Lumos AI Writer
 - 阿里云 CDN 添加加速域名与备案要求：https://help.aliyun.com/zh/cdn/getting-started/add-a-domain-name
 - 阿里云百炼模型调用价格：https://help.aliyun.com/zh/model-studio/model-pricing
 - DeepSeek API 模型与价格：https://api-docs.deepseek.com/quick_start/pricing/
+- Cloudflare Pages 自定义域名：https://developers.cloudflare.com/pages/configuration/custom-domains/
+- Cloudflare Pages Functions 价格：https://developers.cloudflare.com/pages/functions/pricing/
 - OpenAI API Pricing：https://openai.com/api/pricing/
 - Cloudflare Workers Limits：https://developers.cloudflare.com/workers/platform/limits/
+- Cloudflare Workers Pricing：https://developers.cloudflare.com/workers/platform/pricing/
+- Supabase Pricing：https://supabase.com/pricing
 - Vercel Limits：https://vercel.com/docs/limits
 - Firebase Pricing：https://firebase.google.com/pricing
 - Clerk Pricing：https://clerk.com/pricing

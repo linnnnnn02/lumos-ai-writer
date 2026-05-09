@@ -35,6 +35,56 @@ body {
   overflow-x: hidden;
 }
 
+@keyframes sidepanel-shell-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sidepanel-card-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sidepanel-field-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sidepanel-save-settle {
+  0% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(0.985);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
 button,
 input,
 select,
@@ -61,6 +111,7 @@ button:disabled {
   background:
     radial-gradient(circle at top left, rgba(103, 199, 255, 0.12), transparent 24%),
     radial-gradient(circle at 90% 10%, rgba(255, 176, 106, 0.16), transparent 26%);
+  animation: sidepanel-shell-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .sidepanel-header {
@@ -94,12 +145,18 @@ button:disabled {
   font-size: 13px;
   font-weight: 700;
   padding: 0 10px;
+  transition:
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
 }
 
 .sidepanel-tab.active {
   background: rgba(255, 255, 255, 0.9);
   color: var(--panel-text);
   box-shadow: 0 8px 18px rgba(48, 34, 22, 0.05);
+  animation: sidepanel-field-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .library-link-button {
@@ -179,6 +236,7 @@ button:disabled {
   background: var(--panel-surface);
   backdrop-filter: blur(18px);
   box-shadow: var(--panel-shadow);
+  animation: sidepanel-card-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .field-label {
@@ -199,6 +257,7 @@ button:disabled {
   margin-top: 12px;
   border-top: 1px solid rgba(31, 22, 17, 0.06);
   padding-top: 12px;
+  animation: sidepanel-field-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .save-info-row {
@@ -245,6 +304,7 @@ button:disabled {
   grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: center;
+  animation: sidepanel-field-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .folder-create-input-shell {
@@ -306,6 +366,10 @@ button:disabled {
   color: var(--panel-text);
 }
 
+.annotation-card.active {
+  animation: sidepanel-card-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .annotation-title-row {
   display: flex;
   align-items: flex-start;
@@ -331,6 +395,7 @@ button:disabled {
   line-height: 1.65;
   padding: 11px 12px;
   white-space: pre-wrap;
+  animation: sidepanel-field-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .annotation-label {
@@ -468,6 +533,10 @@ button:disabled {
   overflow: visible;
 }
 
+.annotation-save-button.saved {
+  animation: sidepanel-save-settle 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .annotation-save-button-label {
   position: relative;
   z-index: 1;
@@ -548,6 +617,7 @@ button:disabled {
   font-size: 13px;
   line-height: 1.65;
   padding: 14px;
+  animation: sidepanel-field-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .action-stack {
@@ -595,6 +665,7 @@ button:disabled {
   margin: 12px 4px 0;
   font-size: 13px;
   line-height: 1.6;
+  animation: sidepanel-field-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .feedback.error {
@@ -686,6 +757,23 @@ button:disabled {
 
 .result-item {
   min-width: 0;
+  animation: sidepanel-field-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.result-item:nth-child(2) {
+  animation-delay: 35ms;
+}
+
+.result-item:nth-child(3) {
+  animation-delay: 70ms;
+}
+
+.result-item:nth-child(4) {
+  animation-delay: 105ms;
+}
+
+.result-item:nth-child(5) {
+  animation-delay: 140ms;
 }
 
 .result-key {
@@ -719,4 +807,23 @@ button:disabled {
 
 .break-anywhere {
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  button:hover:not(:disabled),
+  .tag-edit-cancel {
+    transform: none;
+  }
+
+  .folder-create-cancel:hover:not(:disabled) {
+    transform: translateY(-50%);
+  }
 }

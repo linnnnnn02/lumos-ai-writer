@@ -101,7 +101,7 @@ export function WorkflowTitleMenu({
           role="menu"
           ref={menuRef}
           style={{ left: menuPosition.left, top: menuPosition.top }}
-          className="fixed z-[90] grid max-h-[calc(100vh-1.5rem)] w-[min(18.5rem,calc(100vw-1.5rem))] gap-1.5 overflow-y-auto rounded-[1.2rem] border border-white/76 bg-white/90 p-1.5 shadow-[0_20px_56px_rgba(48,34,22,0.1)] backdrop-blur-xl"
+          className="ui-popover-motion fixed z-[90] grid max-h-[calc(100vh-1.5rem)] w-[min(18.5rem,calc(100vw-1.5rem))] gap-1.5 overflow-y-auto rounded-[1.2rem] border border-white/76 bg-white/90 p-1.5 shadow-[0_20px_56px_rgba(48,34,22,0.1)] backdrop-blur-xl"
         >
           {steps.map((item) => {
             const Icon = item.icon

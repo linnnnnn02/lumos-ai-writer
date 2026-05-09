@@ -1,6 +1,9 @@
 node_modules
 .pnpm-store
 dist
+.env
+.env.local
+.env.*.local
 .wxt
 .output
 .DS_Store
@@ -8,5 +11,5 @@ dist
 .tools
 coverage
 *.tsbuildinfo
+server/api/lib
 server/functions/lib
-

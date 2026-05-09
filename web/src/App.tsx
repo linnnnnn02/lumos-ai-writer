@@ -753,8 +753,8 @@ function ShellStepPills({ step }: { step: PageStep }) {
           key={item.id}
           className={
             item.id === step
-              ? 'rounded-full bg-[var(--foreground)] px-3 py-1.5 text-xs font-semibold text-white'
-              : 'rounded-full px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)]'
+              ? 'ui-step-pill ui-step-pill-active rounded-full bg-[var(--foreground)] px-3 py-1.5 text-xs font-semibold text-white'
+              : 'ui-step-pill rounded-full px-3 py-1.5 text-xs font-semibold text-[var(--muted-foreground)]'
           }
         >
           {item.title}
@@ -3314,7 +3314,7 @@ function App() {
           <div
             ref={draftMovePromptToolbarRef}
             data-testid="draft-bridge-polish-prompt"
-            className="fixed z-[120] max-w-[calc(100vw-1.75rem)] rounded-full border border-[rgba(42,157,143,0.16)] bg-white/96 px-2 py-2 shadow-[0_18px_48px_rgba(48,34,22,0.14)] backdrop-blur-xl"
+            className="ui-popover-motion fixed z-[120] max-w-[calc(100vw-1.75rem)] rounded-full border border-[rgba(42,157,143,0.16)] bg-white/96 px-2 py-2 shadow-[0_18px_48px_rgba(48,34,22,0.14)] backdrop-blur-xl"
             style={{
               left: draftMovePrompt.position.left,
               top: draftMovePrompt.position.top,
@@ -3359,7 +3359,7 @@ function App() {
 
   function renderDraftBridgeMessage(message: DraftBridgeMessage) {
     return (
-      <div key={message.id} className="flex items-start gap-3">
+      <div key={message.id} className="ui-chat-row flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
           <WandSparkles className="h-5 w-5" />
         </div>
@@ -3460,7 +3460,7 @@ function App() {
             </div>
 
             <div className="min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto">
-              {filteredProjects.map((project) => {
+              {filteredProjects.map((project, index) => {
                 const folder = demoFolders.find((item) => item.id === project.folderId)
                 const projectConversation =
                   project.conversations.find(
@@ -3474,6 +3474,7 @@ function App() {
                     key={project.id}
                     role="button"
                     tabIndex={0}
+                    style={{ animationDelay: `${index * 35}ms` }}
                     aria-label={`进入项目 ${project.name}`}
                     onClick={() => handleOpenProject(project.id)}
                     onKeyDown={(event) => {
@@ -3481,7 +3482,7 @@ function App() {
                       event.preventDefault()
                       handleOpenProject(project.id)
                     }}
-                    className="grid cursor-pointer gap-4 bg-white/72 px-5 py-4 outline-none transition hover:bg-white/92 focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
+                    className="ui-list-item-motion grid cursor-pointer gap-4 bg-white/72 px-5 py-4 outline-none transition hover:bg-white/92 focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
@@ -3559,7 +3560,7 @@ function App() {
               })}
 
               {filteredProjects.length === 0 ? (
-                <div className="bg-white/72 px-6 py-14 text-center">
+                <div className="ui-surface-enter bg-white/72 px-6 py-14 text-center">
                   <p className="text-base font-semibold text-[var(--foreground)]">当前没有匹配到项目</p>
                   <p className="mt-2 text-sm text-[var(--muted-foreground)]">
                     换一个关键词，或者新建项目继续。
@@ -3571,8 +3572,8 @@ function App() {
         </section>
 
         {showCreateProjectCard ? (
-          <div className="fixed inset-0 z-20 flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-4 py-10 backdrop-blur-md">
-            <Card className="w-full max-w-xl rounded-[2.1rem] bg-white/90 shadow-[var(--shadow-elevated)]">
+          <div className="ui-dialog-backdrop fixed inset-0 z-20 flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-4 py-10 backdrop-blur-md">
+            <Card className="ui-dialog-card w-full max-w-xl rounded-[2.1rem] bg-white/90 shadow-[var(--shadow-elevated)]">
               <CardHeader className="flex-row items-start justify-between gap-4">
                 <div>
                   <CardTitle className="text-3xl">新建项目</CardTitle>
@@ -3617,7 +3618,7 @@ function App() {
 
         {projectPendingDelete ? (
           <div
-            className="fixed inset-0 z-30 flex items-center justify-center bg-[rgba(28,21,16,0.2)] px-4 py-10 backdrop-blur-md"
+            className="ui-dialog-backdrop fixed inset-0 z-30 flex items-center justify-center bg-[rgba(28,21,16,0.2)] px-4 py-10 backdrop-blur-md"
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-project-title"
@@ -3625,7 +3626,7 @@ function App() {
             onClick={handleCancelDeleteProject}
           >
             <Card
-              className="w-full max-w-md rounded-[1.8rem] bg-white/94 shadow-[var(--shadow-elevated)]"
+              className="ui-dialog-card w-full max-w-md rounded-[1.8rem] bg-white/94 shadow-[var(--shadow-elevated)]"
               onClick={(event) => event.stopPropagation()}
             >
               <CardHeader className="gap-3">
@@ -3815,7 +3816,7 @@ function App() {
           ? createPortal(
               <div
                 data-sidebar-conversation-menu
-                className="fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[1rem] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
                 role="menu"
                 style={{
                   left: sidebarConversationMenuPosition.left,
@@ -3978,7 +3979,7 @@ function App() {
 
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
-        <section className="w-full max-w-[42rem] rounded-[1.6rem] border border-white/72 bg-white/64 px-7 py-8 shadow-[0_18px_48px_rgba(48,34,22,0.055)]">
+        <section className="ui-surface-enter w-full max-w-[42rem] rounded-[1.6rem] border border-white/72 bg-white/64 px-7 py-8 shadow-[0_18px_48px_rgba(48,34,22,0.055)]">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
             <Sparkles className="h-5 w-5" />
           </div>
@@ -4081,8 +4082,8 @@ function App() {
                         aria-label={card.title}
                         className={
                           isSelected
-                            ? 'relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(240,122,47,0.34)] bg-[linear-gradient(180deg,rgba(255,246,240,0.96),rgba(255,255,255,0.9))] shadow-[0_20px_44px_rgba(61,35,18,0.1)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                            : 'relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(31,22,17,0.075)] bg-white/68 shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition hover:bg-white/86 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                            ? 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(240,122,47,0.34)] bg-[linear-gradient(180deg,rgba(255,246,240,0.96),rgba(255,255,255,0.9))] shadow-[0_20px_44px_rgba(61,35,18,0.1)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                            : 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[1.45rem] border border-[rgba(31,22,17,0.075)] bg-white/68 shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition hover:bg-white/86 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
                         }
                         onClick={selectLength}
                         onKeyDown={(event) => {
@@ -4589,7 +4590,7 @@ function App() {
     const isActive = activeReaderAnnotationId === annotation.id
 
     return (
-      <article key={annotation.id} className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3">
+      <article key={annotation.id} className="ui-list-item-motion grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3">
         <div className="flex justify-center pt-4">
           <span
             className={[
@@ -4648,7 +4649,7 @@ function App() {
     return (
       <section
         key={block.title}
-        className="rounded-[1.2rem] border border-white/76 bg-[rgba(255,248,241,0.7)] px-4 py-4 shadow-[0_12px_28px_rgba(48,34,22,0.04)]"
+        className="ui-surface-enter rounded-[1.2rem] border border-white/76 bg-[rgba(255,248,241,0.7)] px-4 py-4 shadow-[0_12px_28px_rgba(48,34,22,0.04)]"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span

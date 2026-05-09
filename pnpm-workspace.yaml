@@ -2,6 +2,7 @@ packages:
   - web
   - extension
   - packages/*
+  - server/api
   - server/functions
 allowBuilds:
   esbuild: true
