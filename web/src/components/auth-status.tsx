@@ -9,7 +9,6 @@ import {
   LogOut,
   Mail,
   ShieldCheck,
-  UserCircle,
   X,
 } from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
@@ -54,6 +53,11 @@ function getAuthDisplayName(user: CurrentUser | null, session: Session | null) {
   return user?.displayName || user?.email || session?.user.email || '已登录用户'
 }
 
+function getSessionAvatarUrl(session: Session | null) {
+  const avatarUrl = session?.user.user_metadata?.avatar_url
+  return typeof avatarUrl === 'string' ? avatarUrl : null
+}
+
 export function AuthStatus({ className }: AuthStatusProps) {
   const [client, setClient] = useState<SupabaseClient | null>(null)
   const [config, setConfig] = useState<PublicConfigResponse | null>(null)
@@ -74,6 +78,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
     () => getAuthDisplayName(backendUser, session),
     [backendUser, session],
   )
+  const avatarUrl = backendUser?.avatarUrl || getSessionAvatarUrl(session) || '/icon.svg'
 
   useEffect(() => {
     let mounted = true
@@ -112,7 +117,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
         unsubscribe = () => authListener.data.subscription.unsubscribe()
       } catch (error) {
         if (!mounted) return
-        setErrorMessage(error instanceof Error ? error.message : '认证配置读取失败')
+        setErrorMessage(error instanceof Error ? error.message : '登录服务暂时不可用')
       }
     }
 
@@ -151,7 +156,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
       } catch (error) {
         if (cancelled) return
         setBackendStatus('error')
-        setErrorMessage(error instanceof Error ? error.message : '后端联调失败')
+        setErrorMessage(error instanceof Error ? error.message : '云端连接失败')
       }
     }
 
@@ -275,7 +280,13 @@ export function AuthStatus({ className }: AuthStatusProps) {
       {session ? (
         <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/76 bg-white/76 px-2 py-1.5 shadow-[0_12px_28px_rgba(48,34,22,0.05)] backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2 pl-1">
-            <UserCircle className="h-5 w-5 shrink-0 text-[var(--accent-strong)]" />
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-6 w-6 shrink-0 rounded-full object-cover shadow-[0_6px_14px_rgba(48,34,22,0.1)]"
+              referrerPolicy="no-referrer"
+              decoding="async"
+            />
             <div className="hidden min-w-0 leading-tight sm:block">
               <p className="max-w-[13rem] truncate text-xs font-semibold text-[var(--foreground)]">
                 {displayName}
@@ -284,9 +295,9 @@ export function AuthStatus({ className }: AuthStatusProps) {
                 {backendStatus === 'ready' && cloudCounts
                   ? `云端 ${cloudCounts.folders} 文件夹 · ${cloudCounts.notes} 文案`
                   : backendStatus === 'checking'
-                    ? '正在联调后端'
+                    ? '正在同步'
                     : backendStatus === 'error'
-                      ? '后端待检查'
+                      ? '云端未同步'
                       : '已登录'}
               </p>
             </div>
@@ -294,7 +305,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="size-[var(--ui-control-height-sm)]"
             onClick={handleSignOut}
             disabled={isSigningOut}
             aria-label="退出登录"
@@ -330,7 +341,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   {authMode === 'signin' ? '登录 Lumos' : '创建账号'}
                 </h2>
               </div>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={closeDialog}>
+              <Button variant="ghost" size="icon" className="size-[var(--ui-control-height-md)]" onClick={closeDialog}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -341,7 +352,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'h-[var(--ui-control-sm)] shadow-none',
+                  'h-[var(--ui-control-height-sm)] shadow-none',
                   authMode === 'signin'
                     ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                     : 'text-[var(--muted-foreground)] hover:bg-white/58',
@@ -355,7 +366,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'h-[var(--ui-control-sm)] shadow-none',
+                  'h-[var(--ui-control-height-sm)] shadow-none',
                   authMode === 'signup'
                     ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                     : 'text-[var(--muted-foreground)] hover:bg-white/58',

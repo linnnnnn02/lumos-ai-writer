@@ -250,8 +250,6 @@ const initialProjects: ProjectRecord[] = [
 ]
 
 const defaultConversationTitle = '新的文案对话'
-const DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION = 1
-const DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION = 2
 
 type InitialDraftCopy = {
   title: string
@@ -425,9 +423,7 @@ function buildAssistantReply(question: string, context: AiAnalysisResult) {
   return {
     stage: 'followup' as const,
     title: '继续分析',
-    lines: [
-      `我会把你刚才这条追问记在当前项目里，后续分析会继续沿着这个方向走。${context.preference[0]} ${context.preference[1]}`,
-    ],
+    lines: [`已记录这个方向。${context.preference[0]} ${context.preference[1]}`],
   }
 }
 
@@ -436,7 +432,7 @@ function buildSetupReply(question: string) {
     return {
       stage: 'setup' as const,
       title: '分析重点已记录',
-      lines: ['我会优先盯开头怎么把人拉进来，尤其会看首屏是不是够快、够像真人开口。你选好文案后直接开始分析就行。'],
+      lines: ['优先看开头、首屏停留和真人感。'],
     }
   }
 
@@ -444,7 +440,7 @@ function buildSetupReply(question: string) {
     return {
       stage: 'setup' as const,
       title: '分析重点已记录',
-      lines: ['这一轮我会重点拆结构和推进节奏，看看这些文案是怎么安排信息顺序、怎么让读者继续往下看的。'],
+      lines: ['优先拆结构、信息顺序和推进节奏。'],
     }
   }
 
@@ -452,14 +448,14 @@ function buildSetupReply(question: string) {
     return {
       stage: 'setup' as const,
       title: '分析重点已记录',
-      lines: ['收到，我会把语气和口语感放在更前面，尽量帮你拆出“为什么它读起来像真人在说话”。'],
+      lines: ['优先看语气、口语感和真实表达。'],
     }
   }
 
   return {
     stage: 'setup' as const,
     title: '分析重点已记录',
-    lines: ['我先记下这条要求。你可以继续勾选要参考的文案，等你点开始分析后，我会带着这个方向一起拆。'],
+    lines: ['已记录。选择参考文案后开始分析。'],
   }
 }
 
@@ -556,28 +552,6 @@ function formatDraftCopyForClipboard(draft: InitialDraftCopy) {
     .map((line) => line.trim())
     .filter(Boolean)
     .join('\n\n')
-}
-
-function formatUsageNumber(value: number) {
-  return value.toLocaleString('zh-CN')
-}
-
-function formatCny(value: number) {
-  if (value <= 0) return '¥0'
-  if (value < 0.01) return `¥${value.toFixed(4)}`
-  return `¥${value.toFixed(2)}`
-}
-
-function formatAiUsageSummary(usage?: AiUsage | null) {
-  if (!usage?.totalTokens) return ''
-  const promptTokens = usage.promptTokens ?? 0
-  const completionTokens = usage.completionTokens ?? 0
-  const estimatedCny =
-    (promptTokens * DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION +
-      completionTokens * DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION) /
-    1_000_000
-
-  return `${formatUsageNumber(usage.totalTokens)} tokens · 约 ${formatCny(estimatedCny)}`
 }
 
 async function copyTextToClipboard(text: string) {
@@ -810,7 +784,7 @@ function App() {
   const [analysisErrorByConversation, setAnalysisErrorByConversation] = useState<
     Record<string, string>
   >({})
-  const [analysisUsageByConversation, setAnalysisUsageByConversation] = useState<
+  const [, setAnalysisUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
   const [newProjectName, setNewProjectName] = useState('深圳周末路线项目')
@@ -839,7 +813,7 @@ function App() {
   const [finalCopyToast, setFinalCopyToast] = useState('')
   const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>({})
   const [draftCopyByConversation, setDraftCopyByConversation] = useState<Record<string, InitialDraftCopy>>({})
-  const [draftUsageByConversation, setDraftUsageByConversation] = useState<
+  const [, setDraftUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
   const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
@@ -1203,14 +1177,8 @@ function App() {
     isAnalyzing && analysisWaitStartedAt
       ? Math.max(0, Math.floor((aiWaitTick - analysisWaitStartedAt) / 1000))
       : 0
-  const draftWaitSeconds =
-    isDraftGenerating && draftWaitStartedAt
-      ? Math.max(0, Math.floor((aiWaitTick - draftWaitStartedAt) / 1000))
-      : 0
   const analysisError = analysisErrorByConversation[activeConversation.id] ?? ''
-  const analysisUsage = analysisUsageByConversation[activeConversation.id] ?? null
   const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
-  const draftUsage = draftUsageByConversation[activeConversation.id] ?? null
   const effectiveLength = activeConversation.length ?? 'medium'
 
   useEffect(() => {
@@ -1830,7 +1798,7 @@ function App() {
     } catch (error) {
       const message = getErrorMessage(error)
       const friendlyMessage = message.includes('DeepSeek API key')
-        ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型完成学习拆解。'
+        ? 'AI 服务暂时不可用，请稍后重试。'
         : message
       setAnalysisErrorByConversation((current) => ({
         ...current,
@@ -1845,8 +1813,8 @@ function App() {
             id: crypto.randomUUID(),
             role: 'assistant',
             stage: 'setup',
-            title: '真实 AI 暂未跑通',
-            lines: [friendlyMessage, '可以直接点击“重试分析”再跑一次。'],
+            title: 'AI 暂时不可用',
+            lines: [friendlyMessage],
           },
         ],
       }))
@@ -1948,8 +1916,8 @@ function App() {
       setDraftGenerationErrorByConversation((current) => ({
         ...current,
         [conversationId]: message.includes('DeepSeek API key')
-          ? 'DeepSeek API Key 还没配置。配置好后，这里会调用真实模型生成初版文案。'
-          : `${message} 可以直接重试。`,
+          ? 'AI 服务暂时不可用，请稍后重试。'
+          : message,
       }))
     } finally {
       setDraftGeneratingConversationId((current) => (current === conversationId ? '' : current))
@@ -3110,17 +3078,17 @@ function App() {
         .map((line) => line.trim())
         .filter(Boolean),
     }
-    const assistantMessage: RewriteChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      selectedText: normalizedSelection || undefined,
-      lines: assistantLines ?? (normalizedSelection
-        ? [
-            `我会只针对「${normalizedSelection}」动刀，先保留它在原段落里的作用，再把表达往你要的方向压。`,
-            '建议先改语气和具体度，确认顺了以后再决定要不要调整前后句承接。',
-          ]
-        : ['先在左侧选中要改的字词或句子，我会把这次对话限定在那个范围里。']),
-    }
+	    const assistantMessage: RewriteChatMessage = {
+	      id: crypto.randomUUID(),
+	      role: 'assistant',
+	      selectedText: normalizedSelection || undefined,
+	      lines: assistantLines ?? (normalizedSelection
+	        ? [
+	            `只修改「${normalizedSelection}」这一处。`,
+	            '先调整语气和具体度，再看前后承接。',
+	          ]
+	        : ['先在左侧选中要改的内容。']),
+	    }
 
     setRewriteMessagesByConversation((current) => {
       const currentMessages = current[conversationId] ?? []
@@ -3154,11 +3122,11 @@ function App() {
           '带着读者预演建议回到编辑细调：',
           ...suggestionLines.map((line, index) => `${index + 1}. ${line}`),
         ].join('\n'),
-        assistantLines: [
-          '收到，我会把这几条读者预演建议带回当前稿件，优先处理前两段具体度、概括句和结尾互动。',
-          '建议先从开头和结尾动，再检查中段信息是否足够可感知。',
-        ],
-      })
+	        assistantLines: [
+	          '已带回读者预演建议。',
+	          '优先改开头、概括句和结尾互动。',
+	        ],
+	      })
     }
 
     clearRewriteSelection()
@@ -3232,7 +3200,6 @@ function App() {
   function renderDraftGenerationSkeleton() {
     const lengthLabel =
       effectiveLength === 'short' ? '短篇幅' : effectiveLength === 'medium' ? '中篇幅' : '长篇幅'
-    const isLongWait = draftWaitSeconds >= 30
 
     return (
       <div
@@ -3242,11 +3209,9 @@ function App() {
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm leading-6 text-[var(--foreground)]">
-            <p className="font-semibold">{isLongWait ? 'DeepSeek 还在生成' : '正在生成初版'}</p>
+            <p className="font-semibold">正在生成初版</p>
             <p className="mt-1 text-[var(--muted-foreground)]">
-              {isLongWait
-                ? `已等待 ${draftWaitSeconds}s，模型仍在整理标题和正文。完成后会自动替换这里。`
-                : `DeepSeek 正在把学习拆解整理成 ${lengthLabel} 可编辑文案`}
+              正在整理{lengthLabel}文案
             </p>
           </div>
           <div className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[rgba(15,23,42,0.08)] bg-[rgba(241,243,246,0.8)] px-3 text-xs font-semibold text-[var(--muted-foreground)]">
@@ -3566,7 +3531,7 @@ function App() {
             <div className="flex items-start gap-2">
               <MousePointer2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
               <p>
-                需要快速调整时，可圈选文字并移动位置。
+	                圈选文字可拖动调整。
               </p>
             </div>
           </div>
@@ -3751,9 +3716,9 @@ function App() {
               <div>
                 <Badge variant="accent">衔接润色建议</Badge>
               </div>
-              <p className="text-sm leading-7 text-[var(--muted-foreground)]">
-                我把刚才移动到{message.targetLabel}的内容接顺了一下，重点是补出前后关系，不改变原本的小红书口吻。
-              </p>
+	              <p className="text-sm leading-7 text-[var(--muted-foreground)]">
+	                已补前后衔接，保留原口吻。
+	              </p>
               <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.62)] px-4 py-3 text-[length:var(--ui-text-body)] leading-7 text-[#2e3430]">
                 {message.beforeText ? <span>{message.beforeText}</span> : null}
                 <span>{message.movedText}</span>
@@ -3780,9 +3745,6 @@ function App() {
                 <h1 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                   Lumos AI Writer
                 </h1>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                  管理项目、选择参考文案，并完成从学习到预演的创作流程。
-                </p>
               </div>
               <AuthStatus />
             </div>
@@ -3791,7 +3753,7 @@ function App() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--soft-foreground)]" />
                 <Input
-                  className="h-12 rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pl-11 shadow-none"
+                  className="h-[var(--ui-control-height-xl)] rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pl-11 pr-[var(--ui-control-inset-x-xl)] text-[length:var(--ui-control-font-xl)] shadow-none"
                   value={projectSearch}
                   onChange={(event) => setProjectSearch(event.target.value)}
                   placeholder="搜索项目或参考文件夹"
@@ -3849,14 +3811,14 @@ function App() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
+                        <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
                           <FolderOpen className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
                           {renamingProjectId === project.id ? (
                             <Input
                               autoFocus
-                              className="h-9 max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 text-base font-semibold"
+                              className="h-[var(--ui-control-height-md)] max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-md)] font-semibold"
                               value={renamingProjectName}
                               aria-label={`重命名 ${project.name}`}
                               onBlur={() => handleSaveRenameProject(project.id)}
@@ -3907,7 +3869,8 @@ function App() {
                     <div className="flex items-center gap-2 lg:justify-end">
                       <Button
                         variant="ghost"
-                        className="h-9 w-[6.75rem] justify-center bg-transparent px-3 font-medium text-[rgba(214,90,60,0.62)] shadow-none hover:bg-[rgba(214,90,60,0.055)] hover:text-[rgba(214,90,60,0.82)]"
+                        size="sm"
+                        className="w-[6.75rem] justify-center bg-transparent font-medium text-[rgba(214,90,60,0.62)] shadow-none hover:bg-[rgba(214,90,60,0.055)] hover:text-[rgba(214,90,60,0.82)]"
                         aria-label={`删除 ${project.name}`}
                         onClick={(event) => {
                           event.stopPropagation()
@@ -4045,7 +4008,6 @@ function App() {
         libraryError={libraryError}
         workflowSteps={workflowSteps}
         analysisError={analysisError}
-        analysisUsage={analysisUsage}
         analysisWaitSeconds={analysisWaitSeconds}
         isAnalyzing={isAnalyzing}
         isStreaming={isChatStreaming}
@@ -4131,7 +4093,7 @@ function App() {
                 cancelSidebarConversationRename()
               }
             }}
-            className="h-9 min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-3 text-sm font-semibold"
+            className="h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
             aria-label="重命名对话"
           />
         ) : (
@@ -4244,14 +4206,11 @@ function App() {
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <div className="min-w-0">
-              <p className="truncate text-base font-semibold text-[var(--foreground)]">
-                {activeProject.name}
-              </p>
-              <p className="truncate text-sm text-[var(--muted-foreground)]">
-                返回项目页
-              </p>
-            </div>
+	            <div className="min-w-0">
+	              <p className="truncate text-base font-semibold text-[var(--foreground)]">
+	                {activeProject.name}
+	              </p>
+	            </div>
           </div>
 
           <Button
@@ -4287,8 +4246,7 @@ function App() {
               : targetStep === 'rewrite'
                 ? '还没有可调整的初版文案'
                 : '还没有可预演的文案',
-        description:
-          '这个对话还没有选择参考文案，后续环节暂时没有内容。先回到选择文案，挑选要参考的内容并生成偏好分析。',
+        description: '先选择参考文案，再继续后续流程。',
         actionLabel: '去选择文案',
       }
     }
@@ -4303,8 +4261,7 @@ function App() {
               : targetStep === 'rewrite'
                 ? '还没有可调整的初版文案'
                 : '还没有可预演的文案',
-        description:
-          '当前对话已经选择了参考文案，但还没有生成学习总结。先回到学习拆解，完成分析后再进入后续环节。',
+        description: '先完成学习拆解，再继续生成文案。',
         actionLabel: '去学习拆解',
       }
     }
@@ -4319,8 +4276,7 @@ function App() {
               : targetStep === 'reader'
                 ? '还没有可预演的文案'
                 : '请选择这篇内容的篇幅',
-        description:
-          '当前对话已经完成学习拆解，但还没有选择篇幅。先确定内容长度，后续文案创作才有明确边界。',
+        description: '先选择篇幅，再开始文案创作。',
         actionLabel: '去篇幅设置',
       }
     }
@@ -4334,10 +4290,10 @@ function App() {
             : '当前环节还没有内容',
       description:
         targetStep === 'rewrite'
-          ? '当前对话还没有生成初版文案，编辑细调会保持空白。先回到文案创作，让 AI 生成可调整的内容。'
+          ? '先生成初版文案，再进入编辑细调。'
           : targetStep === 'reader'
-            ? '当前对话还没有可供读者预演的最终文案。先回到文案创作生成初版，再进入编辑细调确认版本。'
-          : '当前环节暂时没有可展示的内容。',
+            ? '先确认文案版本，再进入读者预演。'
+          : '当前环节暂无内容。',
       actionLabel:
         targetStep === 'rewrite' || targetStep === 'reader' ? '去文案创作' : '去学习拆解',
     }
@@ -4355,7 +4311,7 @@ function App() {
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
         <section className="ui-surface-enter w-full max-w-[42rem] rounded-[var(--ui-radius-panel)] border border-white/72 bg-white/64 px-7 py-8 shadow-[0_18px_48px_rgba(48,34,22,0.055)]">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+          <div className="flex size-10 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
             <Sparkles className="h-5 w-5" />
           </div>
           <h2 className="mt-5 text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
@@ -4589,19 +4545,9 @@ function App() {
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-6">
             {hasPlanReady ? (
               <section className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col overflow-hidden">
-              <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 pt-5 md:px-4 [scrollbar-gutter:stable]">
-                <div className="grid gap-6">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                      <WandSparkles className="h-5 w-5" />
-                    </div>
-                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
-                      请补充主题、目标读者、必含要点和表达边界。我会先核验信息，必要时继续追问。
-                    </div>
-                  </div>
-
-                  <div className="justify-self-end rounded-[var(--ui-radius-panel)] rounded-tr-[0.45rem] border border-[var(--border)] bg-white/78 p-[1px] shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
-                    <div className="max-w-[42rem] rounded-[var(--ui-radius-card)] bg-white/94 px-5 py-4">
+                <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 pt-5 md:px-4 [scrollbar-gutter:stable]">
+                  <div className="grid gap-5">
+                    <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-5 py-4 shadow-none">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="accent">创作信息</Badge>
                         <span className="text-sm font-medium text-[var(--muted-foreground)]">
@@ -4644,144 +4590,115 @@ function App() {
                         ) : null}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                      <MessageCircle className="h-5 w-5" />
-                    </div>
-                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
-                      {hasDraftReady
-                        ? '初版已生成，可以确认整体方向。'
-                        : isDraftGenerating
-                          ? '正在结合已学习的写法生成初版方案。'
-                          : '信息已核验，可以生成初版方案。'}
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                      <Layers3 className="h-5 w-5" />
-                    </div>
-                    <div
-                      data-plan-draft-card
-                      className="max-w-[50rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="accent">初版方案</Badge>
-                        <Badge variant="outline">标题 + 正文</Badge>
-                        {draftUsage ? (
-                          <Badge variant="outline">{formatAiUsageSummary(draftUsage)}</Badge>
-                        ) : null}
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+                        <Layers3 className="h-5 w-5" />
                       </div>
-                      <p className="mt-4 text-sm leading-7 text-[var(--muted-foreground)]">
-                        {hasDraftReady ? '先确认整体方向；认可后进入编辑细调。' : '根据已选参考内容和学习拆解生成。'}
-                      </p>
-                      {hasDraftReady ? (
-                        <>
-                          <div className="mt-5">
-                            {renderInitialDraftCopy('plan')}
-                          </div>
-                          <div className="mt-3 flex justify-end border-t border-[rgba(31,22,17,0.06)] pt-3">
-                            <div className="inline-flex items-center rounded-full bg-[rgba(241,243,246,0.78)] p-1">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleUndoDraftMove}
-                                disabled={!canUndoDraftMove}
-                                className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
-                              >
-                                <Undo2 className="h-3.5 w-3.5" />
-                                撤回
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleRedoDraftMove}
-                                disabled={!canRedoDraftMove}
-                                className="h-8 px-3 text-[var(--muted-foreground)] disabled:opacity-35"
-                              >
-                                <Redo2 className="h-3.5 w-3.5" />
-                                恢复
-                              </Button>
-                            </div>
-                          </div>
-                        </>
-                      ) : isDraftGenerating ? (
-                        renderDraftGenerationSkeleton()
-                      ) : (
-                        <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="text-sm leading-6 text-[var(--foreground)]">
-                              <p className="font-semibold">已准备好生成</p>
-                              <p className="mt-1 text-[var(--muted-foreground)]">
-                                {effectiveLength === 'short'
-                                  ? '短篇幅'
-                                  : effectiveLength === 'medium'
-                                    ? '中篇幅'
-                                    : '长篇幅'}
-                                ｜{selectedNotes.length} 篇参考，{selectedSnippets.length} 条标注
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={handleGenerateDraft}
-                              disabled={isDraftGenerating}
-                            >
-                              <WandSparkles className="h-4 w-4" />
-                              {draftGenerationError ? '重新生成初版' : '生成初版文案'}
-                            </Button>
-                          </div>
-                          {draftGenerationError ? (
-                            <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]">
-                              {draftGenerationError}
-                            </p>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {draftBridgeMessages.map((message) => renderDraftBridgeMessage(message))}
-
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                      <PenLine className="h-5 w-5" />
-                    </div>
-                    <div className="max-w-[46rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-3 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]">
-                      <p>
-                        整体方向认可后，进入编辑细调，继续处理字词、段落、衔接和局部重写。
-                      </p>
-                      <div className="mt-3">
-                        <Button size="sm" onClick={() => goToStep('rewrite')} disabled={!hasDraftReady}>
-                          进入编辑细调
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="ml-0 grid gap-3 md:ml-[3.25rem]">
-                    {[
-                      { label: '补充信息', text: '还有必须保留的真实细节吗？' },
-                      { label: '校准目标', text: '这版更偏收藏、评论，还是行动？' },
-                      { label: '调整语气', text: '先把表达润得更像朋友分享。' },
-                    ].map((question) => (
-                      <button
-                        key={question.label}
-                        type="button"
-                        onClick={() => setChatInput(question.text)}
-                        className="w-fit rounded-full border border-[var(--border)] bg-white/76 px-4 py-2 text-left text-sm leading-6 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] transition hover:bg-white/94 focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                      <div
+                        data-plan-draft-card
+                        className="max-w-[50rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
                       >
-                        <span className="mr-2 text-[var(--accent-strong)]">{question.label}</span>
-                        {question.text}
-                      </button>
-                    ))}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="accent">初版方案</Badge>
+                          <Badge variant="outline">标题 + 正文</Badge>
+                        </div>
+                        {hasDraftReady ? (
+                          <>
+                            <div className="mt-4">
+                              {renderInitialDraftCopy('plan')}
+                            </div>
+                            <div className="mt-3 flex justify-end border-t border-[rgba(31,22,17,0.06)] pt-3">
+                              <div className="inline-flex items-center rounded-full bg-[rgba(241,243,246,0.78)] p-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={handleUndoDraftMove}
+                                  disabled={!canUndoDraftMove}
+                                  className="text-[var(--muted-foreground)] disabled:opacity-35"
+                                >
+                                  <Undo2 className="h-3.5 w-3.5" />
+                                  撤回
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={handleRedoDraftMove}
+                                  disabled={!canRedoDraftMove}
+                                  className="text-[var(--muted-foreground)] disabled:opacity-35"
+                                >
+                                  <Redo2 className="h-3.5 w-3.5" />
+                                  恢复
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        ) : isDraftGenerating ? (
+                          renderDraftGenerationSkeleton()
+                        ) : (
+                          <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="text-sm leading-6 text-[var(--foreground)]">
+                                <p className="font-semibold">已准备好生成</p>
+                                <p className="mt-1 text-[var(--muted-foreground)]">
+                                  {effectiveLength === 'short'
+                                    ? '短篇幅'
+                                    : effectiveLength === 'medium'
+                                      ? '中篇幅'
+                                      : '长篇幅'}
+                                  ｜{selectedNotes.length} 篇参考，{selectedSnippets.length} 条标注
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={handleGenerateDraft}
+                                disabled={isDraftGenerating}
+                              >
+                                <WandSparkles className="h-4 w-4" />
+                                {draftGenerationError ? '重新生成初版' : '生成初版文案'}
+                              </Button>
+                            </div>
+                            {draftGenerationError ? (
+                              <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]">
+                                {draftGenerationError}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {draftBridgeMessages.map((message) => renderDraftBridgeMessage(message))}
+
+                    <div className="flex justify-start md:ml-[3.25rem]">
+                      <Button size="sm" onClick={() => goToStep('rewrite')} disabled={!hasDraftReady}>
+                        <PenLine className="h-4 w-4" />
+                        进入编辑细调
+                      </Button>
+                    </div>
+
+                    <div className="ml-0 grid gap-3 md:ml-[3.25rem]">
+                      {[
+                        { label: '补充信息', text: '还有必须保留的真实细节吗？' },
+                        { label: '校准目标', text: '这版更偏收藏、评论，还是行动？' },
+                        { label: '调整语气', text: '先把表达润得更像朋友分享。' },
+                      ].map((question) => (
+                        <button
+                          key={question.label}
+                          type="button"
+                          onClick={() => setChatInput(question.text)}
+                          className="w-fit rounded-full border border-[var(--border)] bg-white/76 px-4 py-2 text-left text-sm leading-6 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] transition hover:bg-white/94 focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                        >
+                          <span className="mr-2 text-[var(--accent-strong)]">{question.label}</span>
+                          {question.text}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
 
               <div className="shrink-0 bg-transparent px-1 pt-3 md:px-4">
                 <div className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
@@ -4797,7 +4714,7 @@ function App() {
                     className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
                     placeholder="补充文案信息，或说明要调整的方向..."
                   />
-                  <label className="absolute bottom-4 left-6 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
+                  <label className="absolute bottom-4 left-6 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
                     <Paperclip className="h-4 w-4" />
                     <span className="sr-only">添加附件</span>
                     <input
@@ -4890,7 +4807,7 @@ function App() {
                               data-rewrite-selection-popover
                               onMouseDown={(event) => event.preventDefault()}
                               onClick={handleConfirmRewriteSelection}
-                              className="fixed z-[110] inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/95 px-3 text-xs font-semibold text-[var(--foreground)] shadow-[0_14px_36px_rgba(48,34,22,0.14)] backdrop-blur-xl transition hover:bg-[var(--accent-soft)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                              className="fixed z-[110] inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/95 px-2.5 text-xs font-semibold text-[var(--foreground)] shadow-[0_14px_36px_rgba(48,34,22,0.14)] backdrop-blur-xl transition hover:bg-[var(--accent-soft)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
                               style={{
                                 left: rewriteSelectionCandidate.position.left,
                                 top: rewriteSelectionCandidate.position.top,
@@ -5125,8 +5042,8 @@ function App() {
                   onClick={() => setIsReaderAudienceOpen((current) => !current)}
                   aria-expanded={isReaderAudienceOpen}
                   aria-label="目标用户群体"
-                  title={readerAudienceDraft || '填写目标人群，AI 将按此模拟读者'}
-                  className="flex h-11 w-[min(31rem,46vw)] min-w-[22rem] items-center gap-4 rounded-[var(--ui-radius-control)] border border-[rgba(31,22,17,0.12)] bg-white/92 px-4 text-left text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(15,23,42,0.18)] focus-visible:border-[rgba(15,23,42,0.24)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                  title={readerAudienceDraft || '设置目标用户'}
+                  className="flex h-[var(--ui-control-height-lg)] w-[min(31rem,46vw)] min-w-[22rem] items-center gap-[var(--ui-control-gap-lg)] rounded-[var(--ui-radius-control)] border border-[rgba(31,22,17,0.12)] bg-white/92 px-[var(--ui-control-inset-x-lg)] text-left text-[length:var(--ui-control-font-lg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(15,23,42,0.18)] focus-visible:border-[rgba(15,23,42,0.24)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
                 >
                   <span className="flex shrink-0 items-center gap-1.5 font-semibold text-[var(--foreground)]">
                     <Users className="h-4 w-4 text-[var(--accent-strong)]" />
@@ -5139,7 +5056,7 @@ function App() {
                         : 'min-w-0 flex-1 truncate font-medium text-[var(--soft-foreground)]'
                     }
                   >
-                    {readerAudienceDraft || '填写目标人群，AI 将按此模拟读者'}
+                    {readerAudienceDraft || '设置目标用户'}
                   </span>
                 </button>
                 {isReaderAudienceOpen ? (
@@ -5152,7 +5069,7 @@ function App() {
                         目标用户群体
                       </span>
                       <span className="text-xs leading-5 text-[var(--muted-foreground)]">
-                        填写后，AI 会基于该人群模拟阅读反馈、兴趣点和划走风险。
+                        用于模拟阅读反馈。
                       </span>
                       <Textarea
                         value={readerAudienceDraft}
@@ -5182,9 +5099,6 @@ function App() {
                   <div className="shrink-0 border-b border-[var(--border)] px-6 py-4 lg:px-7">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="accent">最终文案</Badge>
-                      <span className="text-sm font-medium text-[var(--muted-foreground)]">
-                        用当前版本模拟读者阅读
-                      </span>
                     </div>
                   </div>
                   <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 lg:px-8 lg:py-7">
@@ -5201,7 +5115,7 @@ function App() {
                         <div className="flex items-center gap-2">
                           <Badge variant="accent">批注</Badge>
                           <span className="text-sm font-medium text-[var(--muted-foreground)]">
-                            按编号对应左侧标注
+                            对应左侧编号
                           </span>
                         </div>
                         <span className="rounded-full bg-[rgba(236,239,243,0.86)] px-3 py-1 text-xs font-medium text-[var(--soft-foreground)]">

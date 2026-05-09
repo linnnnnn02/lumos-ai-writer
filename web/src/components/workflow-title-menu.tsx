@@ -119,20 +119,20 @@ export function WorkflowTitleMenu({
                 }}
                 className={
                   isActive
-                    ? 'flex items-center gap-3 rounded-[var(--ui-radius-item)] bg-[rgba(241,243,246,0.92)] px-3 py-2.5 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                    : 'flex items-center gap-3 rounded-[var(--ui-radius-item)] px-3 py-2.5 text-left text-[var(--muted-foreground)] outline-none transition hover:bg-[rgba(241,243,246,0.84)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                    ? 'flex items-center gap-2 rounded-[var(--ui-radius-item)] bg-[rgba(241,243,246,0.92)] px-2.5 py-2 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+                    : 'flex items-center gap-2 rounded-[var(--ui-radius-item)] px-2.5 py-2 text-left text-[var(--muted-foreground)] outline-none transition hover:bg-[rgba(241,243,246,0.84)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
                 }
               >
                 <span
                   className={
                     isActive
-                      ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[var(--foreground)]'
-                      : 'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--secondary)] text-[var(--soft-foreground)]'
+                      ? 'flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-[var(--foreground)]'
+                      : 'flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--secondary)] text-[var(--soft-foreground)]'
                   }
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-3.5 w-3.5" />
                 </span>
-                <span className="min-w-0 truncate text-sm font-semibold text-[var(--foreground)]">
+                <span className="min-w-0 truncate text-[length:var(--ui-text-meta)] font-semibold text-[var(--foreground)]">
                   {item.title}
                 </span>
               </button>

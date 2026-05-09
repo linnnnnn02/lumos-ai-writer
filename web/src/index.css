@@ -24,9 +24,9 @@
   --card-foreground: #171311;
   --popover: rgba(255, 255, 255, 0.94);
   --popover-foreground: #171311;
-  --primary: #0f2f4c;
+  --primary: #171311;
   --primary-foreground: #ffffff;
-  --primary-ring: rgba(21, 81, 111, 0.28);
+  --primary-ring: rgba(15, 23, 42, 0.22);
   --secondary: rgba(241, 243, 245, 0.92);
   --secondary-foreground: #171311;
   --muted: rgba(236, 239, 243, 0.78);
@@ -59,16 +59,16 @@
     var(--gradient-brand-base);
   --gradient-brand-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 42%, rgba(3, 7, 18, 0.14) 100%),
     linear-gradient(135deg, #123a5d 0%, #1a5b76 46%, #9f3f19 100%);
+  --button-primary-bg: #171311;
+  --button-primary-bg-hover: #24201d;
   --button-primary-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(3, 7, 18, 0.24),
-    0 18px 36px rgba(15, 47, 76, 0.22),
-    0 8px 18px rgba(150, 56, 22, 0.12);
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.26),
+    0 16px 32px rgba(15, 23, 42, 0.18);
   --button-primary-shadow-hover:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -1px 0 rgba(3, 7, 18, 0.18),
-    0 22px 44px rgba(15, 47, 76, 0.26),
-    0 10px 22px rgba(150, 56, 22, 0.14);
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.2),
+    0 18px 36px rgba(15, 23, 42, 0.2);
   --gradient-wash: radial-gradient(circle at top left, rgba(103, 199, 255, 0.18), transparent 32%),
     radial-gradient(circle at top right, rgba(148, 163, 184, 0.16), transparent 34%),
     linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.88));
@@ -80,15 +80,27 @@
   --ui-space-4: 1rem;
   --ui-space-5: 1.25rem;
   --ui-space-6: 1.5rem;
-  --ui-control-sm: 2rem;
-  --ui-control-md: 2.5rem;
-  --ui-control-lg: 2.75rem;
-  --ui-control-xl: 3rem;
-  --ui-control-gap: 0.5rem;
-  --ui-control-px-sm: 0.75rem;
-  --ui-control-px-md: 0.875rem;
-  --ui-control-px-lg: 1rem;
-  --ui-control-px-xl: 1.125rem;
+  --ui-control-height-sm: 1.875rem;
+  --ui-control-height-md: 2.25rem;
+  --ui-control-height-lg: 2.5rem;
+  --ui-control-height-xl: 2.75rem;
+  --ui-control-sm: var(--ui-control-height-sm);
+  --ui-control-md: var(--ui-control-height-md);
+  --ui-control-lg: var(--ui-control-height-lg);
+  --ui-control-xl: var(--ui-control-height-xl);
+  --ui-control-gap-sm: 0.3125rem;
+  --ui-control-gap-md: 0.375rem;
+  --ui-control-gap-lg: 0.4375rem;
+  --ui-control-gap-xl: 0.5rem;
+  --ui-control-gap: var(--ui-control-gap-md);
+  --ui-control-inset-x-sm: 0.625rem;
+  --ui-control-inset-x-md: 0.75rem;
+  --ui-control-inset-x-lg: 0.875rem;
+  --ui-control-inset-x-xl: 1rem;
+  --ui-control-px-sm: var(--ui-control-inset-x-sm);
+  --ui-control-px-md: var(--ui-control-inset-x-md);
+  --ui-control-px-lg: var(--ui-control-inset-x-lg);
+  --ui-control-px-xl: var(--ui-control-inset-x-xl);
   --ui-text-caption: 0.75rem;
   --ui-text-meta: 0.8125rem;
   --ui-text-control: 0.875rem;
@@ -96,6 +108,10 @@
   --ui-text-body-lg: 1rem;
   --ui-text-section: 1.25rem;
   --ui-text-title: 1.5rem;
+  --ui-control-font-sm: var(--ui-text-meta);
+  --ui-control-font-md: var(--ui-text-control);
+  --ui-control-font-lg: var(--ui-text-control);
+  --ui-control-font-xl: var(--ui-text-body);
   --ui-leading-tight: 1.25;
   --ui-leading-control: 1.35;
   --ui-leading-body: 1.7;
@@ -105,12 +121,12 @@
   --ui-radius-panel: 0.875rem;
   --ui-radius-dialog: 0.875rem;
   --ui-radius-pill: 999px;
-  --ui-field-px: 0.875rem;
+  --ui-field-px: var(--ui-control-inset-x-md);
   --ui-field-py: 0.625rem;
   --ui-field-gap: 0.5rem;
   --ui-field-radius: var(--ui-radius-control);
-  --ui-chip-height: 2rem;
-  --ui-chip-px: 0.875rem;
+  --ui-chip-height: var(--ui-control-height-sm);
+  --ui-chip-px: var(--ui-control-inset-x-md);
   --ui-form-gap: 0.75rem;
   --ui-panel-gap: 1rem;
   --ui-panel-inset: 1rem;
@@ -152,11 +168,7 @@ body {
     linear-gradient(180deg, var(--background) 0%, var(--background-glow) 100%);
 }
 
-button,
-input,
-select,
-textarea {
-  color: inherit;
+:where(button, input, select, textarea) {
   font-family: inherit;
   font-feature-settings: inherit;
   font-variation-settings: inherit;
@@ -236,6 +248,42 @@ textarea[data-rewrite-chat-input]:focus {
   border-color: rgba(15, 23, 42, 0.13);
   background: var(--surface-hover);
   box-shadow: var(--shadow-hover);
+}
+
+.ui-control-sm {
+  height: var(--ui-control-height-sm);
+  min-height: var(--ui-control-height-sm);
+  gap: var(--ui-control-gap-sm);
+  padding-inline: var(--ui-control-inset-x-sm);
+  font-size: var(--ui-control-font-sm);
+  line-height: var(--ui-leading-control);
+}
+
+.ui-control-md {
+  height: var(--ui-control-height-md);
+  min-height: var(--ui-control-height-md);
+  gap: var(--ui-control-gap-md);
+  padding-inline: var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-md);
+  line-height: var(--ui-leading-control);
+}
+
+.ui-control-lg {
+  height: var(--ui-control-height-lg);
+  min-height: var(--ui-control-height-lg);
+  gap: var(--ui-control-gap-lg);
+  padding-inline: var(--ui-control-inset-x-lg);
+  font-size: var(--ui-control-font-lg);
+  line-height: var(--ui-leading-control);
+}
+
+.ui-control-xl {
+  height: var(--ui-control-height-xl);
+  min-height: var(--ui-control-height-xl);
+  gap: var(--ui-control-gap-xl);
+  padding-inline: var(--ui-control-inset-x-xl);
+  font-size: var(--ui-control-font-xl);
+  line-height: var(--ui-leading-control);
 }
 
 .premium-gradient {

@@ -3,7 +3,7 @@ import { cn } from './utils'
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'default' | 'gradient' | 'outline' | 'ghost' | 'soft' | 'danger'
-  size?: 'sm' | 'md' | 'icon'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'icon'
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(

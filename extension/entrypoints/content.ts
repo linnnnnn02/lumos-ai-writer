@@ -1204,11 +1204,14 @@ function createSelectionUi() {
         border-radius: 999px;
         min-height: var(--ui-control-md);
         padding: 0 var(--ui-control-px-lg);
-        background: linear-gradient(135deg, #171311 0%, #334155 100%);
+        background: #171311;
         color: #fff;
         font-size: var(--ui-text-body);
         font-weight: 760;
-        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.16),
+          inset 0 -1px 0 rgba(3, 7, 18, 0.24),
+          0 16px 34px rgba(15, 23, 42, 0.16);
         cursor: pointer;
         pointer-events: auto;
         touch-action: manipulation;
@@ -1355,9 +1358,12 @@ function createSelectionUi() {
       }
 
       .xhs-ai-button.primary {
-        background: linear-gradient(135deg, #171311 0%, #334155 100%);
+        background: #171311;
         color: #fff;
-        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.16);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.16),
+          inset 0 -1px 0 rgba(3, 7, 18, 0.24),
+          0 14px 28px rgba(15, 23, 42, 0.16);
       }
 
       .xhs-ai-toast {

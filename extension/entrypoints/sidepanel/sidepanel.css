@@ -11,6 +11,17 @@
   --panel-text-soft: #87919d;
   --panel-accent-deep: #334155;
   --panel-accent-wash: #eef1f5;
+  --panel-primary-bg: #171311;
+  --panel-primary-bg-hover: #24201d;
+  --panel-primary-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.26),
+    0 16px 32px rgba(15, 23, 42, 0.18);
+  --panel-primary-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.2),
+    0 18px 36px rgba(15, 23, 42, 0.2);
+  --panel-primary-ring: rgba(15, 23, 42, 0.22);
   --panel-gradient-base: linear-gradient(135deg, #0f2f4c 0%, #15516f 46%, #963816 100%);
   --panel-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 42%, rgba(3, 7, 18, 0.18) 100%),
     var(--panel-gradient-base);
@@ -39,14 +50,27 @@
   --ui-space-4: 16px;
   --ui-space-5: 20px;
   --ui-space-6: 24px;
-  --ui-control-sm: 32px;
-  --ui-control-md: 40px;
-  --ui-control-lg: 44px;
-  --ui-control-xl: 48px;
-  --ui-control-gap: 8px;
-  --ui-control-px-sm: 12px;
-  --ui-control-px-md: 14px;
-  --ui-control-px-lg: 16px;
+  --ui-control-height-sm: 30px;
+  --ui-control-height-md: 36px;
+  --ui-control-height-lg: 40px;
+  --ui-control-height-xl: 44px;
+  --ui-control-sm: var(--ui-control-height-sm);
+  --ui-control-md: var(--ui-control-height-md);
+  --ui-control-lg: var(--ui-control-height-lg);
+  --ui-control-xl: var(--ui-control-height-xl);
+  --ui-control-gap-sm: 5px;
+  --ui-control-gap-md: 6px;
+  --ui-control-gap-lg: 7px;
+  --ui-control-gap-xl: 8px;
+  --ui-control-gap: var(--ui-control-gap-md);
+  --ui-control-inset-x-sm: 10px;
+  --ui-control-inset-x-md: 12px;
+  --ui-control-inset-x-lg: 14px;
+  --ui-control-inset-x-xl: 16px;
+  --ui-control-px-sm: var(--ui-control-inset-x-sm);
+  --ui-control-px-md: var(--ui-control-inset-x-md);
+  --ui-control-px-lg: var(--ui-control-inset-x-lg);
+  --ui-control-px-xl: var(--ui-control-inset-x-xl);
   --ui-text-caption: 12px;
   --ui-text-meta: 13px;
   --ui-text-control: 13px;
@@ -58,10 +82,14 @@
   --ui-text-page-title: 24px;
   --ui-text-icon: 16px;
   --ui-text-icon-lg: 24px;
+  --ui-control-font-sm: var(--ui-text-meta);
+  --ui-control-font-md: var(--ui-text-control);
+  --ui-control-font-lg: var(--ui-text-body);
+  --ui-control-font-xl: var(--ui-text-body-lg);
   --ui-leading-tight: 1.25;
   --ui-leading-control: 1.35;
   --ui-leading-body: 1.65;
-  --ui-field-px: 14px;
+  --ui-field-px: var(--ui-control-inset-x-md);
   --ui-field-py: 9px;
   --ui-field-py-compact: 8px;
   --ui-field-gap: 8px;
@@ -201,20 +229,26 @@ button:disabled {
 
 .sidepanel-tab {
   min-width: 0;
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--panel-text-muted);
   cursor: pointer;
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
   transition:
     background-color 180ms ease,
     box-shadow 180ms ease,
     color 180ms ease,
     transform 180ms ease;
+}
+
+.sidepanel-tab:hover:not(.active) {
+  background: var(--panel-surface-hover);
+  color: var(--panel-text);
 }
 
 .sidepanel-tab.active {
@@ -225,15 +259,16 @@ button:disabled {
 }
 
 .library-link-button {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border: 1px solid var(--panel-border);
   border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.48);
   color: var(--panel-accent-deep);
   cursor: pointer;
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-md);
   font-weight: 700;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-md);
   white-space: nowrap;
 }
 
@@ -334,18 +369,31 @@ button:disabled {
   gap: var(--ui-field-gap);
 }
 
-.cloud-sync-dot {
-  width: 9px;
-  height: 9px;
+.cloud-sync-avatar {
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: #2fa861;
-  box-shadow: 0 0 0 4px rgba(47, 168, 97, 0.1);
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.84),
+    0 0 0 5px rgba(47, 168, 97, 0.1),
+    0 8px 18px rgba(15, 23, 42, 0.1);
 }
 
-.cloud-sync-dot.syncing {
-  background: #4d78f2;
-  box-shadow: 0 0 0 4px rgba(77, 120, 242, 0.12);
+.cloud-sync-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cloud-sync-avatar.syncing {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.84),
+    0 0 0 5px rgba(77, 120, 242, 0.12),
+    0 8px 18px rgba(15, 23, 42, 0.1);
 }
 
 .cloud-sync-copy {
@@ -371,15 +419,16 @@ button:disabled {
 }
 
 .cloud-sync-text-button {
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.68);
   color: var(--panel-text-soft);
   cursor: pointer;
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .cloud-sync-text-button:hover {
@@ -392,39 +441,42 @@ button:disabled {
 }
 
 .cloud-login-input {
-  min-height: var(--ui-control-sm);
+  height: var(--ui-control-height-sm);
+  min-height: var(--ui-control-height-sm);
   border-radius: var(--ui-field-radius);
-  font-size: var(--ui-text-caption);
-  padding: var(--ui-field-py-compact) var(--ui-control-px-sm);
+  font-size: var(--ui-control-font-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .cloud-login-button {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border: 0;
   border-radius: var(--ui-field-radius);
   width: 100%;
-  background: var(--panel-gradient);
+  background: var(--panel-primary-bg);
   color: #fff;
   cursor: pointer;
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-md);
   font-weight: 760;
-  padding: 0 var(--ui-control-px-sm);
-  box-shadow: var(--panel-gradient-shadow);
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-md);
+  box-shadow: var(--panel-primary-shadow);
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
   white-space: nowrap;
 }
 
 .cloud-login-button:hover:not(:disabled),
 .cloud-login-button:focus-visible {
-  background: var(--panel-gradient-hover);
-  box-shadow: var(--panel-gradient-shadow-hover);
+  background: var(--panel-primary-bg-hover);
+  box-shadow: var(--panel-primary-shadow-hover);
 }
 
 .cloud-login-button:focus-visible {
   outline: none;
   box-shadow:
-    var(--panel-gradient-shadow-hover),
-    0 0 0 3px var(--panel-gradient-ring);
+    var(--panel-primary-shadow-hover),
+    0 0 0 3px var(--panel-primary-ring);
 }
 
 .cloud-login-button:disabled {
@@ -487,16 +539,19 @@ button:disabled {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--panel-border);
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border-radius: var(--ui-field-radius);
-  padding: var(--ui-field-py) var(--ui-field-px);
+  padding: 0 var(--ui-control-inset-x-md);
   background: rgba(255, 255, 255, 0.82);
   color: var(--panel-text);
+  font-size: var(--ui-control-font-md);
+  line-height: var(--ui-leading-control);
 }
 
 .field-control.compact {
-  min-height: var(--ui-control-sm);
-  padding: var(--ui-field-py-compact) var(--ui-control-px-sm);
+  min-height: var(--ui-control-height-sm);
+  padding: 0 var(--ui-control-inset-x-sm);
+  font-size: var(--ui-control-font-sm);
 }
 
 .field-control:focus {
@@ -521,7 +576,7 @@ button:disabled {
 }
 
 .folder-create-input {
-  padding-right: var(--ui-control-lg);
+  padding-right: var(--ui-control-height-lg);
 }
 
 .folder-create-cancel {
@@ -550,15 +605,16 @@ button:disabled {
 }
 
 .folder-create-confirm {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: var(--panel-accent-deep);
   color: #fff;
   cursor: pointer;
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-md);
   font-weight: 700;
-  padding: 0 var(--ui-control-px-lg);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-lg);
 }
 
 .folder-create-confirm:disabled {
@@ -618,7 +674,7 @@ button:disabled {
 }
 
 .tag-select-trigger {
-  min-height: var(--ui-control-lg);
+  min-height: var(--ui-control-height-lg);
   border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.74);
 }
@@ -706,15 +762,16 @@ button:disabled {
 }
 
 .tag-edit-button {
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.54);
   color: var(--panel-text-soft);
   cursor: pointer;
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .tag-edit-button:hover {
@@ -738,7 +795,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--ui-control-xl);
+  min-height: var(--ui-control-height-xl);
   overflow: visible;
 }
 
@@ -846,31 +903,32 @@ button:disabled {
   border: 0;
   border-radius: var(--ui-field-radius);
   width: 100%;
-  min-height: var(--ui-control-lg);
-  padding: 0 var(--ui-control-px-lg);
-  font-size: var(--ui-text-body);
+  min-height: var(--ui-control-height-lg);
+  padding: 0 var(--ui-control-inset-x-lg);
+  font-size: var(--ui-control-font-lg);
   font-weight: 700;
+  line-height: var(--ui-leading-control);
   cursor: pointer;
 }
 
 .primary-button {
-  background: var(--panel-gradient);
+  background: var(--panel-primary-bg);
   color: white;
-  box-shadow: var(--panel-gradient-shadow);
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  box-shadow: var(--panel-primary-shadow);
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
 }
 
 .primary-button:hover:not(:disabled),
 .primary-button:focus-visible {
-  background: var(--panel-gradient-hover);
-  box-shadow: var(--panel-gradient-shadow-hover);
+  background: var(--panel-primary-bg-hover);
+  box-shadow: var(--panel-primary-shadow-hover);
 }
 
 .primary-button:focus-visible {
   outline: none;
   box-shadow:
-    var(--panel-gradient-shadow-hover),
-    0 0 0 3px var(--panel-gradient-ring);
+    var(--panel-primary-shadow-hover),
+    0 0 0 3px var(--panel-primary-ring);
 }
 
 .secondary-button {
@@ -881,8 +939,9 @@ button:disabled {
 
 .secondary-button.compact {
   width: auto;
-  min-height: var(--ui-control-md);
-  padding: 0 var(--ui-control-px-md);
+  min-height: var(--ui-control-height-md);
+  padding: 0 var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-md);
 }
 
 .tertiary-button {
@@ -907,14 +966,15 @@ button:disabled {
 }
 
 .back-button {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border: 1px solid var(--panel-border);
   border-radius: var(--ui-field-radius);
-  padding: 0 var(--ui-control-px-md);
+  padding: 0 var(--ui-control-inset-x-md);
   background: rgba(255, 255, 255, 0.82);
   color: var(--panel-text);
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-md);
   font-weight: 700;
+  line-height: var(--ui-leading-control);
   cursor: pointer;
 }
 
@@ -953,8 +1013,9 @@ button:disabled {
 
 .secondary-button.inline {
   width: auto;
-  min-height: var(--ui-control-sm);
-  padding: 0 var(--ui-control-px-md);
+  min-height: var(--ui-control-height-sm);
+  padding: 0 var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-sm);
 }
 
 .result-card {
@@ -983,8 +1044,8 @@ button:disabled {
 }
 
 .result-card-toolbar .secondary-button.inline {
-  min-height: var(--ui-control-sm);
-  padding: 0 var(--ui-control-px-sm);
+  min-height: var(--ui-control-height-sm);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .result-grid {

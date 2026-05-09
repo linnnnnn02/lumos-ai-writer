@@ -7,14 +7,27 @@
   --ui-space-4: 16px;
   --ui-space-5: 20px;
   --ui-space-6: 24px;
-  --ui-control-sm: 32px;
-  --ui-control-md: 40px;
-  --ui-control-lg: 44px;
-  --ui-control-xl: 48px;
-  --ui-control-gap: 8px;
-  --ui-control-px-sm: 12px;
-  --ui-control-px-md: 14px;
-  --ui-control-px-lg: 16px;
+  --ui-control-height-sm: 30px;
+  --ui-control-height-md: 36px;
+  --ui-control-height-lg: 40px;
+  --ui-control-height-xl: 44px;
+  --ui-control-sm: var(--ui-control-height-sm);
+  --ui-control-md: var(--ui-control-height-md);
+  --ui-control-lg: var(--ui-control-height-lg);
+  --ui-control-xl: var(--ui-control-height-xl);
+  --ui-control-gap-sm: 5px;
+  --ui-control-gap-md: 6px;
+  --ui-control-gap-lg: 7px;
+  --ui-control-gap-xl: 8px;
+  --ui-control-gap: var(--ui-control-gap-md);
+  --ui-control-inset-x-sm: 10px;
+  --ui-control-inset-x-md: 12px;
+  --ui-control-inset-x-lg: 14px;
+  --ui-control-inset-x-xl: 16px;
+  --ui-control-px-sm: var(--ui-control-inset-x-sm);
+  --ui-control-px-md: var(--ui-control-inset-x-md);
+  --ui-control-px-lg: var(--ui-control-inset-x-lg);
+  --ui-control-px-xl: var(--ui-control-inset-x-xl);
   --ui-text-caption: 12px;
   --ui-text-meta: 13px;
   --ui-text-control: 13px;
@@ -26,10 +39,14 @@
   --ui-text-page-title: 24px;
   --ui-text-icon: 16px;
   --ui-text-icon-lg: 24px;
+  --ui-control-font-sm: var(--ui-text-meta);
+  --ui-control-font-md: var(--ui-text-control);
+  --ui-control-font-lg: var(--ui-text-body);
+  --ui-control-font-xl: var(--ui-text-body-lg);
   --ui-leading-tight: 1.25;
   --ui-leading-control: 1.35;
   --ui-leading-body: 1.65;
-  --ui-field-px: 14px;
+  --ui-field-px: var(--ui-control-inset-x-md);
   --ui-field-py: 9px;
   --ui-field-py-compact: 8px;
   --ui-field-gap: 8px;
@@ -51,6 +68,17 @@
   --ui-surface-hover: rgba(255, 255, 255, 0.76);
   --ui-shadow-muted: inset 0 1px 0 rgba(255, 255, 255, 0.62);
   --ui-shadow-hover: 0 12px 30px rgba(15, 23, 42, 0.07);
+  --ui-primary-bg: #171311;
+  --ui-primary-bg-hover: #24201d;
+  --ui-primary-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.26),
+    0 16px 32px rgba(15, 23, 42, 0.18);
+  --ui-primary-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.2),
+    0 18px 36px rgba(15, 23, 42, 0.2);
+  --ui-primary-ring: rgba(15, 23, 42, 0.22);
 }
 
 @keyframes shadcn-ui-popover-in {
@@ -87,14 +115,12 @@
   min-width: 0;
   align-items: center;
   justify-content: center;
-  gap: var(--ui-control-gap);
   border: 0;
   border-radius: var(--ui-field-radius);
   cursor: pointer;
   font: inherit;
-  font-size: var(--ui-text-control);
   font-weight: 780;
-  line-height: 1;
+  line-height: var(--ui-leading-control);
   outline: none;
   white-space: nowrap;
   transition:
@@ -108,33 +134,56 @@
 }
 
 .shadcn-button[data-size='sm'] {
-  min-height: var(--ui-control-sm);
-  padding: 0 var(--ui-control-px-sm);
+  height: var(--ui-control-height-sm);
+  min-height: var(--ui-control-height-sm);
+  gap: var(--ui-control-gap-sm);
+  padding: 0 var(--ui-control-inset-x-sm);
+  font-size: var(--ui-control-font-sm);
 }
 
 .shadcn-button[data-size='md'] {
-  min-height: var(--ui-control-md);
-  padding: 0 var(--ui-control-px-lg);
+  height: var(--ui-control-height-md);
+  min-height: var(--ui-control-height-md);
+  gap: var(--ui-control-gap-md);
+  padding: 0 var(--ui-control-inset-x-lg);
+  font-size: var(--ui-control-font-md);
+}
+
+.shadcn-button[data-size='lg'] {
+  height: var(--ui-control-height-lg);
+  min-height: var(--ui-control-height-lg);
+  gap: var(--ui-control-gap-lg);
+  padding: 0 var(--ui-control-inset-x-lg);
+  font-size: var(--ui-control-font-lg);
+}
+
+.shadcn-button[data-size='xl'] {
+  height: var(--ui-control-height-xl);
+  min-height: var(--ui-control-height-xl);
+  gap: var(--ui-control-gap-xl);
+  padding: 0 var(--ui-control-inset-x-xl);
+  font-size: var(--ui-control-font-xl);
 }
 
 .shadcn-button[data-size='icon'] {
-  width: var(--ui-control-md);
-  height: var(--ui-control-md);
+  width: var(--ui-control-height-md);
+  height: var(--ui-control-height-md);
+  font-size: var(--ui-control-font-md);
   padding: 0;
 }
 
 .shadcn-button[data-variant='default'] {
-  background: var(--manager-gradient, var(--panel-gradient, linear-gradient(135deg, #0f2f4c, #15516f 46%, #963816)));
+  background: var(--manager-primary-bg, var(--panel-primary-bg, var(--ui-primary-bg)));
   color: #fff;
-  box-shadow: var(--manager-gradient-shadow, var(--panel-gradient-shadow, 0 18px 36px rgba(15, 47, 76, 0.22)));
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  box-shadow: var(--manager-primary-shadow, var(--panel-primary-shadow, var(--ui-primary-shadow)));
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
 }
 
 .shadcn-button[data-variant='gradient'] {
-  background: var(--manager-gradient, var(--panel-gradient, linear-gradient(135deg, #0f2f4c, #15516f 46%, #963816)));
+  background: var(--manager-primary-bg, var(--panel-primary-bg, var(--ui-primary-bg)));
   color: #fff;
-  box-shadow: var(--manager-gradient-shadow, var(--panel-gradient-shadow, 0 18px 36px rgba(15, 47, 76, 0.22)));
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  box-shadow: var(--manager-primary-shadow, var(--panel-primary-shadow, var(--ui-primary-shadow)));
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
 }
 
 .shadcn-button[data-variant='outline'] {
@@ -168,16 +217,16 @@
 
 .shadcn-button[data-variant='default']:hover:not(:disabled),
 .shadcn-button[data-variant='gradient']:hover:not(:disabled) {
-  background: var(--manager-gradient-hover, var(--panel-gradient-hover, linear-gradient(135deg, #123a5d, #1a5b76 46%, #9f3f19)));
-  box-shadow: var(--manager-gradient-shadow-hover, var(--panel-gradient-shadow-hover, 0 22px 44px rgba(15, 47, 76, 0.26)));
+  background: var(--manager-primary-bg-hover, var(--panel-primary-bg-hover, var(--ui-primary-bg-hover)));
+  box-shadow: var(--manager-primary-shadow-hover, var(--panel-primary-shadow-hover, var(--ui-primary-shadow-hover)));
   filter: saturate(1.03);
 }
 
 .shadcn-button[data-variant='default']:focus-visible,
 .shadcn-button[data-variant='gradient']:focus-visible {
   box-shadow:
-    var(--manager-gradient-shadow, var(--panel-gradient-shadow, 0 18px 36px rgba(15, 47, 76, 0.22))),
-    0 0 0 3px var(--manager-gradient-ring, var(--panel-gradient-ring, rgba(21, 81, 111, 0.28)));
+    var(--manager-primary-shadow, var(--panel-primary-shadow, var(--ui-primary-shadow))),
+    0 0 0 3px var(--manager-primary-ring, var(--panel-primary-ring, var(--ui-primary-ring)));
 }
 
 .shadcn-button[data-variant='outline']:hover,
@@ -352,18 +401,24 @@
 }
 
 .shadcn-input {
-  min-height: var(--ui-control-md);
-  padding: var(--ui-field-py) var(--ui-field-px);
+  height: var(--ui-control-height-md);
+  min-height: var(--ui-control-height-md);
+  padding: 0 var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-md);
+  line-height: var(--ui-leading-control);
 }
 
 .shadcn-input.compact {
-  min-height: var(--ui-control-sm);
-  padding: var(--ui-field-py-compact) var(--ui-control-px-sm);
+  height: var(--ui-control-height-sm);
+  min-height: var(--ui-control-height-sm);
+  padding: 0 var(--ui-control-inset-x-sm);
+  font-size: var(--ui-control-font-sm);
 }
 
 .shadcn-textarea {
   min-height: var(--ui-textarea-md);
-  padding: var(--ui-space-2-5) var(--ui-field-px);
+  padding: var(--ui-space-2-5) var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-md);
   line-height: 1.6;
   resize: vertical;
 }
@@ -384,12 +439,15 @@
 
 .shadcn-select-trigger {
   display: inline-flex;
-  min-height: var(--ui-control-md);
+  height: var(--ui-control-height-md);
+  min-height: var(--ui-control-height-md);
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-control-gap);
-  padding: 0 var(--ui-field-px);
+  gap: var(--ui-control-gap-md);
+  padding: 0 var(--ui-control-inset-x-md);
   cursor: pointer;
+  font-size: var(--ui-control-font-md);
+  line-height: var(--ui-leading-control);
 }
 
 .shadcn-select-trigger:hover {
@@ -459,17 +517,17 @@
 .shadcn-select-footer-action {
   display: flex;
   width: 100%;
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   align-items: center;
   justify-content: center;
-  gap: var(--ui-control-gap);
+  gap: var(--ui-control-gap-sm);
   border: 0;
   border-radius: var(--ui-radius-item);
   background: transparent;
   color: var(--panel-accent-deep, var(--manager-accent-deep, #334155));
   cursor: pointer;
   font: inherit;
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
 }
 
@@ -482,13 +540,13 @@
 .shadcn-select-item {
   position: relative;
   display: flex;
-  min-height: calc(var(--ui-control-sm) + 2px);
+  min-height: calc(var(--ui-control-height-sm) + 2px);
   cursor: default;
   user-select: none;
   align-items: center;
   border-radius: var(--ui-radius-item);
   color: var(--panel-text, var(--manager-text, #171311));
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-md);
   outline: none;
   padding: 7px var(--ui-space-2-5) 7px 30px;
   transition:

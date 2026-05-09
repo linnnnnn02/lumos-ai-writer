@@ -1728,7 +1728,7 @@ export function OptionsApp() {
     >
       <aside className="manager-sidebar" aria-label="笔记库文件夹">
         <div className="brand-block">
-          <img className="brand-mark" src="/icon/48.png" alt="" aria-hidden="true" />
+          <img className="brand-mark" src="/icon.svg" alt="" aria-hidden="true" />
           <div>
             <p className="brand-name">Lumos AI Writer</p>
             <h1>笔记库</h1>
@@ -1911,7 +1911,7 @@ export function OptionsApp() {
             ) : (
               <section className="empty-state">
                 <h2>没有匹配到笔记</h2>
-                <p>换一个标签、关键词，或先用插件保存新的小红书笔记。</p>
+                <p>换个标签或关键词。</p>
               </section>
             )}
           </>
@@ -2026,10 +2026,8 @@ export function OptionsApp() {
             ) : (
               <section className="empty-state">
                 <h2>回收站是空的</h2>
-                <p>删除的文件夹和笔记会暂存在这里，7 天后自动清空。</p>
               </section>
             )}
-            <p className="trash-retention-note">已删除内容将在 7 天后自动清空</p>
           </>
         )}
       </main>
@@ -2070,7 +2068,7 @@ export function OptionsApp() {
                 <CardHeader className="note-detail-section-title">
                   <div>
                     <CardTitle>正文</CardTitle>
-                    <CardDescription>选中文字后，可填入右侧当前片段</CardDescription>
+                    <CardDescription>选中文字填入片段</CardDescription>
                   </div>
                   <Badge variant="outline">
                     {detailNote.contentText.trim()
@@ -2197,7 +2195,7 @@ export function OptionsApp() {
                                       className="snippet-tag-name-input"
                                       value={editingTagName.tagName}
                                       maxLength={8}
-                                      placeholder="建议两字，如结构、文风等"
+                                      placeholder="标签名"
                                       aria-label="标签名"
                                       onChange={(event) =>
                                         setEditingTagName((current) =>
@@ -2332,7 +2330,7 @@ export function OptionsApp() {
                             <Textarea
                               className="snippet-textarea snippet-reason-textarea"
                               value={draft.reasonText}
-                              placeholder="记录理由有助于 AI 理解你的喜好，提升创作适配度。"
+                              placeholder="为什么值得参考"
                               onFocus={() => activateSnippetDraft(draft.id)}
                               onChange={(event) =>
                                 updateSnippetDraft(draft.id, {
@@ -2348,7 +2346,6 @@ export function OptionsApp() {
                   ) : (
                     <div className="snippet-editor-empty">
                       <h4>暂无高亮片段</h4>
-                      <p>新增后会保存在这篇笔记下。</p>
                     </div>
                   )}
                 </CardContent>

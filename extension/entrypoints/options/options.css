@@ -15,6 +15,17 @@
   --manager-accent: #64748b;
   --manager-accent-deep: #334155;
   --manager-accent-wash: #eef1f5;
+  --manager-primary-bg: #171311;
+  --manager-primary-bg-hover: #24201d;
+  --manager-primary-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.26),
+    0 16px 32px rgba(15, 23, 42, 0.18);
+  --manager-primary-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(3, 7, 18, 0.2),
+    0 18px 36px rgba(15, 23, 42, 0.2);
+  --manager-primary-ring: rgba(15, 23, 42, 0.22);
   --manager-gradient-base: linear-gradient(135deg, #0f2f4c 0%, #15516f 46%, #963816 100%);
   --manager-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 42%, rgba(3, 7, 18, 0.18) 100%),
     var(--manager-gradient-base);
@@ -43,14 +54,27 @@
   --ui-space-4: 16px;
   --ui-space-5: 20px;
   --ui-space-6: 24px;
-  --ui-control-sm: 32px;
-  --ui-control-md: 40px;
-  --ui-control-lg: 44px;
-  --ui-control-xl: 48px;
-  --ui-control-gap: 8px;
-  --ui-control-px-sm: 12px;
-  --ui-control-px-md: 14px;
-  --ui-control-px-lg: 16px;
+  --ui-control-height-sm: 30px;
+  --ui-control-height-md: 36px;
+  --ui-control-height-lg: 40px;
+  --ui-control-height-xl: 44px;
+  --ui-control-sm: var(--ui-control-height-sm);
+  --ui-control-md: var(--ui-control-height-md);
+  --ui-control-lg: var(--ui-control-height-lg);
+  --ui-control-xl: var(--ui-control-height-xl);
+  --ui-control-gap-sm: 5px;
+  --ui-control-gap-md: 6px;
+  --ui-control-gap-lg: 7px;
+  --ui-control-gap-xl: 8px;
+  --ui-control-gap: var(--ui-control-gap-md);
+  --ui-control-inset-x-sm: 10px;
+  --ui-control-inset-x-md: 12px;
+  --ui-control-inset-x-lg: 14px;
+  --ui-control-inset-x-xl: 16px;
+  --ui-control-px-sm: var(--ui-control-inset-x-sm);
+  --ui-control-px-md: var(--ui-control-inset-x-md);
+  --ui-control-px-lg: var(--ui-control-inset-x-lg);
+  --ui-control-px-xl: var(--ui-control-inset-x-xl);
   --ui-text-caption: 12px;
   --ui-text-meta: 13px;
   --ui-text-control: 13px;
@@ -62,10 +86,14 @@
   --ui-text-page-title: 24px;
   --ui-text-icon: 16px;
   --ui-text-icon-lg: 24px;
+  --ui-control-font-sm: var(--ui-text-meta);
+  --ui-control-font-md: var(--ui-text-control);
+  --ui-control-font-lg: var(--ui-text-body);
+  --ui-control-font-xl: var(--ui-text-body-lg);
   --ui-leading-tight: 1.25;
   --ui-leading-control: 1.35;
   --ui-leading-body: 1.65;
-  --ui-field-px: 14px;
+  --ui-field-px: var(--ui-control-inset-x-md);
   --ui-field-py: 9px;
   --ui-field-py-compact: 8px;
   --ui-field-gap: 8px;
@@ -267,30 +295,31 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--ui-control-gap);
-  min-height: var(--ui-control-md);
+  gap: var(--ui-control-gap-md);
+  min-height: var(--ui-control-height-md);
   border: 0;
   border-radius: var(--ui-field-radius);
-  background: var(--manager-gradient);
+  background: var(--manager-primary-bg);
   color: #fff;
-  font-size: var(--ui-text-body);
+  font-size: var(--ui-control-font-md);
   font-weight: 760;
-  padding: 0 var(--ui-control-px-lg);
-  box-shadow: var(--manager-gradient-shadow);
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-lg);
+  box-shadow: var(--manager-primary-shadow);
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
 }
 
 .new-folder-button:hover:not(:disabled),
 .new-folder-button:focus-visible {
-  background: var(--manager-gradient-hover);
-  box-shadow: var(--manager-gradient-shadow-hover);
+  background: var(--manager-primary-bg-hover);
+  box-shadow: var(--manager-primary-shadow-hover);
 }
 
 .new-folder-button:focus-visible {
   outline: none;
   box-shadow:
-    var(--manager-gradient-shadow-hover),
-    0 0 0 3px var(--manager-gradient-ring);
+    var(--manager-primary-shadow-hover),
+    0 0 0 3px var(--manager-primary-ring);
 }
 
 .new-folder-button span {
@@ -311,24 +340,28 @@ textarea {
 }
 
 .new-folder-panel .new-folder-input {
+  height: var(--ui-control-height-sm);
   min-width: 0;
   border: 0;
   background: transparent;
   color: var(--manager-text);
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
   outline: none;
   box-shadow: none;
 }
 
 .new-folder-panel button {
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-radius-item);
   background: var(--manager-accent-wash);
   color: var(--manager-accent-deep);
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-sm);
   font-weight: 760;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .folder-list {
@@ -347,13 +380,13 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--ui-control-gap);
-  min-height: var(--ui-control-md);
+  gap: var(--ui-control-gap-md);
+  min-height: var(--ui-control-height-md);
   border: 1px solid transparent;
   border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-muted);
-  padding: 0 var(--ui-control-px-sm);
+  padding: 0 var(--ui-control-inset-x-sm);
   text-align: left;
   transition:
     border-color 180ms ease,
@@ -402,12 +435,12 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--ui-space-2-5);
-  min-height: var(--ui-control-xl);
+  min-height: var(--ui-control-height-xl);
   border: 1px solid transparent;
   border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-muted);
-  padding: var(--ui-space-2) var(--ui-control-px-sm);
+  padding: var(--ui-space-2) var(--ui-control-inset-x-sm);
   text-align: left;
   transition:
     border-color 180ms ease,
@@ -491,13 +524,15 @@ textarea {
 
 .search-shell .library-search-input {
   width: 100%;
-  height: var(--ui-control-lg);
+  height: var(--ui-control-height-lg);
   border: 1px solid rgba(31, 22, 17, 0.06);
   border-radius: var(--ui-field-radius);
   background: var(--manager-surface-raised);
   color: var(--manager-text);
+  font-size: var(--ui-control-font-lg);
+  line-height: var(--ui-leading-control);
   outline: none;
-  padding: 0 82px 0 var(--ui-control-px-lg);
+  padding: 0 82px 0 var(--ui-control-inset-x-lg);
   box-shadow: none;
 }
 
@@ -581,12 +616,13 @@ textarea {
 .sort-shell {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-control-gap);
+  gap: var(--ui-control-gap-md);
   justify-self: end;
+  min-height: var(--ui-control-height-lg);
   border: 1px solid rgba(31, 22, 17, 0.06);
   border-radius: var(--ui-field-radius);
   background: var(--manager-surface-muted);
-  padding: var(--ui-space-2) var(--ui-space-2-5) var(--ui-space-2) var(--ui-space-3);
+  padding: 0 var(--ui-space-2-5) 0 var(--ui-space-3);
   box-shadow: none;
 }
 
@@ -598,15 +634,17 @@ textarea {
 
 .sort-shell .sort-select-trigger {
   width: auto;
-  min-height: 28px;
+  height: var(--ui-control-height-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   background: transparent;
   color: var(--manager-text);
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
+  line-height: var(--ui-leading-control);
   outline: none;
   box-shadow: none;
-  padding: 0 2px 0 0;
+  padding: 0 var(--ui-control-inset-x-sm) 0 0;
 }
 
 .library-subbar {
@@ -667,16 +705,17 @@ textarea {
 .tag-tab {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-space-1-5);
-  min-height: var(--ui-control-sm);
+  gap: var(--ui-control-gap-sm);
+  min-height: var(--ui-control-height-sm);
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--manager-text-muted);
-  padding: 0 var(--ui-control-px-sm);
-  font-size: var(--ui-text-body);
+  padding: 0 var(--ui-control-inset-x-md);
+  font-size: var(--ui-control-font-sm);
   font-weight: 700;
+  line-height: var(--ui-leading-control);
   transition:
     border-color 180ms ease,
     box-shadow 180ms ease,
@@ -693,6 +732,11 @@ textarea {
   animation: manager-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.tag-tab:hover:not(.active) {
+  background: var(--manager-surface-muted);
+  color: var(--manager-text);
+}
+
 .tag-dot {
   width: 8px;
   height: 8px;
@@ -701,13 +745,14 @@ textarea {
 }
 
 .danger-folder-button {
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: transparent;
   color: var(--manager-text-soft);
-  font-size: var(--ui-text-control);
-  padding: 0 var(--ui-control-px-sm);
+  font-size: var(--ui-control-font-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .danger-folder-button:hover {
@@ -857,9 +902,9 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--ui-control-px-md);
+  gap: var(--ui-control-inset-x-md);
   border-bottom: 1px solid rgba(31, 22, 17, 0.06);
-  padding: var(--ui-control-px-md) var(--ui-space-4);
+  padding: var(--ui-control-inset-x-md) var(--ui-space-4);
 }
 
 .trash-folder-header > div {
@@ -868,14 +913,15 @@ textarea {
 
 .trash-back-button {
   flex: 0 0 auto;
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: rgba(31, 22, 17, 0.06);
   color: var(--manager-text-muted);
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-sm);
   font-weight: 760;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .trash-back-button:hover {
@@ -916,14 +962,15 @@ textarea {
 
 .trash-folder-actions button,
 .trash-note-actions button {
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: var(--ui-field-radius);
   background: rgba(238, 241, 245, 0.92);
   color: var(--manager-accent-deep);
-  font-size: var(--ui-text-caption);
+  font-size: var(--ui-control-font-sm);
   font-weight: 800;
-  padding: 0 var(--ui-control-px-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
 }
 
 .trash-folder-actions button:last-child,
@@ -1564,12 +1611,12 @@ textarea {
 }
 
 .snippet-tag-select {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border-color: rgba(31, 22, 17, 0.07);
   border-radius: var(--ui-field-radius);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: none;
-  padding: 0 var(--ui-control-px-sm);
+  padding: 0 var(--ui-control-inset-x-md);
 }
 
 .snippet-tag-select:has(.snippet-tag-name-input),
@@ -1702,30 +1749,31 @@ textarea {
 .note-selection-confirm {
   position: fixed;
   z-index: 70;
-  min-height: var(--ui-control-sm);
+  min-height: var(--ui-control-height-sm);
   border: 0;
   border-radius: 999px;
-  background: var(--manager-gradient);
+  background: var(--manager-primary-bg);
   color: #fff;
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-sm);
   font-weight: 800;
-  padding: 0 var(--ui-control-px-md);
-  box-shadow: var(--manager-gradient-shadow);
-  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.28);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-md);
+  box-shadow: var(--manager-primary-shadow);
+  text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
   animation: manager-popover-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .note-selection-confirm:hover,
 .note-selection-confirm:focus-visible {
-  background: var(--manager-gradient-hover);
-  box-shadow: var(--manager-gradient-shadow-hover);
+  background: var(--manager-primary-bg-hover);
+  box-shadow: var(--manager-primary-shadow-hover);
 }
 
 .note-selection-confirm:focus-visible {
   outline: none;
   box-shadow:
-    var(--manager-gradient-shadow-hover),
-    0 0 0 3px var(--manager-gradient-ring);
+    var(--manager-primary-shadow-hover),
+    0 0 0 3px var(--manager-primary-ring);
 }
 
 .snippet-editor-empty {
@@ -1774,7 +1822,7 @@ textarea {
 }
 
 .primary-dialog-button {
-  box-shadow: var(--manager-gradient-shadow);
+  box-shadow: var(--manager-primary-shadow);
 }
 
 .empty-state {
@@ -1858,11 +1906,12 @@ textarea {
 
 .secondary-dialog-button,
 .danger-dialog-button {
-  min-height: var(--ui-control-md);
+  min-height: var(--ui-control-height-md);
   border-radius: var(--ui-field-radius);
-  font-size: var(--ui-text-control);
+  font-size: var(--ui-control-font-md);
   font-weight: 760;
-  padding: 0 var(--ui-control-px-lg);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-lg);
 }
 
 .secondary-dialog-button {

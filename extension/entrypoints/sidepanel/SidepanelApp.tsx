@@ -283,7 +283,7 @@ export function SidepanelApp() {
       setExtractState({
         status: 'error',
         note: null,
-        error: '没有连上页面脚本。请确认你打开的是小红书网页，并刷新页面后重试。',
+        error: '请打开小红书笔记页，刷新后重试。',
       })
     }
   }
@@ -559,7 +559,7 @@ export function SidepanelApp() {
       const currentFolder = folders.find((folder) => folder.id === folderId)
       setAnnotationFeedback(
         savedAnnotationSelection
-          ? `已保存到「${currentFolder?.name || '文案库'}」，可在文案库查看或继续选择新的片段。`
+          ? `已保存到「${currentFolder?.name || '文案库'}」。`
           : '先在正文里选中一段文字。',
       )
       return
@@ -657,12 +657,12 @@ export function SidepanelApp() {
       const localSavedMessage = `已保存到「${activeFolder?.name || '文案库'}」。`
 
       if (cloudAuthState.status !== 'authenticated') {
-        setAnnotationFeedback(`${localSavedMessage} 登录后可同步到网页端。`)
+        setAnnotationFeedback(localSavedMessage)
         return
       }
 
       setIsCloudSyncing(true)
-      setAnnotationFeedback(`${localSavedMessage} 正在同步云端...`)
+      setAnnotationFeedback(`${localSavedMessage} 正在同步...`)
 
       try {
         const token = await getValidCloudAccessToken()
@@ -678,7 +678,7 @@ export function SidepanelApp() {
           note: nextNote,
           snippet: record,
         })
-        setCloudFeedback('刚刚保存的标注已同步到云端。')
+        setCloudFeedback('已同步到云端。')
         setAnnotationFeedback(`${localSavedMessage} 已同步到云端。`)
       } catch (error) {
         const message = getErrorMessage(error)
@@ -765,7 +765,7 @@ export function SidepanelApp() {
             aria-selected={panelView === 'result'}
             onClick={() => setPanelView('result')}
           >
-            查看读取结果
+            读取结果
           </button>
         </div>
         <button className="library-link-button" type="button" onClick={handleOpenManager}>
@@ -789,9 +789,16 @@ export function SidepanelApp() {
           <div className="cloud-sync-row">
             <div className="cloud-sync-account">
               <span
-                className={isCloudSyncing ? 'cloud-sync-dot syncing' : 'cloud-sync-dot'}
+                className={isCloudSyncing ? 'cloud-sync-avatar syncing' : 'cloud-sync-avatar'}
                 aria-hidden="true"
-              />
+              >
+                <img
+                  src={cloudAuthState.user.avatarUrl || '/icon.svg'}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  decoding="async"
+                />
+              </span>
               <div className="cloud-sync-copy">
                 <span className="cloud-sync-title">云端同步</span>
                 <span className="cloud-sync-user">{cloudUserLabel}</span>
@@ -935,7 +942,7 @@ export function SidepanelApp() {
           <Input
             id="filename"
             value={filename}
-            placeholder="默认使用笔记标题，可自定义"
+            placeholder="默认用笔记标题"
             onChange={(event) => {
               setFilename(event.target.value)
               setIsFilenameDirty(true)
@@ -1087,7 +1094,7 @@ export function SidepanelApp() {
               </div>
             </>
           ) : (
-            <p className="feedback error">还没有可查看的读取结果，请先读取笔记。</p>
+            <p className="feedback error">暂无读取结果。</p>
           )}
         </section>
       </main>
@@ -1128,7 +1135,7 @@ export function SidepanelApp() {
                       className="tag-name-inline-input"
                       value={tagNameDraft}
                       maxLength={8}
-                      placeholder="建议两字，如结构、文风等"
+                      placeholder="标签名"
                       aria-label="标签名"
                       onChange={(event) => setTagNameDraft(event.target.value)}
                       onKeyDown={(event) => {
@@ -1208,7 +1215,7 @@ export function SidepanelApp() {
               className="reason-textarea"
               id="reason"
               value={reasonText}
-              placeholder="记录理由有助于 AI 理解你的喜好，提升创作适配度。"
+              placeholder="为什么值得参考"
               onChange={(event) => setReasonText(event.target.value)}
             />
 
@@ -1246,7 +1253,7 @@ export function SidepanelApp() {
           </>
         ) : (
           <div className="annotation-empty">
-            在小红书正文里选中文字，再点“标注片段”。选中的内容会出现在这里。
+            在小红书正文里选中文字，再保存为片段。
           </div>
         )}
 

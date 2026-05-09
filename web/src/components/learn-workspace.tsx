@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { AiUsage, SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
+import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
@@ -57,7 +57,6 @@ type LearnWorkspaceProps = {
   libraryError?: string
   workflowSteps: WorkflowTitleMenuStep[]
   analysisError?: string
-  analysisUsage?: AiUsage | null
   analysisWaitSeconds?: number
   isAnalyzing?: boolean
   isStreaming: boolean
@@ -335,7 +334,7 @@ function NoteDetailDialog({
             type="button"
             aria-label="关闭笔记详情"
             onClick={onClose}
-            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--secondary)] text-[var(--soft-foreground)] transition hover:bg-white hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+            className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-[var(--secondary)] text-[var(--soft-foreground)] transition hover:bg-white hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -401,8 +400,8 @@ function AnalysisBlock({
         </div>
 
         {featuredSnippets.length > 0 ? (
-          <section className="mt-7">
-            <p className="text-sm font-semibold text-[var(--foreground)]">可以重点参考的句子</p>
+	          <section className="mt-7">
+	            <p className="text-sm font-semibold text-[var(--foreground)]">重点句子</p>
             <div className="mt-3 grid gap-3 xl:grid-cols-2">
               {featuredSnippets.map((snippet) => (
                 <button
@@ -429,14 +428,14 @@ function AnalysisBlock({
                     “{snippet.quote}”
                   </blockquote>
                   <p className="mt-2 text-[length:var(--ui-text-control)] leading-6 text-[var(--foreground)]">
-                    <span className="font-semibold">处理方式：</span>
-                    {snippet.description}
-                  </p>
-                  {snippet.reason ? (
-                    <p className="mt-1 text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]">
-                      <span className="font-semibold text-[var(--foreground)]">标注理由：</span>
-                      {snippet.reason}
-                    </p>
+	                    <span className="font-semibold">写法：</span>
+	                    {snippet.description}
+	                  </p>
+	                  {snippet.reason ? (
+	                    <p className="mt-1 text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]">
+	                      <span className="font-semibold text-[var(--foreground)]">理由：</span>
+	                      {snippet.reason}
+	                    </p>
                   ) : null}
                 </button>
               ))}
@@ -485,7 +484,7 @@ function AssistantBlock({
 
   return (
     <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-sm font-semibold text-[var(--accent-strong)]">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-[length:var(--ui-text-meta)] font-semibold text-[var(--accent-strong)]">
         AI
       </div>
       <div
@@ -570,40 +569,13 @@ function UserBlock({ message }: { message: ChatMessage }) {
   )
 }
 
-const DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION = 1
-const DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION = 2
-
-function formatUsageNumber(value: number) {
-  return value.toLocaleString('zh-CN')
-}
-
-function formatCny(value: number) {
-  if (value <= 0) return '¥0'
-  if (value < 0.01) return `¥${value.toFixed(4)}`
-  return `¥${value.toFixed(2)}`
-}
-
-function formatAiUsageSummary(usage?: AiUsage | null) {
-  if (!usage?.totalTokens) return ''
-  const promptTokens = usage.promptTokens ?? 0
-  const completionTokens = usage.completionTokens ?? 0
-  const estimatedCny =
-    (promptTokens * DEEPSEEK_V4_FLASH_INPUT_CNY_PER_MILLION +
-      completionTokens * DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_MILLION) /
-    1_000_000
-
-  return `${formatUsageNumber(usage.totalTokens)} tokens · 约 ${formatCny(estimatedCny)}`
-}
-
 function TypingBlock({
   title,
   text,
-  elapsedSeconds = 0,
   variant = 'dots',
 }: {
   title?: string
   text?: string
-  elapsedSeconds?: number
   variant?: 'analysis' | 'dots'
 }) {
   return (
@@ -612,7 +584,7 @@ function TypingBlock({
       className="ui-chat-row mx-auto flex max-w-5xl gap-4"
       role="status"
     >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-sm font-semibold text-[var(--accent-strong)]">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-[length:var(--ui-text-meta)] font-semibold text-[var(--accent-strong)]">
         AI
       </div>
       <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 shadow-none">
@@ -621,11 +593,6 @@ function TypingBlock({
             <span className="rounded-full border border-[var(--border)] bg-[rgba(238,241,245,0.94)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
               {title}
             </span>
-            {elapsedSeconds > 0 ? (
-              <span className="rounded-full border border-[rgba(15,23,42,0.08)] bg-white/76 px-2.5 py-1 text-xs font-semibold text-[var(--muted-foreground)]">
-                {elapsedSeconds >= 30 ? `已等待 ${elapsedSeconds}s` : `${elapsedSeconds}s`}
-              </span>
-            ) : null}
           </div>
         ) : null}
         {text ? (
@@ -680,7 +647,6 @@ export function LearnWorkspace({
   libraryError = '',
   workflowSteps,
   analysisError = '',
-  analysisUsage = null,
   analysisWaitSeconds = 0,
   isAnalyzing = false,
   isStreaming,
@@ -947,18 +913,18 @@ export function LearnWorkspace({
 
   const emptyLibraryMessage = React.useMemo(() => {
     if (libraryStatus === 'initializing' || libraryStatus === 'loading') {
-      return '正在读取云端文案库。'
+      return '正在读取文案库。'
     }
 
     if (libraryStatus === 'error') {
-      return libraryError ? `云端文案库读取失败：${libraryError}` : '云端文案库读取失败。'
+      return libraryError ? `文案库读取失败：${libraryError}` : '文案库读取失败。'
     }
 
     if (libraryStatus === 'ready' && notes.length === 0) {
-      return '云端文案库暂无文案。'
+      return '文案库暂无文案。'
     }
 
-    return '当前筛选下没有文案。可以清空筛选，或换一个文件夹、标签组合。'
+    return '当前筛选下没有文案。'
   }, [libraryError, libraryStatus, notes.length])
 
   const filterSummary = React.useMemo(() => {
@@ -990,18 +956,15 @@ export function LearnWorkspace({
     if (isAnalyzing) {
       const isLongWait = analysisWaitSeconds >= 30
       return {
-        title: isLongWait ? 'DeepSeek 还在处理' : '正在拆解这批文案',
-        text: isLongWait
-          ? '这次参考内容可能稍多，模型仍在整理结构和偏好判断。你可以继续等待，完成后会自动显示结果。'
-          : 'DeepSeek 正在读取已选参考内容，整理共性写法、读者停留原因和你的稳定偏好。',
+        title: isLongWait ? 'AI 正在处理' : '正在拆解文案',
+        text: '正在整理结构和偏好。',
         variant: 'analysis' as const,
       }
     }
 
     if (!analysisReady) {
       return {
-        title: '已记下你的要求',
-        text: '你可以继续勾选这一轮要参考的文案，我会带着这个方向一起看。',
+        title: '已记录要求',
         variant: 'dots' as const,
       }
     }
@@ -1009,22 +972,20 @@ export function LearnWorkspace({
     if (latestMessage?.role === 'user') {
       return {
         title: '正在整理回答',
-        text: '我在结合刚才这轮分析和你的追问补充更准确的判断。',
         variant: 'dots' as const,
       }
     }
 
     if (analysisMessages.length === 0) {
       return {
-        title: '正在拆解这批文案',
-        text: '我在归纳它们的共性、读者停留原因和你最稳定的偏好，马上给你第一版结论。',
+        title: '正在拆解文案',
+        text: '正在整理结构和偏好。',
         variant: 'analysis' as const,
       }
     }
 
     return {
-      title: '继续整理读者视角',
-      text: '我在把剩下的结论收束成更好落地的判断和下一步建议。',
+      title: '正在整理回答',
       variant: 'dots' as const,
     }
   }, [analysisMessages.length, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
@@ -1036,7 +997,7 @@ export function LearnWorkspace({
         variant={isFiltered ? 'subtle' : 'outline'}
         size="sm"
         className={cn(
-          'h-[var(--ui-chip-height)] min-w-[6.75rem] px-[var(--ui-chip-px)] text-sm shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
+          'min-w-[6.75rem] shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
           isFiltered
             ? 'border-[rgba(77,120,242,0.22)] bg-[rgba(103,199,255,0.18)] text-[#566174] hover:bg-[rgba(103,199,255,0.24)]'
             : 'border-[var(--border)] bg-white/82 text-[var(--foreground)] hover:bg-white/92',
@@ -1077,7 +1038,7 @@ export function LearnWorkspace({
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
+                    'shadow-none',
                     folderFilterId === 'all'
                       ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                       : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
@@ -1093,7 +1054,7 @@ export function LearnWorkspace({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                      'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
+                      'shadow-none',
                       folderFilterId === folder.id
                         ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                         : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
@@ -1119,7 +1080,7 @@ export function LearnWorkspace({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                      'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
+                      'shadow-none',
                       activeTab === tab.id
                         ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
                         : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
@@ -1172,14 +1133,11 @@ export function LearnWorkspace({
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <div className="min-w-0">
-              <p className="truncate text-base font-semibold text-[var(--foreground)]">
-                {projectName}
-              </p>
-              <p className="truncate text-sm text-[var(--muted-foreground)]">
-                返回项目页
-              </p>
-            </div>
+	            <div className="min-w-0">
+	              <p className="truncate text-base font-semibold text-[var(--foreground)]">
+	                {projectName}
+	              </p>
+	            </div>
           </div>
 
           <Button
@@ -1259,7 +1217,7 @@ export function LearnWorkspace({
                           cancelConversationRename()
                         }
                       }}
-                      className="h-9 min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-3 text-sm font-semibold"
+                      className="h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
                       aria-label="重命名对话"
                     />
                   ) : (
@@ -1369,9 +1327,6 @@ export function LearnWorkspace({
                 <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                   文案分析
                 </h1>
-                {analysisUsage ? (
-                  <Badge variant="outline">{formatAiUsageSummary(analysisUsage)}</Badge>
-                ) : null}
                 <WorkflowTitleMenu
                   activeStep={activeWorkflowStep}
                   steps={workflowSteps}
@@ -1399,7 +1354,7 @@ export function LearnWorkspace({
           )}
         >
           {!analysisReady ? (
-            <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
+	                <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
               {setupMessages.length > 0 || typingState ? (
                 <div className="flex max-h-[32%] shrink-0 flex-col gap-4 overflow-y-auto pr-1">
                   {setupMessages.map((message) =>
@@ -1411,7 +1366,6 @@ export function LearnWorkspace({
                   )}
                   {typingState ? (
                     <TypingBlock
-                      elapsedSeconds={isAnalyzing ? analysisWaitSeconds : 0}
                       title={typingState.title}
                       text={typingState.text}
                       variant={typingState.variant}
@@ -1422,21 +1376,18 @@ export function LearnWorkspace({
 
               <section className="flex min-h-0 flex-1 flex-col px-3 py-3">
                 <div className="shrink-0">
-                  <div className="grid gap-1">
-                    <div className="flex flex-wrap items-center gap-4">
-                      <h2 className="text-[length:var(--ui-text-section)] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                        选择文案
+	                  <div className="grid gap-1">
+	                    <div className="flex flex-wrap items-center gap-4">
+	                      <h2 className="text-[length:var(--ui-text-section)] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+	                        选择文案
                       </h2>
                       <WorkflowTitleMenu
                         activeStep={activeWorkflowStep}
                         steps={workflowSteps}
-                        onStepChange={onWorkflowStepChange}
-                      />
-                    </div>
-                    <p className="text-xs leading-6 text-[var(--muted-foreground)]">
-                      当前选择会累计进本轮分析，切换筛选不会清空已选内容。
-                    </p>
-                  </div>
+	                        onStepChange={onWorkflowStepChange}
+	                      />
+	                    </div>
+	                  </div>
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1449,7 +1400,7 @@ export function LearnWorkspace({
                           variant="ghost"
                           size="sm"
                           className={cn(
-                            'h-[var(--ui-chip-height)] px-[var(--ui-chip-px)] text-sm shadow-none',
+                            'shadow-none',
                             activeTab === tab.id
                               ? 'font-semibold text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.04)]'
                               : 'font-medium text-[var(--muted-foreground)]',
@@ -1475,7 +1426,7 @@ export function LearnWorkspace({
                           <SelectTrigger
                             aria-label="更多标签"
                             className={cn(
-                              'h-8 w-auto min-w-[5.75rem] rounded-full border-white/80 bg-white/62 px-3.5 py-1.5 shadow-none',
+                              'h-[var(--ui-control-height-sm)] w-auto min-w-[5.75rem] gap-[var(--ui-control-gap-sm)] rounded-full border-white/80 bg-white/62 px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-sm)] shadow-none',
                               activeOverflowTab
                                 ? 'font-semibold text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.04)]'
                                 : 'font-medium text-[var(--muted-foreground)]',
@@ -1500,7 +1451,7 @@ export function LearnWorkspace({
                         variant="outline"
                         size="sm"
                         className={cn(
-                          'h-8 border-[rgba(31,22,17,0.1)] bg-transparent px-3.5 text-sm font-semibold shadow-none hover:bg-white/58',
+                          'border-[rgba(31,22,17,0.1)] bg-transparent font-semibold shadow-none hover:bg-white/58',
                           activeResultItemIds.length === 0
                             ? 'text-[var(--soft-foreground)]'
                             : 'text-[var(--foreground)]',
@@ -1519,7 +1470,7 @@ export function LearnWorkspace({
                       </Button>
                       <Button
                         size="sm"
-                        className="h-8 min-w-[5.5rem] px-4 text-sm font-semibold"
+                        className="min-w-[5.5rem] font-semibold"
                         disabled={isStreaming || selectedItemIds.length === 0}
                         onClick={onStartAnalysis}
                       >
@@ -1536,7 +1487,7 @@ export function LearnWorkspace({
                   </div>
                   {analysisError ? (
                     <p className="mt-2 text-right text-xs leading-5 text-[rgb(185,28,28)]">
-                      {analysisError} 可以点击重试。
+                      {analysisError}
                     </p>
                   ) : null}
                 </div>
@@ -1630,7 +1581,6 @@ export function LearnWorkspace({
               )}
               {typingState ? (
                 <TypingBlock
-                  elapsedSeconds={isAnalyzing ? analysisWaitSeconds : 0}
                   title={typingState.title}
                   text={typingState.text}
                   variant={typingState.variant}
