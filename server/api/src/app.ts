@@ -10,14 +10,20 @@ import {
   configStatusResponseSchema,
   createSnippetRequestSchema,
   createSnippetResponseSchema,
+  deleteResourceResponseSchema,
   generateDraftRequestSchema,
   generateDraftResponseSchema,
   healthResponseSchema,
   listFoldersResponseSchema,
   listNotesResponseSchema,
   listSnippetsResponseSchema,
+  listTrashResponseSchema,
   meResponseSchema,
   publicConfigResponseSchema,
+  updateFolderRequestSchema,
+  updateFolderResponseSchema,
+  updateSnippetRequestSchema,
+  updateSnippetResponseSchema,
   upsertNoteRequestSchema,
   upsertNoteResponseSchema,
   type OAuthProvider,
@@ -37,11 +43,22 @@ import { getBearerToken, jsonError } from './http.js'
 import {
   createFolder,
   createSnippet,
+  deleteFolder,
+  deleteFolderPermanently,
+  deleteNote,
+  deleteNotePermanently,
+  deleteSnippet,
+  emptyTrash,
   listFolders,
   listNotes,
   listSnippets,
+  listTrash,
   recordAiRun,
+  restoreFolder,
+  restoreNote,
   SupabaseSchemaMissingError,
+  updateFolder,
+  updateSnippet,
   upsertNote,
   upsertUserProfile,
 } from './library.js'
@@ -275,6 +292,125 @@ export function createApiApp() {
     }
   })
 
+  app.patch('/v1/folders/:folderId', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Folders will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, updateFolderRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const folder = await updateFolder(config, user, c.req.param('folderId'), body)
+      return c.json(updateFolderResponseSchema.parse({ ok: true, folder }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Folder not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Folder not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.delete('/v1/folders/:folderId', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Folders will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await deleteFolder(config, user, c.req.param('folderId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Folder not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Folder not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.post('/v1/folders/:folderId/restore', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Folders will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await restoreFolder(config, user, c.req.param('folderId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Folder not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Folder not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.delete('/v1/folders/:folderId/permanent', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Folders will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await deleteFolderPermanently(config, user, c.req.param('folderId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Folder not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Folder not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
   app.get('/v1/notes', async (c) => {
     const config = c.get('config')
     if (!isSupabaseConfigured(config)) {
@@ -318,6 +454,137 @@ export function createApiApp() {
     try {
       const note = await upsertNote(config, user, body)
       return c.json(upsertNoteResponseSchema.parse({ ok: true, note }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.delete('/v1/notes/:noteId', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Notes will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await deleteNote(config, user, c.req.param('noteId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Note not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Note not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.post('/v1/notes/:noteId/restore', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Notes will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await restoreNote(config, user, c.req.param('noteId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Note not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Note not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.delete('/v1/notes/:noteId/permanent', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Notes will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await deleteNotePermanently(config, user, c.req.param('noteId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Note not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Note not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.get('/v1/trash', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Trash will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const groups = await listTrash(config, user)
+      return c.json(listTrashResponseSchema.parse({ ok: true, groups }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.delete('/v1/trash', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Trash will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await emptyTrash(config, user)
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
       throw error
@@ -369,6 +636,67 @@ export function createApiApp() {
       return c.json(createSnippetResponseSchema.parse({ ok: true, snippet }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.patch('/v1/snippets/:snippetId', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Snippets will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, updateSnippetRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const snippet = await updateSnippet(config, user, c.req.param('snippetId'), body)
+      return c.json(updateSnippetResponseSchema.parse({ ok: true, snippet }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Snippet not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Snippet not found.',
+          status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.delete('/v1/snippets/:snippetId', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Snippets will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await deleteSnippet(config, user, c.req.param('snippetId'))
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Snippet not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Snippet not found.',
+          status: 404,
+        })
+      }
       throw error
     }
   })

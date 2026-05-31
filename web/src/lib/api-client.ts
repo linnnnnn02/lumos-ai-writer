@@ -5,14 +5,20 @@ import type {
   CreateFolderResponse,
   CreateSnippetRequest,
   CreateSnippetResponse,
+  DeleteResourceResponse,
   GenerateDraftRequest,
   GenerateDraftResponse,
   HealthResponse,
   ListFoldersResponse,
   ListNotesResponse,
   ListSnippetsResponse,
+  ListTrashResponse,
   MeResponse,
   PublicConfigResponse,
+  UpdateFolderRequest,
+  UpdateFolderResponse,
+  UpdateSnippetRequest,
+  UpdateSnippetResponse,
   UpsertNoteRequest,
   UpsertNoteResponse,
 } from '@lumos-ai/shared'
@@ -81,6 +87,31 @@ export function createFolder(token: string, input: CreateFolderRequest) {
   })
 }
 
+export function updateFolder(token: string, folderId: string, input: UpdateFolderRequest) {
+  return requestJson<UpdateFolderResponse>(`/v1/folders/${folderId}`, token, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export function deleteFolder(token: string, folderId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/folders/${folderId}`, token, {
+    method: 'DELETE',
+  })
+}
+
+export function restoreFolder(token: string, folderId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/folders/${folderId}/restore`, token, {
+    method: 'POST',
+  })
+}
+
+export function deleteFolderPermanently(token: string, folderId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/folders/${folderId}/permanent`, token, {
+    method: 'DELETE',
+  })
+}
+
 export function getNotes(token: string) {
   return requestJson<ListNotesResponse>('/v1/notes', token)
 }
@@ -92,6 +123,34 @@ export function upsertNote(token: string, input: UpsertNoteRequest) {
   })
 }
 
+export function deleteNote(token: string, noteId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/notes/${noteId}`, token, {
+    method: 'DELETE',
+  })
+}
+
+export function restoreNote(token: string, noteId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/notes/${noteId}/restore`, token, {
+    method: 'POST',
+  })
+}
+
+export function deleteNotePermanently(token: string, noteId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/notes/${noteId}/permanent`, token, {
+    method: 'DELETE',
+  })
+}
+
+export function getTrash(token: string) {
+  return requestJson<ListTrashResponse>('/v1/trash', token)
+}
+
+export function emptyTrash(token: string) {
+  return requestJson<DeleteResourceResponse>('/v1/trash', token, {
+    method: 'DELETE',
+  })
+}
+
 export function getSnippets(token: string) {
   return requestJson<ListSnippetsResponse>('/v1/snippets', token)
 }
@@ -100,6 +159,19 @@ export function createSnippet(token: string, input: CreateSnippetRequest) {
   return requestJson<CreateSnippetResponse>('/v1/snippets', token, {
     method: 'POST',
     body: input,
+  })
+}
+
+export function updateSnippet(token: string, snippetId: string, input: UpdateSnippetRequest) {
+  return requestJson<UpdateSnippetResponse>(`/v1/snippets/${snippetId}`, token, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export function deleteSnippet(token: string, snippetId: string) {
+  return requestJson<DeleteResourceResponse>(`/v1/snippets/${snippetId}`, token, {
+    method: 'DELETE',
   })
 }
 

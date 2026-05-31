@@ -7,6 +7,9 @@ import {
   type FolderDto,
   type NoteDto,
   type SnippetDto,
+  type TrashFolderGroup,
+  type UpdateFolderRequest,
+  type UpdateSnippetRequest,
   type UpsertNoteRequest,
 } from '@lumos-ai/shared'
 import type { AppConfig } from './env.js'
@@ -21,6 +24,10 @@ type FolderRow = {
   id: string
   name: string
   updated_at: string
+}
+
+type TrashFolderRow = FolderRow & {
+  deleted_at: string | null
 }
 
 type FolderNameRow = {
@@ -46,6 +53,11 @@ type NoteLookupRow = {
   source_url: string
   title: string
   author_name: string | null
+  deleted_at?: string | null
+}
+
+type TrashNoteRow = NoteRow & {
+  deleted_at: string | null
 }
 
 type SnippetRow = {
@@ -57,6 +69,10 @@ type SnippetRow = {
   color_tag_name: string | null
   created_at: string
 }
+
+const noteSelectColumns =
+  'id,folder_id,title,filename,author_name,source_url,cover_image_url,content_text,created_at,updated_at'
+const snippetSelectColumns = 'id,note_id,selected_text,reason_text,color_value,color_tag_name,created_at'
 
 type RecordAiRunInput = {
   taskType: string
@@ -133,6 +149,54 @@ function toSnippetDto(
   }
 }
 
+function getLatestIso(left: string, right: string) {
+  const leftTime = new Date(left).getTime()
+  const rightTime = new Date(right).getTime()
+  if (Number.isNaN(leftTime)) return right
+  if (Number.isNaN(rightTime)) return left
+  return leftTime > rightTime ? left : right
+}
+
+function assertSingleMutation(data: unknown, resourceName: string) {
+  if (!data) {
+    throw new Error(`${resourceName} not found.`)
+  }
+}
+
+async function getNoteIdsForFolder(
+  supabase: ReturnType<typeof getAdminClient>,
+  user: User,
+  folderId: string,
+) {
+  const noteResult = await supabase
+    .from('notes')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('folder_id', folderId)
+
+  assertNoDatabaseError(noteResult.error)
+
+  return ((noteResult.data ?? []) as Array<{ id: string }>).map((note) => note.id)
+}
+
+async function softDeleteSnippetsForNotes(
+  supabase: ReturnType<typeof getAdminClient>,
+  user: User,
+  noteIds: string[],
+  deletedAt: string,
+) {
+  if (noteIds.length === 0) return
+
+  const snippetResult = await supabase
+    .from('snippets')
+    .update({ deleted_at: deletedAt })
+    .eq('user_id', user.id)
+    .in('note_id', noteIds)
+    .is('deleted_at', null)
+
+  assertNoDatabaseError(snippetResult.error)
+}
+
 export async function upsertUserProfile(config: AppConfig, user: User): Promise<void> {
   const supabase = getAdminClient(config)
   const metadata = user.user_metadata ?? {}
@@ -175,6 +239,158 @@ export async function createFolder(
   assertNoDatabaseError(error)
 
   return toFolderDto(data as FolderRow, 0)
+}
+
+export async function updateFolder(
+  config: AppConfig,
+  user: User,
+  folderId: string,
+  input: UpdateFolderRequest,
+): Promise<FolderDto> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('folders')
+    .update({ name: input.name })
+    .eq('user_id', user.id)
+    .eq('id', folderId)
+    .is('deleted_at', null)
+    .select('id,name,updated_at')
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+
+  if (!data) {
+    throw new Error('Folder not found.')
+  }
+
+  const noteResult = await supabase
+    .from('notes')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('folder_id', folderId)
+    .is('deleted_at', null)
+
+  assertNoDatabaseError(noteResult.error)
+
+  return toFolderDto(data as FolderRow, noteResult.data?.length ?? 0)
+}
+
+export async function deleteFolder(
+  config: AppConfig,
+  user: User,
+  folderId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const deletedAt = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('folders')
+    .update({ deleted_at: deletedAt })
+    .eq('user_id', user.id)
+    .eq('id', folderId)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+  assertSingleMutation(data, 'Folder')
+
+  const noteIds = await getNoteIdsForFolder(supabase, user, folderId)
+  if (noteIds.length > 0) {
+    const noteResult = await supabase
+      .from('notes')
+      .update({ deleted_at: deletedAt })
+      .eq('user_id', user.id)
+      .eq('folder_id', folderId)
+      .is('deleted_at', null)
+
+    assertNoDatabaseError(noteResult.error)
+    await softDeleteSnippetsForNotes(supabase, user, noteIds, deletedAt)
+  }
+}
+
+export async function restoreFolder(
+  config: AppConfig,
+  user: User,
+  folderId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('folders')
+    .update({ deleted_at: null })
+    .eq('user_id', user.id)
+    .eq('id', folderId)
+    .not('deleted_at', 'is', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+  assertSingleMutation(data, 'Folder')
+
+  const noteIds = await getNoteIdsForFolder(supabase, user, folderId)
+  if (noteIds.length === 0) return
+
+  const [noteResult, snippetResult] = await Promise.all([
+    supabase
+      .from('notes')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .eq('folder_id', folderId)
+      .not('deleted_at', 'is', null),
+    supabase
+      .from('snippets')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .in('note_id', noteIds)
+      .not('deleted_at', 'is', null),
+  ])
+
+  assertNoDatabaseError(noteResult.error)
+  assertNoDatabaseError(snippetResult.error)
+}
+
+export async function deleteFolderPermanently(
+  config: AppConfig,
+  user: User,
+  folderId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('folders')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('id', folderId)
+    .not('deleted_at', 'is', null)
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+  assertSingleMutation(data, 'Folder')
+
+  const noteIds = await getNoteIdsForFolder(supabase, user, folderId)
+  if (noteIds.length > 0) {
+    const snippetResult = await supabase
+      .from('snippets')
+      .delete()
+      .eq('user_id', user.id)
+      .in('note_id', noteIds)
+
+    assertNoDatabaseError(snippetResult.error)
+
+    const noteResult = await supabase
+      .from('notes')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('folder_id', folderId)
+
+    assertNoDatabaseError(noteResult.error)
+  }
+
+  const folderResult = await supabase
+    .from('folders')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('id', folderId)
+
+  assertNoDatabaseError(folderResult.error)
 }
 
 export async function listFolders(config: AppConfig, user: User): Promise<FolderDto[]> {
@@ -286,6 +502,236 @@ export async function listNotes(config: AppConfig, user: User): Promise<NoteDto[
   )
 }
 
+export async function deleteNote(
+  config: AppConfig,
+  user: User,
+  noteId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const deletedAt = new Date().toISOString()
+  const noteResult = await supabase
+    .from('notes')
+    .update({ deleted_at: deletedAt })
+    .eq('user_id', user.id)
+    .eq('id', noteId)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(noteResult.error)
+
+  if (!noteResult.data) {
+    throw new Error('Note not found.')
+  }
+
+  const snippetResult = await supabase
+    .from('snippets')
+    .update({ deleted_at: deletedAt })
+    .eq('user_id', user.id)
+    .eq('note_id', noteId)
+    .is('deleted_at', null)
+
+  assertNoDatabaseError(snippetResult.error)
+}
+
+export async function restoreNote(
+  config: AppConfig,
+  user: User,
+  noteId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const noteResult = await supabase
+    .from('notes')
+    .select('id,folder_id')
+    .eq('user_id', user.id)
+    .eq('id', noteId)
+    .not('deleted_at', 'is', null)
+    .maybeSingle()
+
+  assertNoDatabaseError(noteResult.error)
+  const note = noteResult.data as { id: string; folder_id: string | null } | null
+  assertSingleMutation(note, 'Note')
+
+  if (note?.folder_id) {
+    const folderResult = await supabase
+      .from('folders')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .eq('id', note.folder_id)
+      .not('deleted_at', 'is', null)
+
+    assertNoDatabaseError(folderResult.error)
+  }
+
+  const [restoredNoteResult, snippetResult] = await Promise.all([
+    supabase
+      .from('notes')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .eq('id', noteId),
+    supabase
+      .from('snippets')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .eq('note_id', noteId)
+      .not('deleted_at', 'is', null),
+  ])
+
+  assertNoDatabaseError(restoredNoteResult.error)
+  assertNoDatabaseError(snippetResult.error)
+}
+
+export async function deleteNotePermanently(
+  config: AppConfig,
+  user: User,
+  noteId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const noteResult = await supabase
+    .from('notes')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('id', noteId)
+    .not('deleted_at', 'is', null)
+    .maybeSingle()
+
+  assertNoDatabaseError(noteResult.error)
+  assertSingleMutation(noteResult.data, 'Note')
+
+  const [snippetResult, deleteResult] = await Promise.all([
+    supabase.from('snippets').delete().eq('user_id', user.id).eq('note_id', noteId),
+    supabase.from('notes').delete().eq('user_id', user.id).eq('id', noteId),
+  ])
+
+  assertNoDatabaseError(snippetResult.error)
+  assertNoDatabaseError(deleteResult.error)
+}
+
+export async function emptyTrash(config: AppConfig, user: User): Promise<void> {
+  const supabase = getAdminClient(config)
+  const [deletedNotesResult, deletedFoldersResult] = await Promise.all([
+    supabase.from('notes').select('id').eq('user_id', user.id).not('deleted_at', 'is', null),
+    supabase.from('folders').select('id').eq('user_id', user.id).not('deleted_at', 'is', null),
+  ])
+
+  assertNoDatabaseError(deletedNotesResult.error)
+  assertNoDatabaseError(deletedFoldersResult.error)
+
+  const deletedNoteIds = ((deletedNotesResult.data ?? []) as Array<{ id: string }>).map(
+    (note) => note.id,
+  )
+  const deletedFolderIds = ((deletedFoldersResult.data ?? []) as Array<{ id: string }>).map(
+    (folder) => folder.id,
+  )
+
+  if (deletedNoteIds.length > 0) {
+    const snippetResult = await supabase
+      .from('snippets')
+      .delete()
+      .eq('user_id', user.id)
+      .in('note_id', deletedNoteIds)
+    assertNoDatabaseError(snippetResult.error)
+  }
+
+  const deletedSnippetResult = await supabase
+    .from('snippets')
+    .delete()
+    .eq('user_id', user.id)
+    .not('deleted_at', 'is', null)
+  assertNoDatabaseError(deletedSnippetResult.error)
+
+  if (deletedNoteIds.length > 0) {
+    const noteResult = await supabase.from('notes').delete().eq('user_id', user.id).in('id', deletedNoteIds)
+    assertNoDatabaseError(noteResult.error)
+  }
+
+  if (deletedFolderIds.length > 0) {
+    const folderResult = await supabase.from('folders').delete().eq('user_id', user.id).in('id', deletedFolderIds)
+    assertNoDatabaseError(folderResult.error)
+  }
+}
+
+export async function listTrash(config: AppConfig, user: User): Promise<TrashFolderGroup[]> {
+  const supabase = getAdminClient(config)
+  const [folderResult, noteResult, snippetResult] = await Promise.all([
+    supabase.from('folders').select('id,name,updated_at,deleted_at').eq('user_id', user.id),
+    supabase
+      .from('notes')
+      .select(`${noteSelectColumns},deleted_at`)
+      .eq('user_id', user.id)
+      .not('deleted_at', 'is', null),
+    supabase
+      .from('snippets')
+      .select(snippetSelectColumns)
+      .eq('user_id', user.id)
+      .not('deleted_at', 'is', null),
+  ])
+
+  assertNoDatabaseError(folderResult.error)
+  assertNoDatabaseError(noteResult.error)
+  assertNoDatabaseError(snippetResult.error)
+
+  const folders = new Map<string, TrashFolderRow>()
+  for (const folder of (folderResult.data ?? []) as TrashFolderRow[]) {
+    folders.set(folder.id, folder)
+  }
+
+  const snippetsByNoteId = new Map<string, SnippetRow[]>()
+  for (const snippet of (snippetResult.data ?? []) as SnippetRow[]) {
+    if (!snippet.note_id) continue
+    snippetsByNoteId.set(snippet.note_id, [...(snippetsByNoteId.get(snippet.note_id) ?? []), snippet])
+  }
+
+  const groups = new Map<string, TrashFolderGroup>()
+  for (const folder of folders.values()) {
+    if (!folder.deleted_at) continue
+    groups.set(`deleted-folder-${folder.id}`, {
+      id: `deleted-folder-${folder.id}`,
+      folderId: folder.id,
+      folderName: folder.name,
+      deletedAt: folder.deleted_at,
+      folderDeleted: true,
+      notes: [],
+    })
+  }
+
+  for (const note of (noteResult.data ?? []) as TrashNoteRow[]) {
+    const folder = note.folder_id ? folders.get(note.folder_id) : null
+    const folderDeleted = Boolean(folder?.deleted_at)
+    const groupId = folderDeleted
+      ? `deleted-folder-${folder?.id ?? note.folder_id}`
+      : `note-folder-${folder?.id ?? note.folder_id ?? 'unknown'}`
+    const deletedAt = note.deleted_at ?? note.updated_at
+    const existingGroup = groups.get(groupId)
+    const folderName = folder?.name ?? '原文件夹未知'
+    const group =
+      existingGroup ??
+      ({
+        id: groupId,
+        folderId: folder?.id ?? note.folder_id ?? '',
+        folderName,
+        deletedAt,
+        folderDeleted,
+        notes: [],
+      } satisfies TrashFolderGroup)
+
+    group.deletedAt = getLatestIso(group.deletedAt, deletedAt)
+    group.notes.push({
+      id: folderDeleted ? `${folder?.id ?? 'folder'}-${note.id}` : note.id,
+      trashItemId: folderDeleted ? (folder?.id ?? note.folder_id ?? note.id) : note.id,
+      source: folderDeleted ? 'folder' : 'note',
+      deletedAt,
+      note: toNoteDto(note, folderName),
+      snippets: (snippetsByNoteId.get(note.id) ?? []).map((snippet) => toSnippetDto(snippet, note)),
+    })
+    groups.set(groupId, group)
+  }
+
+  return Array.from(groups.values()).sort(
+    (left, right) => new Date(right.deletedAt).getTime() - new Date(left.deletedAt).getTime(),
+  )
+}
+
 export async function createSnippet(
   config: AppConfig,
   user: User,
@@ -297,10 +743,9 @@ export async function createSnippet(
   if (input.noteId) {
     const noteResult = await supabase
       .from('notes')
-      .select('id,source_url,title,author_name')
+      .select('id,source_url,title,author_name,deleted_at')
       .eq('user_id', user.id)
       .eq('id', input.noteId)
-      .is('deleted_at', null)
       .maybeSingle()
 
     assertNoDatabaseError(noteResult.error)
@@ -308,10 +753,9 @@ export async function createSnippet(
   } else if (input.noteUrl) {
     const noteResult = await supabase
       .from('notes')
-      .select('id,source_url,title,author_name')
+      .select('id,source_url,title,author_name,deleted_at')
       .eq('user_id', user.id)
       .eq('normalized_source_url', normalizeNoteUrl(input.noteUrl))
-      .is('deleted_at', null)
       .maybeSingle()
 
     assertNoDatabaseError(noteResult.error)
@@ -328,8 +772,9 @@ export async function createSnippet(
       color_value: input.colorValue ?? null,
       color_tag_name: input.colorTagName ?? null,
       created_at: input.createdAt ?? new Date().toISOString(),
+      deleted_at: note?.deleted_at ?? null,
     })
-    .select('id,note_id,selected_text,reason_text,color_value,color_tag_name,created_at')
+    .select(snippetSelectColumns)
     .single()
 
   assertNoDatabaseError(error)
@@ -337,12 +782,87 @@ export async function createSnippet(
   return toSnippetDto(data as SnippetRow, note)
 }
 
+export async function updateSnippet(
+  config: AppConfig,
+  user: User,
+  snippetId: string,
+  input: UpdateSnippetRequest,
+): Promise<SnippetDto> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('snippets')
+    .update({
+      selected_text: input.selectedText,
+      reason_text: input.reasonText ?? null,
+      color_value: input.colorValue ?? null,
+      color_tag_name: input.colorTagName ?? null,
+    })
+    .eq('user_id', user.id)
+    .eq('id', snippetId)
+    .select(snippetSelectColumns)
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+
+  if (!data) {
+    throw new Error('Snippet not found.')
+  }
+
+  let note: NoteLookupRow | null = null
+  const noteId = (data as SnippetRow).note_id
+  if (noteId) {
+    const noteResult = await supabase
+      .from('notes')
+      .select('id,source_url,title,author_name,deleted_at')
+      .eq('user_id', user.id)
+      .eq('id', noteId)
+      .maybeSingle()
+
+    assertNoDatabaseError(noteResult.error)
+    note = noteResult.data as NoteLookupRow | null
+  }
+
+  return toSnippetDto(data as SnippetRow, note)
+}
+
+export async function deleteSnippet(
+  config: AppConfig,
+  user: User,
+  snippetId: string,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('snippets')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .eq('id', snippetId)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+
+  if (data) return
+
+  const permanentResult = await supabase
+    .from('snippets')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('id', snippetId)
+    .not('deleted_at', 'is', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(permanentResult.error)
+  assertSingleMutation(permanentResult.data, 'Snippet')
+}
+
 export async function listSnippets(config: AppConfig, user: User): Promise<SnippetDto[]> {
   const supabase = getAdminClient(config)
   const [snippetResult, noteResult] = await Promise.all([
     supabase
       .from('snippets')
-      .select('id,note_id,selected_text,reason_text,color_value,color_tag_name,created_at')
+      .select(snippetSelectColumns)
       .eq('user_id', user.id)
       .is('deleted_at', null)
       .order('created_at', { ascending: false }),

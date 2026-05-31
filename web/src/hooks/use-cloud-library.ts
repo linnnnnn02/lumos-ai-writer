@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   CurrentUser,
   NoteDto,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
+  TrashFolderGroup,
 } from '@lumos-ai/shared'
 import {
   getCurrentUser,
   getFolders,
   getNotes,
   getSnippets,
+  getTrash,
 } from '@/lib/api-client'
 import { getSupabaseBrowserClient } from '@/lib/supabase-browser'
 
@@ -22,13 +24,16 @@ export type CloudLibraryState = {
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
   snippets: SavedSnippetRecord[]
+  trashGroups: TrashFolderGroup[]
   error: string
+  refresh: () => void
 }
 
 const emptyLibrary = {
   folders: [] as SavedFolderRecord[],
   notes: [] as SavedNoteRecord[],
   snippets: [] as SavedSnippetRecord[],
+  trashGroups: [] as TrashFolderGroup[],
 }
 
 function getErrorMessage(error: unknown) {
@@ -43,11 +48,16 @@ function normalizeCloudNotes(notes: NoteDto[]): SavedNoteRecord[] {
 }
 
 export function useCloudLibrary(): CloudLibraryState {
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const refresh = useCallback(() => {
+    setRefreshVersion((current) => current + 1)
+  }, [])
   const [state, setState] = useState<CloudLibraryState>({
     status: 'initializing',
     user: null,
     ...emptyLibrary,
     error: '',
+    refresh,
   })
   const accessTokenRef = useRef('')
   const requestIdRef = useRef(0)
@@ -66,14 +76,16 @@ export function useCloudLibrary(): CloudLibraryState {
         status: 'loading',
         ...emptyLibrary,
         error: '',
+        refresh,
       }))
 
       try {
-        const [me, folders, notes, snippets] = await Promise.all([
+        const [me, folders, notes, snippets, trash] = await Promise.all([
           getCurrentUser(accessToken),
           getFolders(accessToken),
           getNotes(accessToken),
           getSnippets(accessToken),
+          getTrash(accessToken),
         ])
 
         if (!isMounted || requestId !== requestIdRef.current) return
@@ -84,7 +96,9 @@ export function useCloudLibrary(): CloudLibraryState {
           folders: folders.folders,
           notes: normalizeCloudNotes(notes.notes),
           snippets: snippets.snippets,
+          trashGroups: trash.groups,
           error: '',
+          refresh,
         })
       } catch (error) {
         if (!isMounted || requestId !== requestIdRef.current) return
@@ -94,6 +108,7 @@ export function useCloudLibrary(): CloudLibraryState {
           status: 'error',
           ...emptyLibrary,
           error: getErrorMessage(error),
+          refresh,
         }))
       }
     }
@@ -106,6 +121,7 @@ export function useCloudLibrary(): CloudLibraryState {
         user: null,
         ...emptyLibrary,
         error: '',
+        refresh,
       })
     }
 
@@ -128,6 +144,7 @@ export function useCloudLibrary(): CloudLibraryState {
             user: null,
             ...emptyLibrary,
             error: error.message,
+            refresh,
           })
           return
         }
@@ -153,6 +170,7 @@ export function useCloudLibrary(): CloudLibraryState {
           user: null,
           ...emptyLibrary,
           error: getErrorMessage(error),
+          refresh,
         })
       }
     }
@@ -170,7 +188,7 @@ export function useCloudLibrary(): CloudLibraryState {
       unsubscribe?.()
       window.removeEventListener('focus', refreshOnFocus)
     }
-  }, [])
+  }, [refresh, refreshVersion])
 
-  return state
+  return { ...state, refresh }
 }

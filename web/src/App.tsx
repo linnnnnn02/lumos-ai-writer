@@ -12,7 +12,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import type { AiAnalysisResult, AiUsage, ProjectLength } from '@lumos-ai/shared'
+import type {
+  AiAnalysisResult,
+  AiUsage,
+  ProjectLength,
+  SavedFolderRecord,
+  SavedNoteRecord,
+  SavedSnippetRecord,
+} from '@lumos-ai/shared'
+import { normalizeNoteUrl } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -63,6 +71,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { LearnWorkspace } from '@/components/learn-workspace'
+import { LibraryManager } from '@/components/library-manager'
 import { AuthStatus } from '@/components/auth-status'
 import {
   WorkflowTitleMenu,
@@ -70,13 +79,29 @@ import {
   type WorkflowTitleMenuStep,
 } from '@/components/workflow-title-menu'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
-import { analyzeReferences, generateDraft } from '@/lib/api-client'
+import {
+  analyzeReferences,
+  createFolder,
+  createSnippet,
+  deleteFolder,
+  deleteFolderPermanently,
+  deleteNote,
+  deleteNotePermanently,
+  deleteSnippet,
+  emptyTrash,
+  generateDraft,
+  restoreFolder,
+  restoreNote,
+  updateFolder,
+  updateSnippet,
+  upsertNote,
+} from '@/lib/api-client'
 import { getCurrentAccessToken } from '@/lib/supabase-browser'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
 
-type PageStep = 'workspace' | 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
-type ConversationStep = Exclude<PageStep, 'workspace'>
+type ConversationStep = 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
+type PageStep = 'workspace' | 'library' | ConversationStep
 
 type ChatMessage = {
   id: string
@@ -773,6 +798,7 @@ function ShellStepPills({ step }: { step: PageStep }) {
 
 function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(true)
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false)
   const [projects, setProjects] = useState<ProjectRecord[]>(initialProjects)
   const [activeProjectId, setActiveProjectId] = useState(initialProjects[0].id)
   const [chatInput, setChatInput] = useState('')
@@ -862,6 +888,7 @@ function App() {
   const libraryFolders = isUsingCloudLibrary ? cloudLibrary.folders : demoFolders
   const libraryNotes = isUsingCloudLibrary ? cloudLibrary.notes : demoNotes
   const librarySnippets = isUsingCloudLibrary ? cloudLibrary.snippets : demoSnippets
+  const libraryTrashGroups = isUsingCloudLibrary ? cloudLibrary.trashGroups : []
   const libraryStatus = cloudLibrary.status === 'guest' ? 'demo' : cloudLibrary.status
   const libraryError = isUsingCloudLibrary ? cloudLibrary.error : ''
   const effectiveNewProjectFolderId = libraryFolders.some(
@@ -878,9 +905,13 @@ function App() {
     [activeProject],
   )
 
-  const step: PageStep = isWorkspaceOpen ? 'workspace' : getConversationStep(activeConversation)
+  const step: PageStep = isLibraryOpen
+    ? 'library'
+    : isWorkspaceOpen
+      ? 'workspace'
+      : getConversationStep(activeConversation)
   const activeWorkflowStep: WorkflowStepId =
-    step === 'workspace'
+    step === 'workspace' || step === 'library'
       ? 'selection'
       : step === 'learn' && !activeConversation.analysisReady
         ? 'selection'
@@ -1414,16 +1445,25 @@ function App() {
 
     if (nextStep === 'workspace') {
       setIsWorkspaceOpen(true)
+      setIsLibraryOpen(false)
+      return
+    }
+
+    if (nextStep === 'library') {
+      setIsWorkspaceOpen(false)
+      setIsLibraryOpen(true)
       return
     }
 
     setIsWorkspaceOpen(false)
+    setIsLibraryOpen(false)
     updateConversationStep(activeProject.id, activeConversation.id, nextStep)
   }
 
   function handleWorkflowStepChange(nextStep: WorkflowStepId) {
     if (nextStep === 'selection') {
       setIsWorkspaceOpen(false)
+      setIsLibraryOpen(false)
       handleBackToSelection()
       updateConversationStep(activeProject.id, activeConversation.id, 'learn')
       return
@@ -1456,6 +1496,7 @@ function App() {
     )
     setActiveProjectId(projectId)
     setIsWorkspaceOpen(false)
+    setIsLibraryOpen(false)
   }
 
   function handleDeleteProject(projectId: string) {
@@ -1467,6 +1508,7 @@ function App() {
       if (next.length === 0) {
         setActiveProjectId('')
         setIsWorkspaceOpen(true)
+        setIsLibraryOpen(false)
       }
       return next
     })
@@ -1547,6 +1589,7 @@ function App() {
     resetConversationTransientState()
     setShowCreateProjectCard(false)
     setIsWorkspaceOpen(false)
+    setIsLibraryOpen(false)
   }
 
   function handleCreateConversation() {
@@ -1570,6 +1613,7 @@ function App() {
     setIsChatStreaming(false)
     resetConversationTransientState()
     setIsWorkspaceOpen(false)
+    setIsLibraryOpen(false)
     updateProject(activeProject.id, (project) => ({
       ...project,
       activeConversationId: conversationId,
@@ -1584,10 +1628,167 @@ function App() {
     setIsChatStreaming(false)
     resetConversationTransientState()
     setIsWorkspaceOpen(false)
+    setIsLibraryOpen(false)
     updateProject(activeProject.id, (project) => ({
       ...project,
       activeConversationId: conversationId,
     }))
+  }
+
+  async function getLibraryAccessToken() {
+    const accessToken = await getCurrentAccessToken()
+    if (!accessToken) {
+      throw new Error('登录状态已过期，请重新登录后再管理文案库。')
+    }
+    return accessToken
+  }
+
+  async function handleCreateLibraryFolder(name: string) {
+    const accessToken = await getLibraryAccessToken()
+    await createFolder(accessToken, { name })
+    cloudLibrary.refresh()
+  }
+
+  async function handleUpdateLibraryFolder(folder: SavedFolderRecord, name: string) {
+    const accessToken = await getLibraryAccessToken()
+    await updateFolder(accessToken, folder.id, { name })
+    cloudLibrary.refresh()
+  }
+
+  async function handleDeleteLibraryFolder(folder: SavedFolderRecord) {
+    const accessToken = await getLibraryAccessToken()
+    await deleteFolder(accessToken, folder.id)
+    cloudLibrary.refresh()
+  }
+
+  async function handleSaveLibraryNote(
+    note: SavedNoteRecord,
+    draft: {
+      authorName: string
+      contentText: string
+      filename: string
+      folderId: string
+      title: string
+    },
+  ) {
+    const accessToken = await getLibraryAccessToken()
+    const folderId = libraryFolders.some((folder) => folder.id === draft.folderId)
+      ? draft.folderId
+      : null
+
+    await upsertNote(accessToken, {
+      authorName: draft.authorName,
+      contentText: draft.contentText,
+      coverImageUrl: note.coverImageUrl ?? '',
+      filename: draft.filename || draft.title || note.filename,
+      folderId,
+      savedAt: note.savedAt,
+      sourceUrl: note.sourceUrl,
+      title: draft.title || draft.filename || note.title,
+    })
+    cloudLibrary.refresh()
+  }
+
+  async function handleDeleteLibraryNote(note: SavedNoteRecord) {
+    const accessToken = await getLibraryAccessToken()
+    await deleteNote(accessToken, note.id)
+    const normalizedNoteUrl = normalizeNoteUrl(note.sourceUrl)
+    const removedSnippetIds = new Set(
+      librarySnippets
+        .filter((snippet) => normalizeNoteUrl(snippet.noteUrl) === normalizedNoteUrl)
+        .map((snippet) => `snippet:${snippet.id}`),
+    )
+    const removedNoteId = `note:${note.id}`
+
+    setProjects((current) =>
+      current.map((project) => ({
+        ...project,
+        conversations: project.conversations.map((conversation) => ({
+          ...conversation,
+          selectedItemIds: conversation.selectedItemIds.filter(
+            (itemId) => itemId !== removedNoteId && !removedSnippetIds.has(itemId),
+          ),
+        })),
+      })),
+    )
+    cloudLibrary.refresh()
+  }
+
+  async function handleRestoreLibraryFolder(folderId: string) {
+    const accessToken = await getLibraryAccessToken()
+    await restoreFolder(accessToken, folderId)
+    cloudLibrary.refresh()
+  }
+
+  async function handleRestoreLibraryNote(noteId: string) {
+    const accessToken = await getLibraryAccessToken()
+    await restoreNote(accessToken, noteId)
+    cloudLibrary.refresh()
+  }
+
+  async function handleDeleteLibraryFolderPermanently(folderId: string) {
+    const accessToken = await getLibraryAccessToken()
+    await deleteFolderPermanently(accessToken, folderId)
+    cloudLibrary.refresh()
+  }
+
+  async function handleDeleteLibraryNotePermanently(noteId: string) {
+    const accessToken = await getLibraryAccessToken()
+    await deleteNotePermanently(accessToken, noteId)
+    cloudLibrary.refresh()
+  }
+
+  async function handleEmptyLibraryTrash() {
+    const accessToken = await getLibraryAccessToken()
+    await emptyTrash(accessToken)
+    cloudLibrary.refresh()
+  }
+
+  async function handleSaveLibraryNoteSnippets(
+    note: SavedNoteRecord,
+    drafts: Array<{
+      id: string
+      colorTagName: string
+      colorValue: string
+      reasonText: string
+      selectedText: string
+    }>,
+    existingSnippets: SavedSnippetRecord[],
+  ) {
+    const accessToken = await getLibraryAccessToken()
+    const existingIds = new Set(existingSnippets.map((snippet) => snippet.id))
+    const savedDraftIds = new Set<string>()
+
+    for (const draft of drafts) {
+      const selectedText = draft.selectedText.trim()
+      if (!selectedText) continue
+
+      if (existingIds.has(draft.id)) {
+        await updateSnippet(accessToken, draft.id, {
+          colorTagName: draft.colorTagName,
+          colorValue: draft.colorValue,
+          reasonText: draft.reasonText,
+          selectedText,
+        })
+        savedDraftIds.add(draft.id)
+        continue
+      }
+
+      await createSnippet(accessToken, {
+        noteId: note.id,
+        colorTagName: draft.colorTagName,
+        colorValue: draft.colorValue,
+        reasonText: draft.reasonText,
+        selectedText,
+      })
+    }
+
+    for (const snippet of existingSnippets) {
+      if (savedDraftIds.has(snippet.id)) continue
+      await deleteSnippet(accessToken, snippet.id)
+    }
+
+    cloudLibrary.refresh()
   }
 
   function handleConversationTitleChange(conversationId: string, title: string) {
@@ -3749,7 +3950,7 @@ function App() {
               <AuthStatus />
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--soft-foreground)]" />
                 <Input
@@ -3759,6 +3960,10 @@ function App() {
                   placeholder="搜索项目或参考文件夹"
                 />
               </div>
+              <Button size="lg" variant="secondary" onClick={() => goToStep('library')}>
+                <Highlighter className="h-4 w-4" />
+                文案库
+              </Button>
               <Button size="lg" onClick={() => setShowCreateProjectCard(true)}>
                 <Plus className="h-4 w-4" />
                 新建项目
@@ -3989,6 +4194,32 @@ function App() {
           </div>
         ) : null}
       </main>
+    )
+  }
+
+  function renderLibrary() {
+    return (
+      <LibraryManager
+        error={libraryError}
+        folders={libraryFolders}
+        notes={libraryNotes}
+        snippets={librarySnippets}
+        status={libraryStatus}
+        trashGroups={libraryTrashGroups}
+        onBack={() => goToStep('workspace')}
+        onCreateFolder={handleCreateLibraryFolder}
+        onDeleteFolder={handleDeleteLibraryFolder}
+        onDeleteFolderPermanently={handleDeleteLibraryFolderPermanently}
+        onDeleteNote={handleDeleteLibraryNote}
+        onDeleteNotePermanently={handleDeleteLibraryNotePermanently}
+        onEmptyTrash={handleEmptyLibraryTrash}
+        onRefresh={cloudLibrary.refresh}
+        onRestoreFolder={handleRestoreLibraryFolder}
+        onRestoreNote={handleRestoreLibraryNote}
+        onSaveNote={handleSaveLibraryNote}
+        onSaveNoteSnippets={handleSaveLibraryNoteSnippets}
+        onUpdateFolder={handleUpdateLibraryFolder}
+      />
     )
   }
 
@@ -5160,6 +5391,8 @@ function App() {
   const navigationTitle =
     step === 'workspace'
       ? '项目工作台'
+      : step === 'library'
+        ? '文案库'
       : step === 'learn'
         ? '网页文案拆解'
           : step === 'length'
@@ -5173,11 +5406,13 @@ function App() {
   const navigationSubtitle =
     step === 'workspace'
       ? '管理项目并进入对应的文案工作流。'
+      : step === 'library'
+        ? '查看和整理插件同步到云端的笔记与标注。'
       : step === 'learn'
         ? '在同一条 AI 对话里完成选文案、开始分析和追问。'
         : '当前项目会沿用前面的分析结果，继续往下生成。'
 
-  const showShellHeader = !['workspace', 'learn', 'length', 'plan', 'rewrite', 'reader'].includes(step)
+  const showShellHeader = !['workspace', 'library', 'learn', 'length', 'plan', 'rewrite', 'reader'].includes(step)
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
@@ -5266,6 +5501,8 @@ function App() {
 
         {step === 'workspace'
           ? renderWorkspace()
+          : step === 'library'
+            ? renderLibrary()
           : step === 'learn'
             ? renderLearn()
             : step === 'length'
