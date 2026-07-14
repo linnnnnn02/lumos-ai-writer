@@ -10,9 +10,17 @@
     }
   },
   "scripts": {
+    "dev": "pnpm -r --parallel --filter @lumos-ai/api --filter web dev",
     "dev:web": "pnpm --filter web dev",
     "dev:api": "PORT=8788 pnpm --filter @lumos-ai/api dev",
     "dev:extension": "pnpm --filter extension dev",
+    "build:pages": "pnpm --filter web build",
+    "typecheck:pages": "pnpm --filter @lumos-ai/api exec tsc --noEmit -p ../../tsconfig.cloudflare.json",
+    "check:deploy": "pnpm typecheck && pnpm typecheck:pages && pnpm lint && pnpm build:pages",
+    "check:p0": "node scripts/check-p0.mjs",
+    "smoke:p0": "node scripts/smoke-p0.mjs",
+    "smoke:p0:ai": "node scripts/smoke-p0.mjs --ai",
+    "report:ai": "node scripts/report-ai-usage.mjs",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"

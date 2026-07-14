@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import type { User } from '@supabase/supabase-js'
 import { ZodError, type ZodSchema } from 'zod'
@@ -77,6 +78,12 @@ export type ApiHonoEnv = {
 }
 
 const supportedOAuthProviders = new Set<OAuthProvider>(['github', 'google'])
+const localCorsOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+]
 
 function getOAuthProviders(rawProviders: string): OAuthProvider[] {
   return rawProviders
@@ -85,6 +92,48 @@ function getOAuthProviders(rawProviders: string): OAuthProvider[] {
     .filter((provider): provider is OAuthProvider =>
       supportedOAuthProviders.has(provider as OAuthProvider),
     )
+}
+
+function normalizeOrigin(value: string) {
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+function normalizeCorsOrigin(value: string) {
+  const trimmedValue = value.trim().replace(/\/+$/, '')
+  if (!trimmedValue) return null
+  if (trimmedValue.startsWith('chrome-extension://')) return trimmedValue
+  return normalizeOrigin(trimmedValue)
+}
+
+function getCommaSeparatedOrigins(rawOrigins: string | undefined) {
+  if (!rawOrigins) return []
+  return rawOrigins
+    .split(',')
+    .map((origin) => normalizeCorsOrigin(origin))
+    .filter((origin): origin is string => Boolean(origin))
+}
+
+function getAllowedCorsOrigin(origin: string, config: ApiVariables['config'] | null) {
+  if (!origin) return null
+
+  const normalizedOrigin = normalizeCorsOrigin(origin)
+  if (!normalizedOrigin) return null
+
+  const isLocalDev = config?.APP_ENV !== 'production'
+  const allowedOrigins = new Set([
+    ...(isLocalDev ? localCorsOrigins : []),
+    ...getCommaSeparatedOrigins(config?.PUBLIC_APP_URL),
+    ...getCommaSeparatedOrigins(config?.CORS_ALLOWED_ORIGINS),
+  ])
+
+  if (allowedOrigins.has(normalizedOrigin)) return origin
+  if (isLocalDev && normalizedOrigin.startsWith('chrome-extension://')) return origin
+
+  return null
 }
 
 async function parseJsonBody<T>(c: Context<ApiHonoEnv>, schema: ZodSchema<T>) {
@@ -126,8 +175,45 @@ async function recordAiRunSafely(
   }
 }
 
+function estimateDeepSeekCostCny(
+  config: ApiVariables['config'],
+  usage: { promptTokens: number | null; completionTokens: number | null } | null,
+) {
+  if (!usage) return null
+
+  const inputRate = config.AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS
+  const outputRate = config.AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS
+  if (inputRate === undefined || outputRate === undefined) return null
+
+  const inputTokens = usage.promptTokens ?? 0
+  const outputTokens = usage.completionTokens ?? 0
+  const estimate =
+    (inputTokens / 1_000_000) * inputRate + (outputTokens / 1_000_000) * outputRate
+
+  return Number(estimate.toFixed(6))
+}
+
 export function createApiApp() {
   const app = new Hono<ApiHonoEnv>()
+
+  app.use(
+    '*',
+    cors({
+      origin: (origin, c) => {
+        let config: ApiVariables['config'] | null = null
+        try {
+          config = readConfig(c.env)
+        } catch {
+          config = null
+        }
+        return getAllowedCorsOrigin(origin, config)
+      },
+      allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['authorization', 'content-type', 'x-request-id', 'apikey'],
+      exposeHeaders: ['x-request-id'],
+      maxAge: 600,
+    }),
+  )
 
   app.use('*', logger())
 
@@ -718,6 +804,7 @@ export function createApiApp() {
         model: result.model,
         status: 'succeeded',
         usage: result.usage,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
         latencyMs: Date.now() - startedAt,
       })
       return c.json(
@@ -757,7 +844,7 @@ export function createApiApp() {
         return jsonError(c, {
           code: 'upstream_error',
           message: error.message,
-          status: 502,
+          status: error.status === 504 ? 504 : 502,
         })
       }
 
@@ -790,6 +877,7 @@ export function createApiApp() {
         model: result.model,
         status: 'succeeded',
         usage: result.usage,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
         latencyMs: Date.now() - startedAt,
       })
       return c.json(
@@ -829,7 +917,7 @@ export function createApiApp() {
         return jsonError(c, {
           code: 'upstream_error',
           message: error.message,
-          status: 502,
+          status: error.status === 504 ? 504 : 502,
         })
       }
 

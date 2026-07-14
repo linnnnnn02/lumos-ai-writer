@@ -74,7 +74,7 @@ Lumos AI Writer 是一个面向小红书内容创作的 AI 写作工作台。它
 - 后续写作应该避免的模板感和硬广感
 - 下一步写初稿时应该采用的推进路径
 
-当前代码中这部分是本地演示逻辑，已经具备完整交互和输出结构，后续可以替换为真实大模型调用。
+当前阶段这部分已经接入后端 `/api/v1/ai/analyze`，登录后会基于云端参考库调用 DeepSeek；未登录或配置缺失时仍保留前端兜底体验。
 
 ### 篇幅与节奏选择
 
@@ -125,13 +125,16 @@ Lumos AI Writer 是一个面向小红书内容创作的 AI 写作工作台。它
 
 ## 当前产品状态
 
-Lumos AI Writer 当前已经具备完整的前端产品原型、浏览器插件采集链路、标注系统、笔记库管理和本地演示级写作工作流。
+Lumos AI Writer 当前已经具备完整的前端产品、浏览器插件采集链路、标注系统、云端文案库、Supabase 账号体系和 DeepSeek AI 调用链路。
 
 目前需要注意：
 
-- 插件数据主要保存在本地浏览器存储中。
-- 网页端的分析、规划和改写建议目前是本地演示逻辑。
-- 后端云函数已有基础占位，真实 AI 服务、账号体系、云端同步和线上持久化仍待接入。
+- 插件可以本地保存，也可以登录云端同步到 Supabase。
+- 网页端登录后会读取云端文案库；未登录时展示本地 demo 数据。
+- DeepSeek 已接入后端 API；请求有 60 秒超时保护，避免上游卡住时拖死页面。
+- API 已允许本地网页端和 Chrome 插件来源跨域调用；线上域名可以通过 `CORS_ALLOWED_ORIGINS` 补充。
+- 后续需要补充预算、限流和线上部署策略。
+- Chrome 里如果还看到旧的 `XHS AI Studio`，那是旧扩展残留；当前代码构建出的插件名是 `Lumos AI Writer`。
 
 ## 本地运行
 
@@ -141,10 +144,88 @@ Lumos AI Writer 当前已经具备完整的前端产品原型、浏览器插件�
 pnpm install
 ```
 
-启动网页端：
+第一次接入真实后端前：
+
+1. 把 `.env.example` 复制为 `.env`。
+2. 填入 Supabase 和 DeepSeek key。
+3. 在 Supabase SQL Editor 执行 `server/api/migrations/001_initial_schema.sql`。
+
+一键启动 API 和网页端：
+
+```bash
+pnpm dev
+```
+
+启动后访问：
+
+- 网页：`http://localhost:5173`
+- API 健康检查：`http://localhost:8788/api/health`
+
+检查 P0 后端链路是否健康：
+
+```bash
+pnpm check:p0
+```
+
+这一步会检查本地 API、Supabase 表结构、DeepSeek 配置，以及网页端/插件访问 API 所需的 CORS 预检。
+
+跑一次真实账号和写入链路：
+
+```bash
+pnpm smoke:p0
+```
+
+如果还想顺手验证 DeepSeek 真调用：
+
+```bash
+pnpm smoke:p0:ai
+```
+
+`smoke:p0` 会临时创建一个已确认测试账号，登录、调用 `/api/v1/me`、创建一个文件夹，然后自动删除测试账号。`smoke:p0:ai` 会额外消耗一次很小的 AI 请求。
+
+查看最近 AI 用量：
+
+```bash
+pnpm report:ai
+```
+
+如果设置了 `AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS` 和 `AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS`，这一步会按 `ai_runs` 里的 token 记录估算人民币成本，并对照 `AI_DAILY_BUDGET_CNY` 提醒预算占用。
+
+检查 Cloudflare Pages 部署入口：
+
+```bash
+pnpm check:deploy
+```
+
+Cloudflare Pages 推荐配置：
+
+- 项目根目录：仓库根目录
+- 构建命令：`pnpm build:pages`
+- 输出目录：`web/dist`
+- API 入口：`functions/api/[[path]].ts`
+- Pages 配置文件：`wrangler.toml`
+
+线上环境变量至少需要配置：
+
+```text
+PUBLIC_APP_URL=https://app.yourdomain.com
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+DEEPSEEK_API_KEY=...
+CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,chrome-extension://<extension-id>
+```
+
+单独启动网页端：
 
 ```bash
 pnpm dev:web
+```
+
+单独启动 API：
+
+```bash
+pnpm dev:api
 ```
 
 启动浏览器插件：
@@ -153,4 +234,6 @@ pnpm dev:web
 pnpm dev:extension
 ```
 
-生成插件开发产物后，在 Chrome 扩展程序页面打开“开发者模式”，加载 WXT 输出的 `.output/chrome-mv3` 目录。
+生成插件产物后，在 Chrome 扩展程序页面打开“开发者模式”，加载 WXT 输出的 `extension/.output/chrome-mv3` 目录。
+
+如果 Chrome 里同时存在旧插件和新插件，建议禁用或删除旧的 `XHS AI Studio`，只保留 `Lumos AI Writer`，避免保存到旧本地库或点错入口。

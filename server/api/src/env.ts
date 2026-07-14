@@ -12,9 +12,12 @@ const configSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
   AUTH_OAUTH_PROVIDERS: z.string().default('github,google'),
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
   AI_PROVIDER_PRIMARY: z.literal('deepseek').default('deepseek'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   AI_DAILY_BUDGET_CNY: z.coerce.number().nonnegative().optional(),
+  AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS: z.coerce.number().nonnegative().optional(),
+  AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS: z.coerce.number().nonnegative().optional(),
 })
 
 export type AppConfig = z.infer<typeof configSchema>
@@ -38,9 +41,14 @@ export function readConfig(bindings: RuntimeBindings = {}): AppConfig {
     SUPABASE_SERVICE_ROLE_KEY: raw.SUPABASE_SERVICE_ROLE_KEY || undefined,
     SUPABASE_JWT_SECRET: raw.SUPABASE_JWT_SECRET || undefined,
     AUTH_OAUTH_PROVIDERS: raw.AUTH_OAUTH_PROVIDERS || undefined,
+    CORS_ALLOWED_ORIGINS: raw.CORS_ALLOWED_ORIGINS || undefined,
     AI_PROVIDER_PRIMARY: raw.AI_PROVIDER_PRIMARY || undefined,
     DEEPSEEK_API_KEY: raw.DEEPSEEK_API_KEY || undefined,
     AI_DAILY_BUDGET_CNY: raw.AI_DAILY_BUDGET_CNY || undefined,
+    AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS:
+      raw.AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS || undefined,
+    AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS:
+      raw.AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS || undefined,
   })
 }
 

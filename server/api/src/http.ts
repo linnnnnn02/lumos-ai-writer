@@ -4,7 +4,7 @@ import type { ApiErrorCode } from '@lumos-ai/shared'
 type ErrorOptions = {
   code: ApiErrorCode
   message: string
-  status: 400 | 401 | 403 | 404 | 422 | 500 | 502 | 503
+  status: 400 | 401 | 403 | 404 | 422 | 500 | 502 | 503 | 504
 }
 
 export function jsonError(c: Context, options: ErrorOptions) {

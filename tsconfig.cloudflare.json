@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@lumos-ai/shared": ["packages/shared/src/index.ts"],
+      "@lumos-ai/api": ["server/api/src/app.ts"]
+    }
+  },
+  "include": [
+    "functions/**/*.ts",
+    "web/functions/**/*.ts",
+    "server/api/src/**/*.ts",
+    "packages/shared/src/**/*.ts"
+  ]
+}

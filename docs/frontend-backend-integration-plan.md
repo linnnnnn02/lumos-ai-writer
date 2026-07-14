@@ -1,7 +1,7 @@
 # Lumos AI Writer 前后端联调与上线计划
 
-更新时间：2026-05-09  
-适用范围：`web`、`extension`、`packages/shared`、`server/functions`
+更新时间：2026-05-31
+适用范围：`web`、`extension`、`packages/shared`、`server/api`、`server/functions`
 
 当前本地联调进度：
 
@@ -13,6 +13,11 @@
 - Web AI 等待体验已补齐：分析和初版生成都有 skeleton/等待动画，超过 30 秒显示长等待提示；失败后可直接重试，成功后显示 token 用量和人民币成本估算。
 - Web 已新增完整笔记库管理入口，按插件 `options` 笔记库迁移主要前端与功能：文件夹侧栏、搜索、排序、标签筛选、卡片网格、正文高亮详情、片段增删改、文件夹/笔记软删除、回收站分组、恢复、彻底删除和清空回收站。
 - `ai_runs` 已开始记录 `analyze` / `draft` 的成功或失败、模型和 token 用量，方便 MVP 阶段观察成本与稳定性。
+- API 已加本地网页端与 Chrome 插件来源 CORS 规则，`pnpm check:p0` 会检查 CORS 预检。
+- DeepSeek 请求已有 60 秒后端超时保护，避免上游长时间无响应时拖死请求。
+- 已新增 Cloudflare Pages 部署骨架：`wrangler.toml`、根目录 `functions/api/[[path]].ts`、`web/public/_routes.json` 和 `pnpm typecheck:pages`。
+- 已新增 GitHub Actions：CI 自动跑 typecheck/lint/build，插件可以自动打包为 Chrome MV3 zip artifact。
+- 已新增 `pnpm report:ai`，可从 `ai_runs` 汇总最近 AI 调用次数、token 和可选人民币成本估算。
 - 本地开发端口固定为：Web `http://localhost:5173`，API `http://localhost:8788/api`。
 
 这份文档的目标不是做一个泛泛的技术选型表，而是把 Lumos AI Writer 从“本地前端原型 + 浏览器本地存储插件”推进到：
@@ -92,19 +97,15 @@ preview.yourdomain.com    可选，长期预览环境
 
 ### 1.2 最大问题
 
-现在最大的问题是：**产品逻辑连贯，但工程数据没有打通。**
+现在最大的问题已经从“工程数据没打通”转为：**本地 MVP 已打通，但还没有线上自动部署、正式域名、生产环境密钥和插件分发流程。**
 
 具体表现：
 
-- 插件保存真实素材，但只存在浏览器本地。
-- 网页端显示的是 `web/src/lib/demo-data.ts` 里的 demo 数据。
-- 网页端的 AI 分析、草稿、改写、读者预演都是本地模拟逻辑。
-- 没有真实账号体系。
-- 没有云数据库。
-- 没有真实 API。
-- 没有线上可访问的 staging/prod 环境。
-- 没有 CI 自动部署、预览环境、插件构建产物。
-- 没有 AI Key 管理、成本控制、用量记录。
+- 真实账号、云端文案库和 DeepSeek 调用已在本地跑通。
+- 还没有线上可访问的 staging/prod 环境。
+- Cloudflare Pages 骨架已经在仓库里，但还需要用户创建 Cloudflare 项目并填环境变量。
+- 插件构建产物可以由 GitHub Actions 生成，但正式插件 ID 需要等加载/发布后才能配置到生产 CORS。
+- AI 已记录 token 和运行状态；成本估算支持可配置 token 单价，但还没有做硬性预算拦截。
 
 ---
 
@@ -1539,6 +1540,35 @@ MVP 海外免费主线：
 - `main` 自动部署到 production/staging。
 - API 使用 Pages Functions，同仓库同域名部署。
 
+当前仓库已准备：
+
+- `wrangler.toml`：声明 Cloudflare Pages 输出目录为 `web/dist`，生产环境默认 `APP_ENV=production`。
+- `functions/api/[[path]].ts`：Cloudflare Pages 根目录 API 入口，负责把 `/api/*` 交给 `server/api` 的 Hono app。
+- `web/public/_routes.json`：只让 `/api/*` 进入 Pages Functions，静态资源不走函数。
+- `pnpm build:pages`：只构建网页端给 Cloudflare Pages 使用。
+- `pnpm typecheck:pages`：单独检查 Pages Function 入口和复用的 API app。
+
+Cloudflare Pages 创建项目时推荐设置：
+
+```text
+Root directory: 仓库根目录
+Build command: pnpm build:pages
+Build output directory: web/dist
+```
+
+Cloudflare Pages 环境变量必须填：
+
+```text
+PUBLIC_APP_URL=https://app.yourdomain.com
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+DEEPSEEK_API_KEY=...
+CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,chrome-extension://<extension-id>
+```
+
+如果正式插件 ID 还没有出来，可以先只填网页域名；插件上线或固定加载目录后，再把 `chrome-extension://<extension-id>` 补进去。
+
 ### 12.3 API 预览
 
 每次 push 到 `main`：
@@ -1577,6 +1607,13 @@ GitHub Actions
 - 发布 Chrome Web Store unlisted/staged extension。
 - 发布 Edge Add-ons 内测版本。
 - 测试用户直接从商店安装，不需要下载 zip。
+
+当前仓库已新增 `.github/workflows/extension-artifact.yml`：
+
+- push 到 `main` 或手动触发时自动构建插件。
+- 生成 `lumos-ai-writer-chrome-mv3.zip`。
+- 上传为 GitHub Actions artifact。
+- 如果要让 artifact 指向线上 API，需要在 GitHub 仓库变量里设置 `WXT_PUBLIC_API_BASE_URL=https://app.yourdomain.com/api`。
 
 ### 12.5 Cloud IDE
 

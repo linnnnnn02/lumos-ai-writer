@@ -1,0 +1,9 @@
+name = "lumos-ai-writer"
+compatibility_date = "2026-05-31"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "web/dist"
+
+[vars]
+APP_ENV = "production"
+AUTH_OAUTH_PROVIDERS = "github,google"
+AI_PROVIDER_PRIMARY = "deepseek"

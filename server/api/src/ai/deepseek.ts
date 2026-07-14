@@ -10,8 +10,26 @@ import {
 } from '@lumos-ai/shared'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
+const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 export const DEEPSEEK_ANALYZE_MODEL = 'deepseek-v4-flash'
 export const DEEPSEEK_DRAFT_MODEL = 'deepseek-v4-flash'
+
+type DeepSeekChatCompletionRequest = {
+  model: string
+  messages: Array<{
+    role: 'system' | 'user'
+    content: string
+  }>
+  response_format: {
+    type: 'json_object'
+  }
+  thinking: {
+    type: 'disabled'
+  }
+  max_tokens: number
+  temperature: number
+  stream: false
+}
 
 type DeepSeekChatCompletionResponse = {
   choices?: Array<{
@@ -218,6 +236,64 @@ function toUsage(usage: DeepSeekChatCompletionResponse['usage']): AiUsage | null
   }
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : 'Unknown error'
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+async function requestDeepSeekChatCompletion(
+  config: AppConfig,
+  body: DeepSeekChatCompletionRequest,
+) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEEPSEEK_REQUEST_TIMEOUT_MS)
+  let response: Response
+
+  try {
+    response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.DEEPSEEK_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new DeepSeekUpstreamError('DeepSeek request timed out. Please retry.', 504)
+    }
+
+    throw new DeepSeekUpstreamError(`DeepSeek request failed: ${getErrorMessage(error)}`, 502)
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  let data: DeepSeekChatCompletionResponse
+  try {
+    data = (await response.json()) as DeepSeekChatCompletionResponse
+  } catch {
+    throw new DeepSeekUpstreamError(
+      response.ok
+        ? 'DeepSeek returned a non-JSON response.'
+        : `DeepSeek request failed with status ${response.status}.`,
+      response.ok ? 502 : response.status,
+    )
+  }
+
+  if (!response.ok) {
+    throw new DeepSeekUpstreamError(
+      data.error?.message || `DeepSeek request failed with status ${response.status}.`,
+      response.status,
+    )
+  }
+
+  return data
+}
+
 export async function analyzeReferencesWithDeepSeek(
   config: AppConfig,
   input: AnalyzeReferencesRequest,
@@ -230,41 +306,33 @@ export async function analyzeReferencesWithDeepSeek(
     throw new DeepSeekNotConfiguredError()
   }
 
-  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.DEEPSEEK_API_KEY}`,
-      'Content-Type': 'application/json',
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: DEEPSEEK_ANALYZE_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: buildAnalyzeSystemPrompt(),
+      },
+      {
+        role: 'user',
+        content: buildAnalyzeUserPrompt(input),
+      },
+    ],
+    response_format: {
+      type: 'json_object',
     },
-    body: JSON.stringify({
-      model: DEEPSEEK_ANALYZE_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: buildAnalyzeSystemPrompt(),
-        },
-        {
-          role: 'user',
-          content: buildAnalyzeUserPrompt(input),
-        },
-      ],
-      response_format: {
-        type: 'json_object',
-      },
-      thinking: {
-        type: 'disabled',
-      },
-      max_tokens: 2200,
-      temperature: 0.4,
-      stream: false,
-    }),
+    thinking: {
+      type: 'disabled',
+    },
+    max_tokens: 2200,
+    temperature: 0.4,
+    stream: false,
   })
-  const data = (await response.json()) as DeepSeekChatCompletionResponse
 
-  if (!response.ok) {
+  if (data.error?.message) {
     throw new DeepSeekUpstreamError(
-      data.error?.message || `DeepSeek request failed with status ${response.status}.`,
-      response.status,
+      data.error.message,
+      502,
     )
   }
 
@@ -292,41 +360,33 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekNotConfiguredError()
   }
 
-  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.DEEPSEEK_API_KEY}`,
-      'Content-Type': 'application/json',
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: DEEPSEEK_DRAFT_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: buildDraftSystemPrompt(input),
+      },
+      {
+        role: 'user',
+        content: buildDraftUserPrompt(input),
+      },
+    ],
+    response_format: {
+      type: 'json_object',
     },
-    body: JSON.stringify({
-      model: DEEPSEEK_DRAFT_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: buildDraftSystemPrompt(input),
-        },
-        {
-          role: 'user',
-          content: buildDraftUserPrompt(input),
-        },
-      ],
-      response_format: {
-        type: 'json_object',
-      },
-      thinking: {
-        type: 'disabled',
-      },
-      max_tokens: 2600,
-      temperature: 0.72,
-      stream: false,
-    }),
+    thinking: {
+      type: 'disabled',
+    },
+    max_tokens: 2600,
+    temperature: 0.72,
+    stream: false,
   })
-  const data = (await response.json()) as DeepSeekChatCompletionResponse
 
-  if (!response.ok) {
+  if (data.error?.message) {
     throw new DeepSeekUpstreamError(
-      data.error?.message || `DeepSeek request failed with status ${response.status}.`,
-      response.status,
+      data.error.message,
+      502,
     )
   }
 
