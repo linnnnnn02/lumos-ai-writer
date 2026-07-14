@@ -80,6 +80,7 @@ type RecordAiRunInput = {
   model: string
   status: 'succeeded' | 'failed'
   usage?: AiUsage | null
+  promptHash?: string
   costEstimateCny?: number | null
   latencyMs?: number
   errorCode?: string
@@ -909,7 +910,7 @@ export async function recordAiRun(
     output_token_count: input.usage?.completionTokens ?? null,
     cost_estimate_cny: input.costEstimateCny ?? null,
     latency_ms: input.latencyMs ?? null,
-    prompt_hash: null,
+    prompt_hash: input.promptHash ?? null,
     error_code: input.errorCode ?? null,
     error_message: input.errorMessage ?? null,
     finished_at: new Date().toISOString(),

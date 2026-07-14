@@ -71,10 +71,17 @@ export const aiUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative().nullable(),
 })
 
+export const aiSkillMetadataSchema = z.object({
+  id: z.string().min(1),
+  version: z.string().min(1),
+  promptHash: z.string().regex(/^[a-f0-9]{64}$/),
+})
+
 export const analyzeReferencesResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
   model: z.string(),
+  skill: aiSkillMetadataSchema,
   analysis: aiAnalysisResultSchema,
   usage: aiUsageSchema.nullable(),
 })
@@ -93,5 +100,6 @@ export type AiDraftCopy = z.infer<typeof aiDraftCopySchema>
 export type AnalyzeReferencesRequest = z.infer<typeof analyzeReferencesRequestSchema>
 export type GenerateDraftRequest = z.infer<typeof generateDraftRequestSchema>
 export type AiUsage = z.infer<typeof aiUsageSchema>
+export type AiSkillMetadata = z.infer<typeof aiSkillMetadataSchema>
 export type AnalyzeReferencesResponse = z.infer<typeof analyzeReferencesResponseSchema>
 export type GenerateDraftResponse = z.infer<typeof generateDraftResponseSchema>

@@ -30,6 +30,7 @@ import {
   type OAuthProvider,
 } from '@lumos-ai/shared'
 import {
+  AiFeatureDisabledError,
   analyzeReferencesWithDeepSeek,
   DEEPSEEK_ANALYZE_MODEL,
   DEEPSEEK_DRAFT_MODEL,
@@ -789,6 +790,14 @@ export function createApiApp() {
 
   app.post('/v1/ai/analyze', async (c) => {
     const config = c.get('config')
+    if (!config.AI_FEATURE_ENABLED) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'AI analysis is paused until analysis-v1 passes evaluation.',
+        status: 503,
+      })
+    }
+
     const body = await parseJsonBody(c, analyzeReferencesRequestSchema)
     if (body instanceof Response) return body
 
@@ -804,6 +813,7 @@ export function createApiApp() {
         model: result.model,
         status: 'succeeded',
         usage: result.usage,
+        promptHash: result.skill.promptHash,
         costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
         latencyMs: Date.now() - startedAt,
       })
@@ -812,6 +822,7 @@ export function createApiApp() {
           ok: true,
           provider: 'deepseek',
           model: result.model,
+          skill: result.skill,
           analysis: result.analysis,
           usage: result.usage,
         }),
@@ -824,13 +835,23 @@ export function createApiApp() {
         status: 'failed',
         latencyMs: Date.now() - startedAt,
         errorCode:
-          error instanceof DeepSeekNotConfiguredError
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
             ? 'service_not_configured'
             : error instanceof DeepSeekUpstreamError || error instanceof ZodError
               ? 'upstream_error'
               : 'internal_error',
         errorMessage: getErrorMessage(error),
       })
+
+      if (error instanceof AiFeatureDisabledError) {
+        return jsonError(c, {
+          code: 'feature_disabled',
+          message: error.message,
+          status: 503,
+        })
+      }
 
       if (error instanceof DeepSeekNotConfiguredError) {
         return jsonError(c, {
@@ -862,6 +883,14 @@ export function createApiApp() {
 
   app.post('/v1/ai/draft', async (c) => {
     const config = c.get('config')
+    if (!config.AI_FEATURE_ENABLED) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'AI drafting is paused until its Skill passes evaluation.',
+        status: 503,
+      })
+    }
+
     const body = await parseJsonBody(c, generateDraftRequestSchema)
     if (body instanceof Response) return body
 
@@ -897,13 +926,23 @@ export function createApiApp() {
         status: 'failed',
         latencyMs: Date.now() - startedAt,
         errorCode:
-          error instanceof DeepSeekNotConfiguredError
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
             ? 'service_not_configured'
             : error instanceof DeepSeekUpstreamError || error instanceof ZodError
               ? 'upstream_error'
               : 'internal_error',
         errorMessage: getErrorMessage(error),
       })
+
+      if (error instanceof AiFeatureDisabledError) {
+        return jsonError(c, {
+          code: 'feature_disabled',
+          message: error.message,
+          status: 503,
+        })
+      }
 
       if (error instanceof DeepSeekNotConfiguredError) {
         return jsonError(c, {

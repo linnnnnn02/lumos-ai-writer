@@ -3,6 +3,10 @@ import { z } from 'zod'
 export type RuntimeBindings = Record<string, string | undefined>
 
 const appEnvSchema = z.enum(['local', 'preview', 'staging', 'production'])
+const featureFlagSchema = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true')
 
 const configSchema = z.object({
   APP_ENV: appEnvSchema.default('local'),
@@ -13,6 +17,7 @@ const configSchema = z.object({
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
   AUTH_OAUTH_PROVIDERS: z.string().default('github,google'),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
+  AI_FEATURE_ENABLED: featureFlagSchema,
   AI_PROVIDER_PRIMARY: z.literal('deepseek').default('deepseek'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   AI_DAILY_BUDGET_CNY: z.coerce.number().nonnegative().optional(),
@@ -42,6 +47,7 @@ export function readConfig(bindings: RuntimeBindings = {}): AppConfig {
     SUPABASE_JWT_SECRET: raw.SUPABASE_JWT_SECRET || undefined,
     AUTH_OAUTH_PROVIDERS: raw.AUTH_OAUTH_PROVIDERS || undefined,
     CORS_ALLOWED_ORIGINS: raw.CORS_ALLOWED_ORIGINS || undefined,
+    AI_FEATURE_ENABLED: raw.AI_FEATURE_ENABLED || undefined,
     AI_PROVIDER_PRIMARY: raw.AI_PROVIDER_PRIMARY || undefined,
     DEEPSEEK_API_KEY: raw.DEEPSEEK_API_KEY || undefined,
     AI_DAILY_BUDGET_CNY: raw.AI_DAILY_BUDGET_CNY || undefined,

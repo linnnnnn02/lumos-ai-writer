@@ -5,6 +5,7 @@ export const apiErrorCodeSchema = z.enum([
   'forbidden',
   'not_found',
   'validation_failed',
+  'feature_disabled',
   'service_not_configured',
   'upstream_error',
   'internal_error',
@@ -44,6 +45,7 @@ export const configStatusResponseSchema = z.object({
   supabaseConfigured: z.boolean(),
   ai: z.object({
     provider: z.literal('deepseek'),
+    enabled: z.boolean(),
     configured: z.boolean(),
     dailyBudgetCny: z.number().nonnegative().nullable(),
     model: z.string(),

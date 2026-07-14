@@ -1,17 +1,19 @@
 import type { AppConfig } from '../env.js'
 import {
-  aiAnalysisResultSchema,
   aiDraftCopySchema,
   type AiAnalysisResult,
   type AiDraftCopy,
+  type AiSkillMetadata,
   type AiUsage,
   type AnalyzeReferencesRequest,
   type GenerateDraftRequest,
 } from '@lumos-ai/shared'
+import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
+import { prepareAiSkill } from '../skills/runtime.js'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
-export const DEEPSEEK_ANALYZE_MODEL = 'deepseek-v4-flash'
+export const DEEPSEEK_ANALYZE_MODEL = analysisSkillV1.model
 export const DEEPSEEK_DRAFT_MODEL = 'deepseek-v4-flash'
 
 type DeepSeekChatCompletionRequest = {
@@ -54,6 +56,13 @@ export class DeepSeekNotConfiguredError extends Error {
   }
 }
 
+export class AiFeatureDisabledError extends Error {
+  constructor() {
+    super('AI features are disabled until the active Skill passes evaluation.')
+    this.name = 'AiFeatureDisabledError'
+  }
+}
+
 export class DeepSeekUpstreamError extends Error {
   status: number
 
@@ -71,6 +80,7 @@ export function isDeepSeekConfigured(config: AppConfig) {
 export function getDeepSeekConfigStatus(config: AppConfig) {
   return {
     provider: 'deepseek',
+    enabled: config.AI_FEATURE_ENABLED,
     configured: isDeepSeekConfigured(config),
     dailyBudgetCny: config.AI_DAILY_BUDGET_CNY ?? null,
     model: DEEPSEEK_ANALYZE_MODEL,
@@ -79,81 +89,6 @@ export function getDeepSeekConfigStatus(config: AppConfig) {
 
 function trimText(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
-}
-
-function compactAnalyzeInput(input: AnalyzeReferencesRequest) {
-  return {
-    projectName: input.projectName,
-    folderName: input.folderName,
-    topic: input.topic,
-    targetAudience: input.targetAudience,
-    length: input.length,
-    notes: input.notes.slice(0, 8).map((note) => ({
-      title: note.title,
-      filename: note.filename,
-      authorName: note.authorName,
-      sourceUrl: note.sourceUrl,
-      folderName: note.folderName,
-      contentText: trimText(note.contentText, 1200),
-    })),
-    snippets: input.snippets.slice(0, 24).map((snippet) => ({
-      noteTitle: snippet.noteTitle,
-      noteUrl: snippet.noteUrl,
-      selectedText: trimText(snippet.selectedText, 600),
-      reasonText: trimText(snippet.reasonText, 400),
-      colorTagName: snippet.colorTagName,
-    })),
-  }
-}
-
-function buildAnalyzeSystemPrompt() {
-  return [
-    '你是 Lumos AI Writer 的文案拆解助手，任务是从用户选中的小红书参考文案和标注里提炼可复用写作机制。',
-    '只输出一个 JSON object，不要 Markdown，不要代码块，不要解释。',
-    '必须使用中文，语气具体、可执行、少用抽象形容词。',
-    'JSON 字段必须严格匹配：',
-    JSON.stringify({
-      projectName: 'string',
-      aiLearningMethod: {
-        writingPath: 'string',
-        reusableMechanisms: ['string', 'string', 'string'],
-        styleConstraints: ['string', 'string'],
-      },
-      coreJudgement: 'string',
-      evidence: 'string',
-      effectivePatterns: ['开头策略', '中段策略', '收尾策略'],
-      featuredSnippets: [
-        {
-          quote: '被引用的原文片段',
-          noteTitle: '来源标题',
-          noteUrl: '来源链接',
-          label: '选择点处理',
-          description: '这个片段可复用的机制',
-          reason: '用户标注理由',
-        },
-      ],
-      userPreference: 'string',
-      reuseSuggestion: 'string',
-      avoidPitfall: 'string',
-      preferenceQuestion: 'string',
-      writingMove: 'string',
-      summary: 'string',
-      wording: ['string', 'string'],
-      structure: ['string', 'string'],
-      preference: ['string', 'string'],
-      readerView: ['string', 'string'],
-      nextStep: ['string', 'string'],
-    }),
-    'featuredSnippets 最多 2 个，必须从 input.snippets 中选，不要编造原文。',
-    'effectivePatterns 必须至少 3 条，按开头、中段、收尾顺序写。',
-  ].join('\n')
-}
-
-function buildAnalyzeUserPrompt(input: AnalyzeReferencesRequest) {
-  return JSON.stringify({
-    task: 'analyze_reference_writing_patterns',
-    input: compactAnalyzeInput(input),
-  })
 }
 
 function compactDraftInput(input: GenerateDraftRequest) {
@@ -299,23 +234,30 @@ export async function analyzeReferencesWithDeepSeek(
   input: AnalyzeReferencesRequest,
 ): Promise<{
   analysis: AiAnalysisResult
+  skill: AiSkillMetadata
   model: string
   usage: AiUsage | null
 }> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
   if (!config.DEEPSEEK_API_KEY) {
     throw new DeepSeekNotConfiguredError()
   }
 
+  const preparedSkill = await prepareAiSkill(analysisSkillV1, input)
+
   const data = await requestDeepSeekChatCompletion(config, {
-    model: DEEPSEEK_ANALYZE_MODEL,
+    model: preparedSkill.model,
     messages: [
       {
         role: 'system',
-        content: buildAnalyzeSystemPrompt(),
+        content: preparedSkill.systemPrompt,
       },
       {
         role: 'user',
-        content: buildAnalyzeUserPrompt(input),
+        content: preparedSkill.userPrompt,
       },
     ],
     response_format: {
@@ -324,8 +266,8 @@ export async function analyzeReferencesWithDeepSeek(
     thinking: {
       type: 'disabled',
     },
-    max_tokens: 2200,
-    temperature: 0.4,
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
     stream: false,
   })
 
@@ -342,8 +284,9 @@ export async function analyzeReferencesWithDeepSeek(
   }
 
   return {
-    analysis: aiAnalysisResultSchema.parse(parseJsonContent(content)),
-    model: DEEPSEEK_ANALYZE_MODEL,
+    analysis: preparedSkill.outputSchema.parse(parseJsonContent(content)),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
     usage: toUsage(data.usage),
   }
 }
@@ -356,6 +299,10 @@ export async function generateDraftWithDeepSeek(
   model: string
   usage: AiUsage | null
 }> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
   if (!config.DEEPSEEK_API_KEY) {
     throw new DeepSeekNotConfiguredError()
   }

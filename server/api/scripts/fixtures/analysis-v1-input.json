@@ -1,0 +1,44 @@
+{
+  "projectName": "深圳通勤骑行分享",
+  "folderName": "骑行参考库",
+  "topic": "第一次在深圳骑车通勤后的真实感受",
+  "targetAudience": "想尝试骑车通勤但担心太累的上班族",
+  "length": "medium",
+  "notes": [
+    {
+      "id": "note-fixture-1",
+      "folderId": "folder-fixture-1",
+      "folderName": "骑行参考库",
+      "filename": "通勤骑行真实记录.md",
+      "title": "骑了七天后，我终于不再挤早高峰",
+      "authorName": "测试作者",
+      "sourceUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "contentText": "第一天出门前我最担心迟到，所以提前二十分钟下楼。真正骑起来后，最难的不是距离，而是找到一条不用频繁和汽车抢道的路线。第三天开始，我已经知道在哪个路口提前减速，也知道哪一段可以放松骑。",
+      "savedAt": "2026-05-01T08:00:00.000Z"
+    }
+  ],
+  "snippets": [
+    {
+      "id": "snippet-fixture-1",
+      "noteUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "noteTitle": "骑了七天后，我终于不再挤早高峰",
+      "noteAuthorName": "测试作者",
+      "selectedText": "最难的不是距离，而是找到一条不用频繁和汽车抢道的路线。",
+      "reasonText": "先推翻读者对体力的担心，再给出更具体的问题，很像真人复盘。",
+      "colorTagName": "反常识判断",
+      "colorValue": "#d97757",
+      "createdAt": "2026-05-01T08:10:00.000Z"
+    },
+    {
+      "id": "snippet-fixture-2",
+      "noteUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "noteTitle": "骑了七天后，我终于不再挤早高峰",
+      "noteAuthorName": "测试作者",
+      "selectedText": "第三天开始，我已经知道在哪个路口提前减速。",
+      "reasonText": "用时间变化证明体验，不用空泛地说越来越熟练。",
+      "colorTagName": "具体场景",
+      "colorValue": "#d5a84b",
+      "createdAt": "2026-05-01T08:12:00.000Z"
+    }
+  ]
+}

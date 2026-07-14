@@ -181,7 +181,13 @@ pnpm smoke:p0
 pnpm smoke:p0:ai
 ```
 
-`smoke:p0` 会临时创建一个已确认测试账号，登录、调用 `/api/v1/me`、创建一个文件夹，然后自动删除测试账号。`smoke:p0:ai` 会额外消耗一次很小的 AI 请求。
+运行付费 AI 测试前，必须先通过 Skill 离线评测：
+
+```bash
+pnpm eval:skills
+```
+
+`AI_FEATURE_ENABLED` 默认是 `false`。只有当前 Skill 的离线评测通过并确认允许产生费用后，才可以将它设为 `true`。`smoke:p0` 会临时创建一个已确认测试账号，登录、调用 `/api/v1/me`、创建一个文件夹，然后自动删除测试账号。`smoke:p0:ai` 会额外消耗一次很小的 AI 请求。
 
 查看最近 AI 用量：
 
@@ -213,6 +219,7 @@ SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 DEEPSEEK_API_KEY=...
+AI_FEATURE_ENABLED=false
 CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,chrome-extension://<extension-id>
 ```
 
