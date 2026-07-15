@@ -2,11 +2,15 @@ import type { AppConfig } from '../env.js'
 import {
   type AiAnalysisResult,
   type AiDraftCopy,
+  type AiRewriteResult,
+  type AiReaderPreviewResult,
   type AiSkillMetadata,
   type AiUsage,
   type AnalyzeReferencesRequest,
   type BuildWritingProfileRequest,
   type GenerateDraftRequest,
+  type RewriteDraftRequest,
+  type PreviewDraftForReaderRequest,
   type WritingProfile,
 } from '@lumos-ai/shared'
 import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
@@ -15,6 +19,14 @@ import {
   validateDraftSkillOutput,
 } from '../skills/draft-v1/index.js'
 import { prepareAiSkill } from '../skills/runtime.js'
+import {
+  rewriteSkillV1,
+  validateRewriteSkillOutput,
+} from '../skills/rewrite-v1/index.js'
+import {
+  readerPreviewSkillV1,
+  validateReaderPreviewSkillOutput,
+} from '../skills/reader-preview-v1/index.js'
 import { writerModelSkillV1 } from '../skills/writer-model-v1/index.js'
 import type { WritingProfileContext } from '../writing-profile.js'
 
@@ -23,6 +35,8 @@ const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 export const DEEPSEEK_ANALYZE_MODEL = analysisSkillV1.model
 export const DEEPSEEK_WRITER_MODEL = writerModelSkillV1.model
 export const DEEPSEEK_DRAFT_MODEL = draftSkillV1.model
+export const DEEPSEEK_REWRITE_MODEL = rewriteSkillV1.model
+export const DEEPSEEK_READER_PREVIEW_MODEL = readerPreviewSkillV1.model
 
 type DeepSeekChatCompletionRequest = {
   model: string
@@ -296,6 +310,112 @@ export async function generateDraftWithDeepSeek(
 
   return {
     draft: validateDraftSkillOutput(draft, input.length),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
+    usage: toUsage(data.usage),
+  }
+}
+
+export async function rewriteDraftWithDeepSeek(
+  config: AppConfig,
+  input: RewriteDraftRequest,
+  writingProfileContext?: WritingProfileContext,
+): Promise<{
+  rewrite: AiRewriteResult
+  skill: AiSkillMetadata
+  model: string
+  usage: AiUsage | null
+}> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
+  if (!config.DEEPSEEK_API_KEY) {
+    throw new DeepSeekNotConfiguredError()
+  }
+
+  const preparedSkill = await prepareAiSkill(rewriteSkillV1, {
+    ...input,
+    writingProfileContext,
+  })
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: preparedSkill.model,
+    messages: [
+      { role: 'system', content: preparedSkill.systemPrompt },
+      { role: 'user', content: preparedSkill.userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    thinking: { type: 'disabled' },
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
+    stream: false,
+  })
+
+  if (data.error?.message) {
+    throw new DeepSeekUpstreamError(data.error.message, 502)
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new DeepSeekUpstreamError('DeepSeek returned an empty rewrite.', 502)
+  }
+
+  const rewrite = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  return {
+    rewrite: validateRewriteSkillOutput(rewrite, input.selectedText),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
+    usage: toUsage(data.usage),
+  }
+}
+
+export async function previewDraftForReaderWithDeepSeek(
+  config: AppConfig,
+  input: PreviewDraftForReaderRequest,
+  writingProfileContext?: WritingProfileContext,
+): Promise<{
+  preview: AiReaderPreviewResult
+  skill: AiSkillMetadata
+  model: string
+  usage: AiUsage | null
+}> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
+  if (!config.DEEPSEEK_API_KEY) {
+    throw new DeepSeekNotConfiguredError()
+  }
+
+  const preparedSkill = await prepareAiSkill(readerPreviewSkillV1, {
+    ...input,
+    writingProfileContext,
+  })
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: preparedSkill.model,
+    messages: [
+      { role: 'system', content: preparedSkill.systemPrompt },
+      { role: 'user', content: preparedSkill.userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    thinking: { type: 'disabled' },
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
+    stream: false,
+  })
+
+  if (data.error?.message) {
+    throw new DeepSeekUpstreamError(data.error.message, 502)
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new DeepSeekUpstreamError('DeepSeek returned an empty reader preview.', 502)
+  }
+
+  const preview = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  return {
+    preview: validateReaderPreviewSkillOutput(preview, input.draft),
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
     usage: toUsage(data.usage),

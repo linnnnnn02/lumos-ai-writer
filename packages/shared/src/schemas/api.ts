@@ -6,6 +6,7 @@ export const apiErrorCodeSchema = z.enum([
   'not_found',
   'validation_failed',
   'feature_disabled',
+  'budget_exhausted',
   'service_not_configured',
   'upstream_error',
   'internal_error',

@@ -10,4 +10,7 @@ CORS_ALLOWED_ORIGINS = "https://lumos-ai-writer.pages.dev"
 AUTH_OAUTH_PROVIDERS = "none"
 AI_FEATURE_ENABLED = "false"
 AI_PROVIDER_PRIMARY = "deepseek"
-AI_DAILY_BUDGET_CNY = "20"
+AI_DAILY_BUDGET_CNY = "5"
+# Conservative CNY estimates for deepseek-v4-flash cache-miss pricing.
+AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS = "1.10"
+AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS = "2.10"

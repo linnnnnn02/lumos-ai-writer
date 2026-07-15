@@ -26,7 +26,11 @@ import {
   listSnippetsResponseSchema,
   listTrashResponseSchema,
   meResponseSchema,
+  previewDraftForReaderRequestSchema,
+  previewDraftForReaderResponseSchema,
   publicConfigResponseSchema,
+  rewriteDraftRequestSchema,
+  rewriteDraftResponseSchema,
   syncWorkspaceRequestSchema,
   syncWorkspaceResponseSchema,
   updateFolderRequestSchema,
@@ -42,13 +46,23 @@ import {
   analyzeReferencesWithDeepSeek,
   DEEPSEEK_ANALYZE_MODEL,
   DEEPSEEK_DRAFT_MODEL,
+  DEEPSEEK_REWRITE_MODEL,
+  DEEPSEEK_READER_PREVIEW_MODEL,
   DEEPSEEK_WRITER_MODEL,
   DeepSeekNotConfiguredError,
   DeepSeekUpstreamError,
   generateDraftWithDeepSeek,
   getDeepSeekConfigStatus,
   learnWritingProfileWithDeepSeek,
+  rewriteDraftWithDeepSeek,
+  previewDraftForReaderWithDeepSeek,
 } from './ai/deepseek.js'
+import {
+  createAiExecutionConfig,
+  getAiAccessBlockReason,
+  hasAnyAiAudience,
+  isAiEnabledForUser,
+} from './ai/access.js'
 import { requireCurrentUser } from './auth.js'
 import { getConfigChecks, isSupabaseConfigured, readConfig, type RuntimeBindings } from './env.js'
 import { getBearerToken, jsonError } from './http.js'
@@ -61,6 +75,7 @@ import {
   deleteNotePermanently,
   deleteSnippet,
   emptyTrash,
+  getAiDailySpendCny,
   listFolders,
   listNotes,
   listSnippets,
@@ -213,6 +228,47 @@ function estimateDeepSeekCostCny(
     (inputTokens / 1_000_000) * inputRate + (outputTokens / 1_000_000) * outputRate
 
   return Number(estimate.toFixed(6))
+}
+
+async function requireAiExecutionConfig(
+  c: Context<ApiHonoEnv>,
+  user: User,
+): Promise<ApiVariables['config'] | Response> {
+  const config = c.get('config')
+
+  if (!isAiEnabledForUser(config, user.id)) {
+    return jsonError(c, {
+      code: 'feature_disabled',
+      message: 'AI features are not enabled for this account.',
+      status: 503,
+    })
+  }
+
+  if (getAiAccessBlockReason(config, user.id, 0) === 'budget_not_configured') {
+    return jsonError(c, {
+      code: 'service_not_configured',
+      message: 'AI pilot budget tracking is not fully configured.',
+      status: 503,
+    })
+  }
+
+  let dailySpendCny: number
+  try {
+    dailySpendCny = await getAiDailySpendCny(config, user)
+  } catch (error) {
+    if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+    throw error
+  }
+
+  if (getAiAccessBlockReason(config, user.id, dailySpendCny) === 'budget_exhausted') {
+    return jsonError(c, {
+      code: 'budget_exhausted',
+      message: 'Today\'s AI trial budget has been used. Please continue tomorrow.',
+      status: 429,
+    })
+  }
+
+  return createAiExecutionConfig(config)
 }
 
 export function createApiApp() {
@@ -935,7 +991,7 @@ export function createApiApp() {
 
   app.post('/v1/ai/writing-profile', async (c) => {
     const config = c.get('config')
-    if (!config.AI_FEATURE_ENABLED) {
+    if (!hasAnyAiAudience(config)) {
       return jsonError(c, {
         code: 'feature_disabled',
         message: 'Writing profile learning is paused until writer-model-v1 passes evaluation.',
@@ -948,6 +1004,8 @@ export function createApiApp() {
 
     const user = await requireCurrentUser(c)
     if (user instanceof Response) return user
+    const aiConfig = await requireAiExecutionConfig(c, user)
+    if (aiConfig instanceof Response) return aiConfig
 
     const startedAt = Date.now()
     try {
@@ -981,7 +1039,7 @@ export function createApiApp() {
         ...body,
         previousProfile: currentRevision?.profile ?? null,
       }
-      const result = await learnWritingProfileWithDeepSeek(config, learningInput)
+      const result = await learnWritingProfileWithDeepSeek(aiConfig, learningInput)
       const revision = await createWritingProfileRevision(
         config,
         user,
@@ -1060,7 +1118,7 @@ export function createApiApp() {
 
   app.post('/v1/ai/analyze', async (c) => {
     const config = c.get('config')
-    if (!config.AI_FEATURE_ENABLED) {
+    if (!hasAnyAiAudience(config)) {
       return jsonError(c, {
         code: 'feature_disabled',
         message: 'AI analysis is paused until analysis-v1 passes evaluation.',
@@ -1073,10 +1131,12 @@ export function createApiApp() {
 
     const user = await requireCurrentUser(c)
     if (user instanceof Response) return user
+    const aiConfig = await requireAiExecutionConfig(c, user)
+    if (aiConfig instanceof Response) return aiConfig
 
     const startedAt = Date.now()
     try {
-      const result = await analyzeReferencesWithDeepSeek(config, body)
+      const result = await analyzeReferencesWithDeepSeek(aiConfig, body)
       await recordAiRunSafely(config, user, {
         taskType: 'analyze',
         provider: 'deepseek',
@@ -1153,7 +1213,7 @@ export function createApiApp() {
 
   app.post('/v1/ai/draft', async (c) => {
     const config = c.get('config')
-    if (!config.AI_FEATURE_ENABLED) {
+    if (!hasAnyAiAudience(config)) {
       return jsonError(c, {
         code: 'feature_disabled',
         message: 'AI drafting is paused until its Skill passes evaluation.',
@@ -1166,6 +1226,8 @@ export function createApiApp() {
 
     const user = await requireCurrentUser(c)
     if (user instanceof Response) return user
+    const aiConfig = await requireAiExecutionConfig(c, user)
+    if (aiConfig instanceof Response) return aiConfig
 
     const startedAt = Date.now()
     try {
@@ -1174,7 +1236,7 @@ export function createApiApp() {
         user,
         body.projectId,
       )
-      const result = await generateDraftWithDeepSeek(config, body, writingProfileContext)
+      const result = await generateDraftWithDeepSeek(aiConfig, body, writingProfileContext)
       await recordAiRunSafely(config, user, {
         taskType: 'draft',
         provider: 'deepseek',
@@ -1250,6 +1312,224 @@ export function createApiApp() {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned draft in an unexpected format. Please retry.',
+          status: 502,
+        })
+      }
+
+      throw error
+    }
+  })
+
+  app.post('/v1/ai/rewrite', async (c) => {
+    const config = c.get('config')
+    if (!hasAnyAiAudience(config)) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'AI rewriting is paused until rewrite-v1 passes evaluation.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, rewriteDraftRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+    const aiConfig = await requireAiExecutionConfig(c, user)
+    if (aiConfig instanceof Response) return aiConfig
+
+    const startedAt = Date.now()
+    try {
+      const writingProfileContext = await getWritingProfileContext(
+        config,
+        user,
+        body.projectId,
+      )
+      const result = await rewriteDraftWithDeepSeek(
+        aiConfig,
+        body,
+        writingProfileContext,
+      )
+      await recordAiRunSafely(config, user, {
+        taskType: 'rewrite',
+        provider: 'deepseek',
+        model: result.model,
+        status: 'succeeded',
+        usage: result.usage,
+        promptHash: result.skill.promptHash,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
+        latencyMs: Date.now() - startedAt,
+      })
+      return c.json(
+        rewriteDraftResponseSchema.parse({
+          ok: true,
+          provider: 'deepseek',
+          model: result.model,
+          skill: result.skill,
+          rewrite: result.rewrite,
+          usage: result.usage,
+        }),
+      )
+    } catch (error) {
+      await recordAiRunSafely(config, user, {
+        taskType: 'rewrite',
+        provider: 'deepseek',
+        model: DEEPSEEK_REWRITE_MODEL,
+        status: 'failed',
+        latencyMs: Date.now() - startedAt,
+        errorCode:
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
+              ? 'service_not_configured'
+              : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+                ? 'upstream_error'
+                : 'internal_error',
+        errorMessage: getErrorMessage(error),
+      })
+
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      if (error instanceof AiFeatureDisabledError) {
+        return jsonError(c, {
+          code: 'feature_disabled',
+          message: error.message,
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekNotConfiguredError) {
+        return jsonError(c, {
+          code: 'service_not_configured',
+          message: 'DeepSeek API key is not configured yet. Add DEEPSEEK_API_KEY before rewriting real copy.',
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekUpstreamError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: error.message,
+          status: error.status === 504 ? 504 : 502,
+        })
+      }
+      if (error instanceof ZodError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: 'DeepSeek returned rewrite suggestions in an unexpected format. Please retry.',
+          status: 502,
+        })
+      }
+
+      throw error
+    }
+  })
+
+  app.post('/v1/ai/reader-preview', async (c) => {
+    const config = c.get('config')
+    if (!hasAnyAiAudience(config)) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'AI reader preview is paused until reader-preview-v1 passes evaluation.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, previewDraftForReaderRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+    const aiConfig = await requireAiExecutionConfig(c, user)
+    if (aiConfig instanceof Response) return aiConfig
+
+    const startedAt = Date.now()
+    try {
+      const writingProfileContext = await getWritingProfileContext(
+        config,
+        user,
+        body.projectId,
+      )
+      const result = await previewDraftForReaderWithDeepSeek(
+        aiConfig,
+        body,
+        writingProfileContext,
+      )
+      await recordAiRunSafely(config, user, {
+        taskType: 'reader-preview',
+        provider: 'deepseek',
+        model: result.model,
+        status: 'succeeded',
+        usage: result.usage,
+        promptHash: result.skill.promptHash,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
+        latencyMs: Date.now() - startedAt,
+      })
+      return c.json(
+        previewDraftForReaderResponseSchema.parse({
+          ok: true,
+          provider: 'deepseek',
+          model: result.model,
+          skill: result.skill,
+          preview: result.preview,
+          usage: result.usage,
+        }),
+      )
+    } catch (error) {
+      await recordAiRunSafely(config, user, {
+        taskType: 'reader-preview',
+        provider: 'deepseek',
+        model: DEEPSEEK_READER_PREVIEW_MODEL,
+        status: 'failed',
+        latencyMs: Date.now() - startedAt,
+        errorCode:
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
+              ? 'service_not_configured'
+              : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+                ? 'upstream_error'
+                : 'internal_error',
+        errorMessage: getErrorMessage(error),
+      })
+
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      if (error instanceof AiFeatureDisabledError) {
+        return jsonError(c, {
+          code: 'feature_disabled',
+          message: error.message,
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekNotConfiguredError) {
+        return jsonError(c, {
+          code: 'service_not_configured',
+          message: 'DeepSeek API key is not configured yet. Add DEEPSEEK_API_KEY before previewing real copy.',
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekUpstreamError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: error.message,
+          status: error.status === 504 ? 504 : 502,
+        })
+      }
+      if (error instanceof ZodError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: 'DeepSeek returned reader feedback in an unexpected format. Please retry.',
           status: 502,
         })
       }
