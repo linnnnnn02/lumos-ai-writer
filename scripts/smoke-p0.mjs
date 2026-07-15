@@ -250,6 +250,90 @@ async function main() {
     }
     printStep('created folder', createdFolder.folder.name)
 
+    const projectId = randomUUID()
+    const conversationId = randomUUID()
+    const messageId = randomUUID()
+    const now = new Date().toISOString()
+    const workspaceInput = {
+      projects: [
+        {
+          id: projectId,
+          name: `Smoke Project ${stamp}`,
+          folderId: createdFolder.folder.id,
+          activeConversationId: conversationId,
+          updatedAt: now,
+          conversations: [
+            {
+              id: conversationId,
+              title: '新的文案对话',
+              step: 'learn',
+              pinned: false,
+              selectedReferenceIds: [],
+              length: null,
+              topic: '验证云端工作区持久化',
+              targetAudience: '产品测试人员',
+              analysisReady: false,
+              finalizedAt: null,
+              createdAt: now,
+              updatedAt: now,
+              lastOpenedAt: now,
+              state: {},
+              messages: [
+                {
+                  id: messageId,
+                  channel: 'analysis',
+                  role: 'user',
+                  content: {
+                    stage: 'setup',
+                    lines: ['验证工作区消息保存。'],
+                  },
+                  createdAt: now,
+                },
+              ],
+              draft: {
+                title: '工作草稿',
+                body: ['这是无 AI 的持久化冒烟测试。', '测试账号删除后数据会自动清理。', '不产生模型费用。'],
+                source: 'smoke_test',
+              },
+            },
+          ],
+        },
+      ],
+    }
+
+    const syncedWorkspace = await apiRequest('/v1/workspace', accessToken, {
+      method: 'PUT',
+      body: workspaceInput,
+    })
+    if (!syncedWorkspace?.ok) throw new Error('/v1/workspace did not sync the workspace.')
+    printStep('synced cloud workspace')
+
+    const workspace = await apiRequest('/v1/workspace', accessToken)
+    const smokeProject = workspace?.projects?.find((project) => project.id === projectId)
+    if (
+      !workspace?.ok ||
+      smokeProject?.conversations?.[0]?.messages?.[0]?.id !== messageId ||
+      smokeProject?.conversations?.[0]?.draft?.title !== '工作草稿'
+    ) {
+      throw new Error('/v1/workspace did not return the saved workspace state.')
+    }
+    printStep('read cloud workspace', smokeProject.name)
+
+    const memory = await apiRequest('/v1/feedback-memories', accessToken, {
+      method: 'POST',
+      body: {
+        projectId,
+        conversationId,
+        type: 'rewrite_preference',
+        content: '更具体一点，减少模板化表达。',
+        context: { source: 'smoke_test' },
+      },
+    })
+    if (!memory?.ok || memory.memory?.type !== 'rewrite_preference') {
+      throw new Error('/v1/feedback-memories did not create a memory.')
+    }
+    printStep('created feedback memory')
+
     if (shouldCheckAi) {
       const ai = await apiRequest('/v1/ai/analyze', accessToken, {
         method: 'POST',

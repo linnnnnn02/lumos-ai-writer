@@ -125,13 +125,14 @@ Lumos AI Writer 是一个面向小红书内容创作的 AI 写作工作台。它
 
 ## 当前产品状态
 
-Lumos AI Writer 当前已经具备完整的前端产品、浏览器插件采集链路、标注系统、云端文案库、Supabase 账号体系和 DeepSeek AI 调用链路。
+Lumos AI Writer 当前已经具备完整的前端产品、浏览器插件采集链路、标注系统、云端文案库、云端项目工作区、Supabase 账号体系和受控的 DeepSeek AI 调用链路。
 
 目前需要注意：
 
 - 插件可以本地保存，也可以登录云端同步到 Supabase。
 - 网页端登录后会读取云端文案库；未登录时展示本地 demo 数据。
-- DeepSeek 已接入后端 API；请求有 60 秒超时保护，避免上游卡住时拖死页面。
+- 网页端登录后会自动保存项目、对话、消息、当前步骤、工作草稿和明确反馈；未登录时不会上传 demo 项目。
+- DeepSeek 密钥已接入后端，但 `AI_FEATURE_ENABLED=false` 时分析和初稿接口会在调用模型前被拦截。
 - API 已允许本地网页端和 Chrome 插件来源跨域调用；线上域名可以通过 `CORS_ALLOWED_ORIGINS` 补充。
 - 后续需要补充预算、限流和线上部署策略。
 - Chrome 里如果还看到旧的 `XHS AI Studio`，那是旧扩展残留；当前代码构建出的插件名是 `Lumos AI Writer`。
@@ -148,7 +149,9 @@ pnpm install
 
 1. 把 `.env.example` 复制为 `.env`。
 2. 填入 Supabase 和 DeepSeek key。
-3. 在 Supabase SQL Editor 执行 `server/api/migrations/001_initial_schema.sql`。
+3. 在 Supabase SQL Editor 按文件名顺序执行 `server/api/migrations` 中的全部 SQL 文件：
+   - `001_initial_schema.sql`
+   - `002_workspace_persistence.sql`
 
 一键启动 API 和网页端：
 

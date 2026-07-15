@@ -18,6 +18,7 @@ const expectedTables = [
   'chat_messages',
   'drafts',
   'ai_runs',
+  'feedback_memories',
 ]
 
 function parseDotenv(content) {

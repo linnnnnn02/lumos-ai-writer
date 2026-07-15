@@ -3,6 +3,7 @@ export const projectLengths = ['short', 'medium', 'long'] as const
 export * from './schemas/api.js'
 export * from './schemas/ai.js'
 export * from './schemas/library.js'
+export * from './schemas/workspace.js'
 
 export type ProjectLength = (typeof projectLengths)[number]
 
@@ -40,12 +41,6 @@ export interface DraftBlockRecord {
   toneHint: string
   content: string
   blockColor?: string
-}
-
-export interface FeedbackMemoryRecord {
-  id: string
-  type: 'like' | 'dislike' | 'rewrite_preference' | 'ai_smell_feedback' | 'final_choice'
-  content: string
 }
 
 export interface ExtractedNoteRecord {

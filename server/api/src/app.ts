@@ -8,12 +8,15 @@ import {
   analyzeReferencesResponseSchema,
   createFolderRequestSchema,
   createFolderResponseSchema,
+  createFeedbackMemoryRequestSchema,
+  createFeedbackMemoryResponseSchema,
   configStatusResponseSchema,
   createSnippetRequestSchema,
   createSnippetResponseSchema,
   deleteResourceResponseSchema,
   generateDraftRequestSchema,
   generateDraftResponseSchema,
+  getWorkspaceResponseSchema,
   healthResponseSchema,
   listFoldersResponseSchema,
   listNotesResponseSchema,
@@ -21,6 +24,8 @@ import {
   listTrashResponseSchema,
   meResponseSchema,
   publicConfigResponseSchema,
+  syncWorkspaceRequestSchema,
+  syncWorkspaceResponseSchema,
   updateFolderRequestSchema,
   updateFolderResponseSchema,
   updateSnippetRequestSchema,
@@ -65,6 +70,12 @@ import {
   upsertUserProfile,
 } from './library.js'
 import { getUserFromAccessToken, toCurrentUser } from './supabase.js'
+import {
+  createFeedbackMemory,
+  listWorkspace,
+  syncWorkspace,
+  WorkspaceOwnershipError,
+} from './workspace.js'
 
 type ApiVariables = {
   config: ReturnType<typeof readConfig>
@@ -155,7 +166,7 @@ async function parseJsonBody<T>(c: Context<ApiHonoEnv>, schema: ZodSchema<T>) {
 function getSchemaMissingErrorResponse(c: Context<ApiHonoEnv>) {
   return jsonError(c, {
     code: 'service_not_configured',
-    message: 'Supabase tables are not created yet. Run server/api/migrations/001_initial_schema.sql.',
+    message: 'Supabase schema is incomplete. Apply all SQL files in server/api/migrations.',
     status: 503,
   })
 }
@@ -782,6 +793,92 @@ export function createApiApp() {
           code: 'not_found',
           message: 'Snippet not found.',
           status: 404,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.get('/v1/workspace', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Workspace persistence is unavailable.',
+        status: 503,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const workspace = await listWorkspace(config, user)
+      return c.json(getWorkspaceResponseSchema.parse(workspace))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.put('/v1/workspace', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Workspace persistence is unavailable.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, syncWorkspaceRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const result = await syncWorkspace(config, user, body)
+      return c.json(syncWorkspaceResponseSchema.parse(result))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.post('/v1/feedback-memories', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Feedback memory is unavailable.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, createFeedbackMemoryRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const memory = await createFeedbackMemory(config, user, body)
+      return c.json(createFeedbackMemoryResponseSchema.parse({ ok: true, memory }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
         })
       }
       throw error

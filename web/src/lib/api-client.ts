@@ -3,11 +3,14 @@ import type {
   AnalyzeReferencesResponse,
   CreateFolderRequest,
   CreateFolderResponse,
+  CreateFeedbackMemoryRequest,
+  CreateFeedbackMemoryResponse,
   CreateSnippetRequest,
   CreateSnippetResponse,
   DeleteResourceResponse,
   GenerateDraftRequest,
   GenerateDraftResponse,
+  GetWorkspaceResponse,
   HealthResponse,
   ListFoldersResponse,
   ListNotesResponse,
@@ -15,6 +18,8 @@ import type {
   ListTrashResponse,
   MeResponse,
   PublicConfigResponse,
+  SyncWorkspaceRequest,
+  SyncWorkspaceResponse,
   UpdateFolderRequest,
   UpdateFolderResponse,
   UpdateSnippetRequest,
@@ -172,6 +177,24 @@ export function updateSnippet(token: string, snippetId: string, input: UpdateSni
 export function deleteSnippet(token: string, snippetId: string) {
   return requestJson<DeleteResourceResponse>(`/v1/snippets/${snippetId}`, token, {
     method: 'DELETE',
+  })
+}
+
+export function getWorkspace(token: string) {
+  return requestJson<GetWorkspaceResponse>('/v1/workspace', token)
+}
+
+export function syncWorkspace(token: string, input: SyncWorkspaceRequest) {
+  return requestJson<SyncWorkspaceResponse>('/v1/workspace', token, {
+    method: 'PUT',
+    body: input,
+  })
+}
+
+export function createFeedbackMemory(token: string, input: CreateFeedbackMemoryRequest) {
+  return requestJson<CreateFeedbackMemoryResponse>('/v1/feedback-memories', token, {
+    method: 'POST',
+    body: input,
   })
 }
 

@@ -41,7 +41,7 @@ export async function requireCurrentUser(c: Context<ApiHonoEnv>): Promise<User |
     if (error instanceof SupabaseSchemaMissingError) {
       return jsonError(c, {
         code: 'service_not_configured',
-        message: 'Supabase tables are not created yet. Run server/api/migrations/001_initial_schema.sql.',
+        message: 'Supabase schema is incomplete. Apply all SQL files in server/api/migrations.',
         status: 503,
       })
     }

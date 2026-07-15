@@ -15,10 +15,13 @@ import {
 import type {
   AiAnalysisResult,
   AiUsage,
+  CreateFeedbackMemoryRequest,
   ProjectLength,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
+  SyncWorkspaceRequest,
+  WorkspaceProjectDto,
 } from '@lumos-ai/shared'
 import { normalizeNoteUrl } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
@@ -79,6 +82,7 @@ import {
   type WorkflowTitleMenuStep,
 } from '@/components/workflow-title-menu'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
+import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
   analyzeReferences,
   createFolder,
@@ -400,8 +404,193 @@ type ReaderPreviewFeedback = {
   blocks: ReaderFeedbackBlock[]
 }
 
-function getConversationCreatedTime(conversation: ConversationRecord) {
-  return Date.parse(conversation.createdAt || conversation.updatedAt) || 0
+type HydratedCloudWorkspace = {
+  projects: ProjectRecord[]
+  analysisByConversation: Record<string, AiAnalysisResult>
+  draftCopyByConversation: Record<string, InitialDraftCopy>
+  draftReadyByConversation: Record<string, boolean>
+  rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
+  planAttachmentsByConversation: Record<string, PlanAttachment[]>
+  readerAudienceByConversation: Record<string, string>
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function isInitialDraftCopy(value: unknown): value is InitialDraftCopy {
+  return (
+    isObject(value) &&
+    typeof value.title === 'string' &&
+    Array.isArray(value.body) &&
+    value.body.every((item) => typeof item === 'string')
+  )
+}
+
+function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCloudWorkspace {
+  const analysisByConversation: Record<string, AiAnalysisResult> = {}
+  const draftCopyByConversation: Record<string, InitialDraftCopy> = {}
+  const draftReadyByConversation: Record<string, boolean> = {}
+  const rewriteMessagesByConversation: Record<string, RewriteChatMessage[]> = {}
+  const planAttachmentsByConversation: Record<string, PlanAttachment[]> = {}
+  const readerAudienceByConversation: Record<string, string> = {}
+
+  const projects = cloudProjects.map((project): ProjectRecord => {
+    const conversations = project.conversations.map((conversation): ConversationRecord => {
+      const state = conversation.state
+      if (isObject(state.analysis)) {
+        analysisByConversation[conversation.id] = state.analysis as AiAnalysisResult
+      }
+      if (Array.isArray(state.rewriteMessages)) {
+        rewriteMessagesByConversation[conversation.id] =
+          state.rewriteMessages as RewriteChatMessage[]
+      }
+      if (Array.isArray(state.planAttachments)) {
+        planAttachmentsByConversation[conversation.id] =
+          state.planAttachments as PlanAttachment[]
+      }
+      if (typeof state.readerAudience === 'string') {
+        readerAudienceByConversation[conversation.id] = state.readerAudience
+      }
+
+      const draft = conversation.draft
+        ? { title: conversation.draft.title, body: conversation.draft.body }
+        : null
+      if (draft) {
+        draftCopyByConversation[conversation.id] = draft
+        draftReadyByConversation[conversation.id] = true
+      }
+
+      const chatMessages = conversation.messages
+        .filter(
+          (message) =>
+            message.channel === 'analysis' &&
+            (message.role === 'assistant' || message.role === 'user'),
+        )
+        .map((message) => ({
+          ...(message.content as Omit<ChatMessage, 'id' | 'role'>),
+          id: message.id,
+          role: message.role as ChatMessage['role'],
+        }))
+        .filter(
+          (message): message is ChatMessage =>
+            Array.isArray(message.lines) &&
+            ['setup', 'analysis', 'followup'].includes(message.stage),
+        )
+
+      const finalDraft = isInitialDraftCopy(state.finalDraft) ? state.finalDraft : undefined
+
+      return {
+        id: conversation.id,
+        title: conversation.title,
+        pinned: conversation.pinned,
+        finalizedAt: conversation.finalizedAt ?? undefined,
+        finalDraft,
+        step: conversation.step,
+        createdAt: conversation.createdAt,
+        lastOpenedAt: conversation.lastOpenedAt,
+        selectedItemIds: conversation.selectedReferenceIds,
+        chatMessages,
+        analysisReady: conversation.analysisReady,
+        length: conversation.length,
+        topic: conversation.topic,
+        targetAudience: conversation.targetAudience,
+        updatedAt: conversation.updatedAt,
+      }
+    })
+
+    return {
+      id: project.id,
+      name: project.name,
+      folderId: project.folderId ?? '',
+      conversations,
+      activeConversationId: project.activeConversationId ?? conversations[0]?.id ?? '',
+      updatedAt: project.updatedAt,
+    }
+  })
+
+  return {
+    projects,
+    analysisByConversation,
+    draftCopyByConversation,
+    draftReadyByConversation,
+    rewriteMessagesByConversation,
+    planAttachmentsByConversation,
+    readerAudienceByConversation,
+  }
+}
+
+function getMessageCreatedAt(conversation: ConversationRecord, index: number) {
+  const baseTime = Date.parse(conversation.createdAt || conversation.updatedAt)
+  return new Date((Number.isNaN(baseTime) ? Date.now() : baseTime) + index).toISOString()
+}
+
+function buildWorkspaceSyncPayload(input: {
+  projects: ProjectRecord[]
+  analysisByConversation: Record<string, AiAnalysisResult>
+  draftCopyByConversation: Record<string, InitialDraftCopy>
+  draftReadyByConversation: Record<string, boolean>
+  rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
+  planAttachmentsByConversation: Record<string, PlanAttachment[]>
+  readerAudienceByConversation: Record<string, string>
+}): SyncWorkspaceRequest {
+  return {
+    projects: input.projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      folderId: project.folderId || null,
+      activeConversationId: project.activeConversationId || null,
+      updatedAt: project.updatedAt,
+      conversations: project.conversations.map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title,
+        step: conversation.step,
+        pinned: Boolean(conversation.pinned),
+        selectedReferenceIds: conversation.selectedItemIds,
+        length: conversation.length,
+        topic: conversation.topic,
+        targetAudience: conversation.targetAudience,
+        analysisReady: conversation.analysisReady,
+        finalizedAt: conversation.finalizedAt ?? null,
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        lastOpenedAt: conversation.lastOpenedAt,
+        state: {
+          ...(input.analysisByConversation[conversation.id]
+            ? { analysis: input.analysisByConversation[conversation.id] }
+            : {}),
+          rewriteMessages: input.rewriteMessagesByConversation[conversation.id] ?? [],
+          planAttachments: input.planAttachmentsByConversation[conversation.id] ?? [],
+          readerAudience: input.readerAudienceByConversation[conversation.id] ?? '',
+          ...(conversation.finalDraft ? { finalDraft: conversation.finalDraft } : {}),
+        },
+        messages: conversation.chatMessages.map((message, index) => {
+          const { id, role, ...content } = message
+          return {
+            id,
+            channel: 'analysis',
+            role,
+            content,
+            createdAt: getMessageCreatedAt(conversation, index),
+          }
+        }),
+        draft:
+          input.draftReadyByConversation[conversation.id] &&
+          input.draftCopyByConversation[conversation.id]
+            ? {
+                ...input.draftCopyByConversation[conversation.id],
+                source: 'working_draft',
+              }
+            : null,
+      })),
+    })),
+  }
+}
+
+function getConversationSortTime(conversation: ConversationRecord) {
+  return Date.parse(
+    conversation.lastOpenedAt || conversation.updatedAt || conversation.createdAt,
+  ) || 0
 }
 
 function sortConversationsForSidebar(conversations: ConversationRecord[]) {
@@ -410,7 +599,7 @@ function sortConversationsForSidebar(conversations: ConversationRecord[]) {
     .sort(
       (a, b) =>
         Number(Boolean(b.conversation.pinned)) - Number(Boolean(a.conversation.pinned)) ||
-        getConversationCreatedTime(b.conversation) - getConversationCreatedTime(a.conversation) ||
+        getConversationSortTime(b.conversation) - getConversationSortTime(a.conversation) ||
         a.index - b.index,
     )
     .map(({ conversation }) => conversation)
@@ -852,6 +1041,14 @@ function App() {
   const [draftDropLanding, setDraftDropLanding] = useState<DraftDropLanding | null>(null)
   const [draftMovePrompt, setDraftMovePrompt] = useState<DraftMovePrompt | null>(null)
   const cloudLibrary = useCloudLibrary()
+  const {
+    status: cloudWorkspaceStatus,
+    userId: cloudWorkspaceUserId,
+    projects: cloudWorkspaceProjects,
+    error: cloudWorkspaceError,
+    save: saveCloudWorkspace,
+    remember: rememberCloudFeedback,
+  } = useCloudWorkspace()
   const [analysisByConversation, setAnalysisByConversation] = useState<
     Record<string, AiAnalysisResult>
   >({})
@@ -879,6 +1076,11 @@ function App() {
   const draftSelectionPointerStartRef = useRef<DraftSelectionPointerStart | null>(null)
   const draftDropLandingTimerRef = useRef<number | null>(null)
   const draftBridgeGenerationTimerRef = useRef<number | null>(null)
+  const workspaceSyncTimerRef = useRef<number | null>(null)
+  const workspaceSyncBaselineRef = useRef('')
+  const cloudWorkspaceHydratedUserIdRef = useRef('')
+  const skipNextWorkspaceAutosaveRef = useRef(false)
+  const workspaceSaveQueueRef = useRef(Promise.resolve())
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
@@ -903,6 +1105,32 @@ function App() {
         (conversation) => conversation.id === activeProject.activeConversationId,
       ) ?? activeProject.conversations[0],
     [activeProject],
+  )
+
+  const workspaceSyncPayload = useMemo(
+    () =>
+      buildWorkspaceSyncPayload({
+        projects,
+        analysisByConversation,
+        draftCopyByConversation,
+        draftReadyByConversation,
+        rewriteMessagesByConversation,
+        planAttachmentsByConversation,
+        readerAudienceByConversation,
+      }),
+    [
+      analysisByConversation,
+      draftCopyByConversation,
+      draftReadyByConversation,
+      planAttachmentsByConversation,
+      projects,
+      readerAudienceByConversation,
+      rewriteMessagesByConversation,
+    ],
+  )
+  const workspaceSyncSerialized = useMemo(
+    () => JSON.stringify(workspaceSyncPayload),
+    [workspaceSyncPayload],
   )
 
   const step: PageStep = isLibraryOpen
@@ -942,6 +1170,95 @@ function App() {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [step])
 
+  useEffect(() => {
+    if (cloudWorkspaceStatus === 'guest') {
+      if (!cloudWorkspaceHydratedUserIdRef.current) return
+
+      cloudWorkspaceHydratedUserIdRef.current = ''
+      workspaceSyncBaselineRef.current = ''
+      setProjects(initialProjects)
+      setActiveProjectId(initialProjects[0].id)
+      setAnalysisByConversation({})
+      setDraftCopyByConversation({})
+      setDraftReadyByConversation({})
+      setRewriteMessagesByConversation({})
+      setPlanAttachmentsByConversation({})
+      setReaderAudienceByConversation({})
+      setIsWorkspaceOpen(true)
+      setIsLibraryOpen(false)
+      return
+    }
+
+    if (
+      cloudWorkspaceStatus !== 'ready' ||
+      !cloudWorkspaceUserId ||
+      cloudWorkspaceHydratedUserIdRef.current === cloudWorkspaceUserId
+    ) {
+      return
+    }
+
+    const hydrated = hydrateCloudWorkspace(cloudWorkspaceProjects)
+    const baselinePayload = buildWorkspaceSyncPayload(hydrated)
+
+    cloudWorkspaceHydratedUserIdRef.current = cloudWorkspaceUserId
+    skipNextWorkspaceAutosaveRef.current = true
+    workspaceSyncBaselineRef.current = JSON.stringify(baselinePayload)
+    setProjects(hydrated.projects)
+    setActiveProjectId(hydrated.projects[0]?.id ?? '')
+    setAnalysisByConversation(hydrated.analysisByConversation)
+    setDraftCopyByConversation(hydrated.draftCopyByConversation)
+    setDraftReadyByConversation(hydrated.draftReadyByConversation)
+    setRewriteMessagesByConversation(hydrated.rewriteMessagesByConversation)
+    setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
+    setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
+    setIsWorkspaceOpen(true)
+    setIsLibraryOpen(false)
+  }, [cloudWorkspaceProjects, cloudWorkspaceStatus, cloudWorkspaceUserId])
+
+  useEffect(() => {
+    if (skipNextWorkspaceAutosaveRef.current) {
+      skipNextWorkspaceAutosaveRef.current = false
+      return
+    }
+
+    if (
+      cloudWorkspaceStatus !== 'ready' ||
+      cloudWorkspaceHydratedUserIdRef.current !== cloudWorkspaceUserId ||
+      workspaceSyncSerialized === workspaceSyncBaselineRef.current
+    ) {
+      return
+    }
+
+    if (workspaceSyncTimerRef.current) {
+      window.clearTimeout(workspaceSyncTimerRef.current)
+    }
+
+    const payload = workspaceSyncPayload
+    const serializedPayload = workspaceSyncSerialized
+    workspaceSyncTimerRef.current = window.setTimeout(() => {
+      workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await saveCloudWorkspace(payload)
+          workspaceSyncBaselineRef.current = serializedPayload
+        })
+      workspaceSyncTimerRef.current = null
+    }, 900)
+
+    return () => {
+      if (workspaceSyncTimerRef.current) {
+        window.clearTimeout(workspaceSyncTimerRef.current)
+        workspaceSyncTimerRef.current = null
+      }
+    }
+  }, [
+    cloudWorkspaceStatus,
+    cloudWorkspaceUserId,
+    saveCloudWorkspace,
+    workspaceSyncPayload,
+    workspaceSyncSerialized,
+  ])
+
   useEffect(
     () => () => {
       if (draftSelectionCaptureTimerRef.current) {
@@ -955,6 +1272,9 @@ function App() {
       }
       if (finalCopyToastTimerRef.current) {
         window.clearTimeout(finalCopyToastTimerRef.current)
+      }
+      if (workspaceSyncTimerRef.current) {
+        window.clearTimeout(workspaceSyncTimerRef.current)
       }
     },
     [],
@@ -1482,6 +1802,7 @@ function App() {
   }
 
   function handleOpenProject(projectId: string) {
+    const now = new Date().toISOString()
     setIsChatStreaming(false)
     resetConversationTransientState()
     setProjects((current) =>
@@ -1489,7 +1810,14 @@ function App() {
         project.id === projectId
           ? {
               ...project,
-              conversations: sortConversationsForSidebar(project.conversations),
+              updatedAt: now,
+              conversations: sortConversationsForSidebar(
+                project.conversations.map((conversation) =>
+                  conversation.id === project.activeConversationId
+                    ? { ...conversation, lastOpenedAt: now, updatedAt: now }
+                    : conversation,
+                ),
+              ),
             }
           : project,
       ),
@@ -1625,6 +1953,7 @@ function App() {
   function handleSwitchConversation(conversationId: string) {
     if (conversationId === activeProject.activeConversationId) return
 
+    const now = new Date().toISOString()
     setIsChatStreaming(false)
     resetConversationTransientState()
     setIsWorkspaceOpen(false)
@@ -1632,7 +1961,29 @@ function App() {
     updateProject(activeProject.id, (project) => ({
       ...project,
       activeConversationId: conversationId,
+      updatedAt: now,
+      conversations: sortConversationsForSidebar(
+        project.conversations.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, lastOpenedAt: now, updatedAt: now }
+            : conversation,
+        ),
+      ),
     }))
+  }
+
+  function rememberExplicitFeedback(input: CreateFeedbackMemoryRequest) {
+    if (cloudWorkspaceStatus !== 'ready') return
+
+    const payload = workspaceSyncPayload
+    const serializedPayload = workspaceSyncSerialized
+    workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveCloudWorkspace(payload)
+        workspaceSyncBaselineRef.current = serializedPayload
+        await rememberCloudFeedback(input)
+      })
   }
 
   async function getLibraryAccessToken() {
@@ -3307,10 +3658,22 @@ function App() {
     const selection = selectedRewriteText.trim()
     if (!question || !selection) return
 
-    appendRewriteChatMessage({
+    const appended = appendRewriteChatMessage({
       question,
       selection,
     })
+    if (appended) {
+      rememberExplicitFeedback({
+        projectId: activeProject.id,
+        conversationId: activeConversation.id,
+        type: 'rewrite_preference',
+        content: question,
+        context: {
+          selectedText: selection,
+          step: 'rewrite',
+        },
+      })
+    }
   }
 
   function handleSendReaderSuggestionsToRewrite() {
@@ -3347,6 +3710,7 @@ function App() {
   }
 
   async function handleFinalizeReaderPreview() {
+    const wasAlreadyFinalized = Boolean(activeConversation.finalizedAt)
     const copied = await copyTextToClipboard(formatDraftCopyForClipboard(initialDraftCopy))
 
     updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
@@ -3355,6 +3719,18 @@ function App() {
       finalDraft: initialDraftCopy,
       step: 'reader',
     }))
+    if (!wasAlreadyFinalized) {
+      rememberExplicitFeedback({
+        projectId: activeProject.id,
+        conversationId: activeConversation.id,
+        type: 'final_choice',
+        content: formatDraftCopyForClipboard(initialDraftCopy),
+        context: {
+          targetAudience: readerAudienceDraft,
+          step: 'reader',
+        },
+      })
+    }
     setIsReaderAudienceOpen(false)
     showFinalCopyToast(copied ? '已复制当前文案' : '已确认完成，可再次点击复制')
   }
@@ -5418,6 +5794,20 @@ function App() {
     <div className="relative min-h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div className="pointer-events-none absolute left-[-12rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(103,199,255,0.18),transparent_65%)] blur-2xl" />
       <div className="pointer-events-none absolute right-[-8rem] top-[-5rem] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(148,163,184,0.16),transparent_62%)] blur-2xl" />
+      {cloudWorkspaceError && cloudWorkspaceStatus !== 'guest' ? (
+        <div
+          role="alert"
+          className="fixed right-5 top-5 z-[170] flex max-w-sm items-start gap-3 rounded-[var(--ui-radius-panel)] border border-[rgba(214,90,60,0.18)] bg-white/95 px-4 py-3 text-sm text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.14)] backdrop-blur-xl"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#b94f38]" />
+          <div>
+            <p className="font-semibold">云端项目暂时无法同步</p>
+            <p className="mt-1 leading-5 text-[var(--muted-foreground)]">
+              当前内容仍保留在页面中，连接恢复后会继续保存。
+            </p>
+          </div>
+        </div>
+      ) : null}
       {finalCopyToast ? (
         <div
           role="status"
