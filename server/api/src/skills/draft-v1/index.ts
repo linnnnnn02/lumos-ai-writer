@@ -37,7 +37,7 @@ export type DraftSkillInput = GenerateDraftRequest & {
 
 const outputContract = {
   title: '一条不超过 35 个汉字的小红书标题',
-  body: ['独立正文段落 1', '独立正文段落 2', '独立正文段落 3'],
+  body: ['完整正文段落；实际数组长度必须严格满足 input.outputRequirements'],
 }
 
 function trimText(text: string, maxLength: number) {
@@ -67,11 +67,20 @@ function compactProfile(revision: WritingProfileRevisionDto | null | undefined) 
 }
 
 export function compactDraftSkillInput(input: DraftSkillInput) {
+  const lengthPolicy = draftLengthPolicies[input.length]
+
   return {
     projectName: input.projectName,
     topic: input.topic,
     targetAudience: input.targetAudience,
     length: input.length,
+    outputRequirements: {
+      minParagraphs: lengthPolicy.minParagraphs,
+      maxParagraphs: lengthPolicy.maxParagraphs,
+      minBodyCharacters: lengthPolicy.minCharacters,
+      maxBodyCharacters: lengthPolicy.maxCharacters,
+      countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
+    },
     brief: input.brief,
     writingProfile: {
       account: compactProfile(input.writingProfileContext?.accountProfile),
@@ -158,6 +167,7 @@ const draftSystemPrompt = [
   `short：${draftLengthPolicies.short.minParagraphs}-${draftLengthPolicies.short.maxParagraphs} 段，总字数约 ${draftLengthPolicies.short.minCharacters}-${draftLengthPolicies.short.maxCharacters} 字。`,
   `medium：${draftLengthPolicies.medium.minParagraphs}-${draftLengthPolicies.medium.maxParagraphs} 段，总字数约 ${draftLengthPolicies.medium.minCharacters}-${draftLengthPolicies.medium.maxCharacters} 字。`,
   `long：${draftLengthPolicies.long.minParagraphs}-${draftLengthPolicies.long.maxParagraphs} 段，总字数约 ${draftLengthPolicies.long.minCharacters}-${draftLengthPolicies.long.maxCharacters} 字。`,
+  'input.outputRequirements 是本次输出的硬约束。写完后必须在内部逐项核对段落数和正文总字数；不满足时先调整，再输出最终 JSON。',
   '默认不用 emoji；确有语气需要时整篇最多 2 个。结尾可以互动，但不能强行要求点赞、收藏或关注。',
   '去 AI 味规则：',
   ...antiAiWritingRulesV1.map((rule, index) => `${index + 1}. ${rule}`),
@@ -171,11 +181,11 @@ export const draftSkillV1: AiSkillDefinition<
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',
-  version: '1.0.0',
+  version: '1.0.1',
   taskType: 'draft',
   model: 'deepseek-v4-flash',
   maxTokens: 2600,
-  temperature: 0.68,
+  temperature: 0.58,
   systemPrompt: draftSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "generate_xiaohongshu_draft", input: compactDraftSkillInput(input) })',

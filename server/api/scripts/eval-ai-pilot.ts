@@ -5,6 +5,7 @@ import {
   hasAnyAiAudience,
   isAiEnabledForUser,
 } from '../src/ai/access.js'
+import { DeepSeekOutputValidationError } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 
 const pilotUserId = '11111111-1111-4111-8111-111111111111'
@@ -30,6 +31,14 @@ assert.equal(getAiAccessBlockReason(config, pilotUserId, 2), 'budget_exhausted')
 const executionConfig = createAiExecutionConfig(config)
 assert.equal(executionConfig.AI_FEATURE_ENABLED, true)
 assert.equal(config.AI_FEATURE_ENABLED, false)
+
+const validationError = new DeepSeekOutputValidationError(
+  new Error('invalid model output'),
+  { promptTokens: 900, completionTokens: 500, totalTokens: 1400 },
+  'a'.repeat(64),
+)
+assert.equal(validationError.usage?.totalTokens, 1400)
+assert.equal(validationError.promptHash, 'a'.repeat(64))
 
 const missingBudgetConfig = readConfig({
   APP_ENV: 'local',

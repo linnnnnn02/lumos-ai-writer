@@ -50,6 +50,7 @@ import {
   DEEPSEEK_READER_PREVIEW_MODEL,
   DEEPSEEK_WRITER_MODEL,
   DeepSeekNotConfiguredError,
+  DeepSeekOutputValidationError,
   DeepSeekUpstreamError,
   generateDraftWithDeepSeek,
   getDeepSeekConfigStatus,
@@ -228,6 +229,19 @@ function estimateDeepSeekCostCny(
     (inputTokens / 1_000_000) * inputRate + (outputTokens / 1_000_000) * outputRate
 
   return Number(estimate.toFixed(6))
+}
+
+function getFailedAiRunAccounting(
+  config: ApiVariables['config'],
+  error: unknown,
+) {
+  if (!(error instanceof DeepSeekOutputValidationError)) return {}
+
+  return {
+    usage: error.usage,
+    promptHash: error.promptHash,
+    costEstimateCny: estimateDeepSeekCostCny(config, error.usage),
+  }
 }
 
 async function requireAiExecutionConfig(
@@ -1075,13 +1089,16 @@ export function createApiApp() {
         provider: 'deepseek',
         model: DEEPSEEK_WRITER_MODEL,
         status: 'failed',
+        ...getFailedAiRunAccounting(config, error),
         latencyMs: Date.now() - startedAt,
         errorCode:
           error instanceof AiFeatureDisabledError
             ? 'feature_disabled'
             : error instanceof DeepSeekNotConfiguredError
             ? 'service_not_configured'
-            : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+            : error instanceof DeepSeekUpstreamError ||
+                error instanceof DeepSeekOutputValidationError ||
+                error instanceof ZodError
               ? 'upstream_error'
               : 'internal_error',
         errorMessage: getErrorMessage(error),
@@ -1102,7 +1119,11 @@ export function createApiApp() {
           status: 503,
         })
       }
-      if (error instanceof DeepSeekUpstreamError || error instanceof ZodError) {
+      if (
+        error instanceof DeepSeekUpstreamError ||
+        error instanceof DeepSeekOutputValidationError ||
+        error instanceof ZodError
+      ) {
         return jsonError(c, {
           code: 'upstream_error',
           message:
@@ -1163,13 +1184,16 @@ export function createApiApp() {
         provider: 'deepseek',
         model: DEEPSEEK_ANALYZE_MODEL,
         status: 'failed',
+        ...getFailedAiRunAccounting(config, error),
         latencyMs: Date.now() - startedAt,
         errorCode:
           error instanceof AiFeatureDisabledError
             ? 'feature_disabled'
             : error instanceof DeepSeekNotConfiguredError
             ? 'service_not_configured'
-            : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+            : error instanceof DeepSeekUpstreamError ||
+                error instanceof DeepSeekOutputValidationError ||
+                error instanceof ZodError
               ? 'upstream_error'
               : 'internal_error',
         errorMessage: getErrorMessage(error),
@@ -1199,7 +1223,7 @@ export function createApiApp() {
         })
       }
 
-      if (error instanceof ZodError) {
+      if (error instanceof DeepSeekOutputValidationError || error instanceof ZodError) {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned analysis in an unexpected format. Please retry.',
@@ -1263,13 +1287,16 @@ export function createApiApp() {
         provider: 'deepseek',
         model: DEEPSEEK_DRAFT_MODEL,
         status: 'failed',
+        ...getFailedAiRunAccounting(config, error),
         latencyMs: Date.now() - startedAt,
         errorCode:
           error instanceof AiFeatureDisabledError
             ? 'feature_disabled'
             : error instanceof DeepSeekNotConfiguredError
             ? 'service_not_configured'
-            : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+            : error instanceof DeepSeekUpstreamError ||
+                error instanceof DeepSeekOutputValidationError ||
+                error instanceof ZodError
               ? 'upstream_error'
               : 'internal_error',
         errorMessage: getErrorMessage(error),
@@ -1308,7 +1335,7 @@ export function createApiApp() {
         })
       }
 
-      if (error instanceof ZodError) {
+      if (error instanceof DeepSeekOutputValidationError || error instanceof ZodError) {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned draft in an unexpected format. Please retry.',
@@ -1376,13 +1403,16 @@ export function createApiApp() {
         provider: 'deepseek',
         model: DEEPSEEK_REWRITE_MODEL,
         status: 'failed',
+        ...getFailedAiRunAccounting(config, error),
         latencyMs: Date.now() - startedAt,
         errorCode:
           error instanceof AiFeatureDisabledError
             ? 'feature_disabled'
             : error instanceof DeepSeekNotConfiguredError
               ? 'service_not_configured'
-              : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+              : error instanceof DeepSeekUpstreamError ||
+                  error instanceof DeepSeekOutputValidationError ||
+                  error instanceof ZodError
                 ? 'upstream_error'
                 : 'internal_error',
         errorMessage: getErrorMessage(error),
@@ -1417,7 +1447,7 @@ export function createApiApp() {
           status: error.status === 504 ? 504 : 502,
         })
       }
-      if (error instanceof ZodError) {
+      if (error instanceof DeepSeekOutputValidationError || error instanceof ZodError) {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned rewrite suggestions in an unexpected format. Please retry.',
@@ -1485,13 +1515,16 @@ export function createApiApp() {
         provider: 'deepseek',
         model: DEEPSEEK_READER_PREVIEW_MODEL,
         status: 'failed',
+        ...getFailedAiRunAccounting(config, error),
         latencyMs: Date.now() - startedAt,
         errorCode:
           error instanceof AiFeatureDisabledError
             ? 'feature_disabled'
             : error instanceof DeepSeekNotConfiguredError
               ? 'service_not_configured'
-              : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+              : error instanceof DeepSeekUpstreamError ||
+                  error instanceof DeepSeekOutputValidationError ||
+                  error instanceof ZodError
                 ? 'upstream_error'
                 : 'internal_error',
         errorMessage: getErrorMessage(error),
@@ -1526,7 +1559,7 @@ export function createApiApp() {
           status: error.status === 504 ? 504 : 502,
         })
       }
-      if (error instanceof ZodError) {
+      if (error instanceof DeepSeekOutputValidationError || error instanceof ZodError) {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned reader feedback in an unexpected format. Please retry.',
