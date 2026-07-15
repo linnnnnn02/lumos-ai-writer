@@ -16,7 +16,7 @@ Changing instructions, model parameters, or the user-prompt template requires a 
 
 `user-writing-model` is the core learning Skill. It turns library reasons, repeated material patterns, rewrite instructions, manual edits, accepted or rejected rewrites, and final choices into an evidence-backed account profile plus optional project overrides.
 
-Task Skills such as `reference-analysis`, `xiaohongshu-draft`, rewrite, and reader preview are consumers of that model. They must not independently invent a user style or promote a one-off project instruction into a long-term preference.
+Task Skills such as `reference-analysis`, `xiaohongshu-draft`, `selection-rewrite`, and reader preview are consumers of that model. They must not independently invent a user style or promote a one-off project instruction into a long-term preference.
 
 Evidence priority is:
 

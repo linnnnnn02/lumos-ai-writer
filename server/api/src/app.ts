@@ -27,6 +27,8 @@ import {
   listTrashResponseSchema,
   meResponseSchema,
   publicConfigResponseSchema,
+  rewriteDraftRequestSchema,
+  rewriteDraftResponseSchema,
   syncWorkspaceRequestSchema,
   syncWorkspaceResponseSchema,
   updateFolderRequestSchema,
@@ -42,12 +44,14 @@ import {
   analyzeReferencesWithDeepSeek,
   DEEPSEEK_ANALYZE_MODEL,
   DEEPSEEK_DRAFT_MODEL,
+  DEEPSEEK_REWRITE_MODEL,
   DEEPSEEK_WRITER_MODEL,
   DeepSeekNotConfiguredError,
   DeepSeekUpstreamError,
   generateDraftWithDeepSeek,
   getDeepSeekConfigStatus,
   learnWritingProfileWithDeepSeek,
+  rewriteDraftWithDeepSeek,
 } from './ai/deepseek.js'
 import { requireCurrentUser } from './auth.js'
 import { getConfigChecks, isSupabaseConfigured, readConfig, type RuntimeBindings } from './env.js'
@@ -1250,6 +1254,113 @@ export function createApiApp() {
         return jsonError(c, {
           code: 'upstream_error',
           message: 'DeepSeek returned draft in an unexpected format. Please retry.',
+          status: 502,
+        })
+      }
+
+      throw error
+    }
+  })
+
+  app.post('/v1/ai/rewrite', async (c) => {
+    const config = c.get('config')
+    if (!config.AI_FEATURE_ENABLED) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'AI rewriting is paused until rewrite-v1 passes evaluation.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, rewriteDraftRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    const startedAt = Date.now()
+    try {
+      const writingProfileContext = await getWritingProfileContext(
+        config,
+        user,
+        body.projectId,
+      )
+      const result = await rewriteDraftWithDeepSeek(
+        config,
+        body,
+        writingProfileContext,
+      )
+      await recordAiRunSafely(config, user, {
+        taskType: 'rewrite',
+        provider: 'deepseek',
+        model: result.model,
+        status: 'succeeded',
+        usage: result.usage,
+        promptHash: result.skill.promptHash,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
+        latencyMs: Date.now() - startedAt,
+      })
+      return c.json(
+        rewriteDraftResponseSchema.parse({
+          ok: true,
+          provider: 'deepseek',
+          model: result.model,
+          skill: result.skill,
+          rewrite: result.rewrite,
+          usage: result.usage,
+        }),
+      )
+    } catch (error) {
+      await recordAiRunSafely(config, user, {
+        taskType: 'rewrite',
+        provider: 'deepseek',
+        model: DEEPSEEK_REWRITE_MODEL,
+        status: 'failed',
+        latencyMs: Date.now() - startedAt,
+        errorCode:
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
+              ? 'service_not_configured'
+              : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+                ? 'upstream_error'
+                : 'internal_error',
+        errorMessage: getErrorMessage(error),
+      })
+
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      if (error instanceof AiFeatureDisabledError) {
+        return jsonError(c, {
+          code: 'feature_disabled',
+          message: error.message,
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekNotConfiguredError) {
+        return jsonError(c, {
+          code: 'service_not_configured',
+          message: 'DeepSeek API key is not configured yet. Add DEEPSEEK_API_KEY before rewriting real copy.',
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekUpstreamError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: error.message,
+          status: error.status === 504 ? 504 : 502,
+        })
+      }
+      if (error instanceof ZodError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message: 'DeepSeek returned rewrite suggestions in an unexpected format. Please retry.',
           status: 502,
         })
       }

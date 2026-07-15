@@ -20,6 +20,8 @@ import type {
   ListTrashResponse,
   MeResponse,
   PublicConfigResponse,
+  RewriteDraftRequest,
+  RewriteDraftResponse,
   SyncWorkspaceRequest,
   SyncWorkspaceResponse,
   UpdateFolderRequest,
@@ -216,6 +218,13 @@ export function buildWritingProfile(token: string, input: BuildWritingProfileReq
 
 export function generateDraft(token: string, input: GenerateDraftRequest) {
   return requestJson<GenerateDraftResponse>('/v1/ai/draft', token, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function rewriteDraft(token: string, input: RewriteDraftRequest) {
+  return requestJson<RewriteDraftResponse>('/v1/ai/rewrite', token, {
     method: 'POST',
     body: input,
   })

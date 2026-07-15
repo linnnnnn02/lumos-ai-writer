@@ -14,6 +14,8 @@ import {
 } from 'react'
 import type {
   AiAnalysisResult,
+  AiRewriteResult,
+  AiRewriteSuggestion,
   AiUsage,
   CreateFeedbackMemoryRequest,
   ProjectLength,
@@ -37,6 +39,7 @@ import {
   Highlighter,
   Image,
   Layers3,
+  Loader2,
   MessageCircle,
   MoreHorizontal,
   MousePointer2,
@@ -95,6 +98,7 @@ import {
   deleteSnippet,
   emptyTrash,
   generateDraft,
+  rewriteDraft,
   restoreFolder,
   restoreNote,
   updateFolder,
@@ -104,6 +108,7 @@ import {
 import { getCurrentAccessToken } from '@/lib/supabase-browser'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
+import { buildFallbackSelectionRewrite } from './lib/rewrite'
 
 type ConversationStep = 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
 type PageStep = 'workspace' | 'library' | ConversationStep
@@ -134,6 +139,15 @@ type RewriteChatMessage = {
   role: 'assistant' | 'user'
   selectedText?: string
   lines: string[]
+  fieldId?: string
+  instruction?: string
+  suggestions?: Array<
+    AiRewriteSuggestion & {
+      id: string
+      status: 'available' | 'accepted' | 'rejected' | 'superseded'
+    }
+  >
+  recommendedIndex?: number
 }
 
 type PlanAttachment = {
@@ -1018,6 +1032,8 @@ function App() {
   const [rewriteMessagesByConversation, setRewriteMessagesByConversation] = useState<
     Record<string, RewriteChatMessage[]>
   >({})
+  const [rewritePendingConversationId, setRewritePendingConversationId] = useState('')
+  const [, setRewriteUsageByConversation] = useState<Record<string, AiUsage | null>>({})
   const [planAttachmentsByConversation, setPlanAttachmentsByConversation] = useState<
     Record<string, PlanAttachment[]>
   >({})
@@ -3698,29 +3714,251 @@ function App() {
     return true
   }
 
-  function handleSendRewriteChat() {
+  function createRewriteAssistantMessage(
+    rewrite: AiRewriteResult,
+    input: {
+      selection: string
+      fieldId: string
+      instruction: string
+    },
+  ): RewriteChatMessage {
+    return {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      selectedText: input.selection,
+      fieldId: input.fieldId,
+      instruction: input.instruction,
+      lines: [rewrite.summary],
+      suggestions: rewrite.suggestions.map((suggestion) => ({
+        ...suggestion,
+        id: crypto.randomUUID(),
+        status: 'available',
+      })),
+      recommendedIndex: rewrite.recommendedIndex,
+    }
+  }
+
+  async function handleSendRewriteChat() {
     const question = rewriteChatInput.trim()
     const selection = selectedRewriteText.trim()
-    if (!question || !selection) return
+    const fieldId = selectedRewriteFieldId
+    if (!question || !selection || !fieldId || rewritePendingConversationId) return
 
-    const appended = appendRewriteChatMessage({
-      question,
-      selection,
-    })
-    if (appended) {
-      rememberExplicitFeedback({
-        projectId: activeProject.id,
-        conversationId: activeConversation.id,
-        type: 'rewrite_preference',
-        content: question,
-        context: {
-          selectedText: selection,
-          draftTitle: initialDraftCopy.title,
-          selectedFieldId: selectedRewriteFieldId,
-          step: 'rewrite',
-        },
-      })
+    const projectId = activeProject.id
+    const conversationId = activeConversation.id
+    const fieldValue = getDraftFieldValue(initialDraftCopy, fieldId)
+    const selectedIndex = fieldValue.indexOf(selection)
+    if (selectedIndex < 0) {
+      clearRewriteSelection()
+      showFinalCopyToast('圈选内容已变化，请重新选择')
+      return
     }
+
+    const userMessage: RewriteChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      selectedText: selection,
+      fieldId,
+      instruction: question,
+      lines: question
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    }
+    setRewriteMessagesByConversation((current) => ({
+      ...current,
+      [conversationId]: [...(current[conversationId] ?? []), userMessage],
+    }))
+    setRewriteChatInput('')
+    setRewritePendingConversationId(conversationId)
+
+    rememberExplicitFeedback({
+      projectId,
+      conversationId,
+      type: 'rewrite_preference',
+      content: question,
+      context: {
+        selectedText: selection,
+        draftTitle: initialDraftCopy.title,
+        selectedFieldId: fieldId,
+        step: 'rewrite',
+      },
+    })
+
+    try {
+      let result: AiRewriteResult
+      let usage: AiUsage | null = null
+
+      if (cloudWorkspaceStatus === 'guest') {
+        result = buildFallbackSelectionRewrite({
+          selectedText: selection,
+          instruction: question,
+        })
+      } else {
+        if (cloudWorkspaceStatus !== 'ready') {
+          throw new Error('云端工作区还在连接中，稍等一下再试。')
+        }
+        const accessToken = await getCurrentAccessToken()
+        if (!accessToken) {
+          throw new Error('登录状态已过期，请重新登录后再使用 AI 改写。')
+        }
+
+        const response = await rewriteDraft(accessToken, {
+          projectId,
+          projectName: activeProject.name,
+          topic: activeConversation.topic,
+          targetAudience: activeConversation.targetAudience,
+          draft: initialDraftCopy,
+          fieldId,
+          selectedText: selection,
+          contextBefore: fieldValue.slice(Math.max(0, selectedIndex - 600), selectedIndex),
+          contextAfter: fieldValue.slice(selectedIndex + selection.length, selectedIndex + selection.length + 600),
+          instruction: question,
+          analysis: activeConversation.analysisReady ? analysis : undefined,
+        })
+        result = response.rewrite
+        usage = response.usage
+      }
+
+      setRewriteUsageByConversation((current) => ({
+        ...current,
+        [conversationId]: usage,
+      }))
+      const assistantMessage = createRewriteAssistantMessage(result, {
+        selection,
+        fieldId,
+        instruction: question,
+      })
+      setRewriteMessagesByConversation((current) => ({
+        ...current,
+        [conversationId]: [...(current[conversationId] ?? []), assistantMessage],
+      }))
+    } catch (error) {
+      const message = getErrorMessage(error)
+      const friendlyMessage = message.includes('paused until rewrite-v1 passes evaluation')
+        ? 'AI 改写仍在评测阶段，暂未开放真实调用。'
+        : message
+      setRewriteMessagesByConversation((current) => ({
+        ...current,
+        [conversationId]: [
+          ...(current[conversationId] ?? []),
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            selectedText: selection,
+            lines: [friendlyMessage],
+          },
+        ],
+      }))
+    } finally {
+      setRewritePendingConversationId((current) =>
+        current === conversationId ? '' : current,
+      )
+    }
+  }
+
+  function handleAcceptRewriteSuggestion(
+    message: RewriteChatMessage,
+    suggestion: NonNullable<RewriteChatMessage['suggestions']>[number],
+  ) {
+    if (suggestion.status !== 'available' || !message.fieldId || !message.selectedText) return
+
+    const previousValue = getDraftFieldValue(initialDraftCopy, message.fieldId)
+    const selectedIndex = previousValue.indexOf(message.selectedText)
+    if (selectedIndex < 0) {
+      showFinalCopyToast('原文已变化，请重新圈选后生成建议')
+      return
+    }
+
+    const nextValue = [
+      previousValue.slice(0, selectedIndex),
+      suggestion.text,
+      previousValue.slice(selectedIndex + message.selectedText.length),
+    ].join('')
+    setDraftCopyByConversation((current) => {
+      const currentDraft = current[activeConversation.id] ?? generatedInitialDraftCopy
+      return {
+        ...current,
+        [activeConversation.id]: setDraftFieldValue(currentDraft, message.fieldId!, nextValue),
+      }
+    })
+    setRewriteMessagesByConversation((current) => ({
+      ...current,
+      [activeConversation.id]: (current[activeConversation.id] ?? []).map((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              suggestions: item.suggestions?.map((candidate) => ({
+                ...candidate,
+                status: candidate.id === suggestion.id
+                  ? 'accepted'
+                  : candidate.status === 'available'
+                    ? 'superseded'
+                    : candidate.status,
+              })),
+            }
+          : item,
+      ),
+    }))
+    rememberExplicitFeedback({
+      projectId: activeProject.id,
+      conversationId: activeConversation.id,
+      type: 'accepted_rewrite',
+      content: suggestion.text,
+      context: {
+        fieldId: message.fieldId,
+        beforeText: message.selectedText,
+        afterText: suggestion.text,
+        instruction: message.instruction ?? '',
+        label: suggestion.label,
+        step: 'rewrite',
+      },
+      source: 'rewrite_suggestion',
+    })
+    if (
+      selectedRewriteFieldId === message.fieldId &&
+      selectedRewriteText === message.selectedText
+    ) {
+      clearRewriteSelection()
+    }
+    showFinalCopyToast('已采用改写，并记住这次选择')
+  }
+
+  function handleRejectRewriteSuggestion(
+    message: RewriteChatMessage,
+    suggestion: NonNullable<RewriteChatMessage['suggestions']>[number],
+  ) {
+    if (suggestion.status !== 'available') return
+
+    setRewriteMessagesByConversation((current) => ({
+      ...current,
+      [activeConversation.id]: (current[activeConversation.id] ?? []).map((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              suggestions: item.suggestions?.map((candidate) =>
+                candidate.id === suggestion.id
+                  ? { ...candidate, status: 'rejected' }
+                  : candidate,
+              ),
+            }
+          : item,
+      ),
+    }))
+    rememberExplicitFeedback({
+      projectId: activeProject.id,
+      conversationId: activeConversation.id,
+      type: 'rejected_rewrite',
+      content: suggestion.text,
+      context: {
+        fieldId: message.fieldId ?? '',
+        selectedText: message.selectedText ?? '',
+        instruction: message.instruction ?? '',
+        label: suggestion.label,
+        step: 'rewrite',
+      },
+      source: 'rewrite_suggestion',
+    })
   }
 
   function handleSendReaderSuggestionsToRewrite() {
@@ -5497,20 +5735,88 @@ function App() {
                           key={message.id}
                           className={
                             message.role === 'user'
-                              ? 'justify-self-end rounded-[var(--ui-radius-panel)] rounded-tr-[0.45rem] bg-[var(--foreground)] px-4 py-3 text-sm leading-7 text-white shadow-[0_16px_34px_rgba(15,23,42,0.16)]'
-                              : 'rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]'
+                              ? 'max-w-[92%] justify-self-end rounded-[var(--ui-radius-panel)] rounded-tr-[0.45rem] bg-[var(--foreground)] px-4 py-3 text-sm leading-7 text-white shadow-[0_16px_34px_rgba(15,23,42,0.16)]'
+                              : 'w-full rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-4 py-4 text-sm leading-7 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.04)]'
                           }
                         >
                           {message.selectedText ? (
-                            <p className={message.role === 'user' ? 'mb-2 text-xs text-white/78' : 'mb-2 text-xs text-[var(--soft-foreground)]'}>
+                            <p className={message.role === 'user' ? 'mb-2 text-xs text-white/78' : 'mb-2 line-clamp-2 text-xs text-[var(--soft-foreground)]'}>
                               针对：{message.selectedText}
                             </p>
                           ) : null}
                           {message.lines.map((line, lineIndex) => (
                             <p key={`${message.id}-${lineIndex}`}>{line}</p>
                           ))}
+                          {message.suggestions ? (
+                            <div className="mt-3 divide-y divide-[rgba(15,23,42,0.08)] border-t border-[rgba(15,23,42,0.08)]">
+                              {message.suggestions.map((suggestion, suggestionIndex) => {
+                                const isAvailable = suggestion.status === 'available'
+                                const isRecommended = message.recommendedIndex === suggestionIndex
+                                return (
+                                  <div
+                                    key={suggestion.id}
+                                    className={[
+                                      'py-4 first:pt-3 last:pb-0',
+                                      suggestion.status === 'rejected' || suggestion.status === 'superseded'
+                                        ? 'opacity-55'
+                                        : '',
+                                    ].join(' ')}
+                                  >
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold text-[var(--foreground)]">
+                                        {suggestion.label}
+                                      </span>
+                                      {isRecommended ? <Badge variant="accent">推荐</Badge> : null}
+                                      {suggestion.status === 'accepted' ? (
+                                        <Badge variant="accent" className="gap-1">
+                                          <CheckCircle2 className="h-3 w-3" />
+                                          已采用
+                                        </Badge>
+                                      ) : null}
+                                      {suggestion.status === 'rejected' ? (
+                                        <Badge>不喜欢</Badge>
+                                      ) : null}
+                                      {suggestion.status === 'superseded' ? (
+                                        <Badge>未采用</Badge>
+                                      ) : null}
+                                    </div>
+                                    <p className="whitespace-pre-wrap text-[length:var(--ui-text-meta)] font-medium leading-7 text-[var(--foreground)]">
+                                      {suggestion.text}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-[var(--soft-foreground)]">
+                                      {suggestion.rationale}
+                                    </p>
+                                    {isAvailable ? (
+                                      <div className="mt-3 flex justify-end gap-2">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleRejectRewriteSuggestion(message, suggestion)}
+                                        >
+                                          不喜欢
+                                        </Button>
+                                        <Button
+                                          variant={isRecommended ? 'default' : 'secondary'}
+                                          size="sm"
+                                          onClick={() => handleAcceptRewriteSuggestion(message, suggestion)}
+                                        >
+                                          采用此版
+                                        </Button>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ) : null}
                         </div>
                       ))}
+                      {rewritePendingConversationId === activeConversation.id ? (
+                        <div className="flex items-center gap-2 px-1 py-2 text-sm text-[var(--soft-foreground)]">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          正在结合你的写作偏好生成局部版本…
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -5544,10 +5850,18 @@ function App() {
                         <Button
                           size="sm"
                           onClick={handleSendRewriteChat}
-                          disabled={!selectedRewriteText || !rewriteChatInput.trim()}
+                          disabled={
+                            !selectedRewriteText ||
+                            !rewriteChatInput.trim() ||
+                            rewritePendingConversationId === activeConversation.id
+                          }
                         >
-                          <Send className="h-4 w-4" />
-                          发送
+                          {rewritePendingConversationId === activeConversation.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          {rewritePendingConversationId === activeConversation.id ? '生成中' : '发送'}
                         </Button>
                       </div>
                     </div>
