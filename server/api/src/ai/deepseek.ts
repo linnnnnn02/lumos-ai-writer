@@ -5,7 +5,9 @@ import {
   type AiSkillMetadata,
   type AiUsage,
   type AnalyzeReferencesRequest,
+  type BuildWritingProfileRequest,
   type GenerateDraftRequest,
+  type WritingProfile,
 } from '@lumos-ai/shared'
 import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
 import {
@@ -13,10 +15,13 @@ import {
   validateDraftSkillOutput,
 } from '../skills/draft-v1/index.js'
 import { prepareAiSkill } from '../skills/runtime.js'
+import { writerModelSkillV1 } from '../skills/writer-model-v1/index.js'
+import type { WritingProfileContext } from '../writing-profile.js'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 export const DEEPSEEK_ANALYZE_MODEL = analysisSkillV1.model
+export const DEEPSEEK_WRITER_MODEL = writerModelSkillV1.model
 export const DEEPSEEK_DRAFT_MODEL = draftSkillV1.model
 
 type DeepSeekChatCompletionRequest = {
@@ -232,6 +237,7 @@ export async function analyzeReferencesWithDeepSeek(
 export async function generateDraftWithDeepSeek(
   config: AppConfig,
   input: GenerateDraftRequest,
+  writingProfileContext?: WritingProfileContext,
 ): Promise<{
   draft: AiDraftCopy
   skill: AiSkillMetadata
@@ -246,7 +252,10 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekNotConfiguredError()
   }
 
-  const preparedSkill = await prepareAiSkill(draftSkillV1, input)
+  const preparedSkill = await prepareAiSkill(draftSkillV1, {
+    ...input,
+    writingProfileContext,
+  })
 
   const data = await requestDeepSeekChatCompletion(config, {
     model: preparedSkill.model,
@@ -287,6 +296,54 @@ export async function generateDraftWithDeepSeek(
 
   return {
     draft: validateDraftSkillOutput(draft, input.length),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
+    usage: toUsage(data.usage),
+  }
+}
+
+export async function learnWritingProfileWithDeepSeek(
+  config: AppConfig,
+  input: BuildWritingProfileRequest,
+): Promise<{
+  profile: WritingProfile
+  skill: AiSkillMetadata
+  model: string
+  usage: AiUsage | null
+}> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
+  if (!config.DEEPSEEK_API_KEY) {
+    throw new DeepSeekNotConfiguredError()
+  }
+
+  const preparedSkill = await prepareAiSkill(writerModelSkillV1, input)
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: preparedSkill.model,
+    messages: [
+      { role: 'system', content: preparedSkill.systemPrompt },
+      { role: 'user', content: preparedSkill.userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    thinking: { type: 'disabled' },
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
+    stream: false,
+  })
+
+  if (data.error?.message) {
+    throw new DeepSeekUpstreamError(data.error.message, 502)
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new DeepSeekUpstreamError('DeepSeek returned an empty writing profile.', 502)
+  }
+
+  return {
+    profile: preparedSkill.outputSchema.parse(parseJsonContent(content)),
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
     usage: toUsage(data.usage),

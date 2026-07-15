@@ -1,6 +1,8 @@
 import type {
   AnalyzeReferencesRequest,
   AnalyzeReferencesResponse,
+  BuildWritingProfileRequest,
+  BuildWritingProfileResponse,
   CreateFolderRequest,
   CreateFolderResponse,
   CreateFeedbackMemoryRequest,
@@ -200,6 +202,13 @@ export function createFeedbackMemory(token: string, input: CreateFeedbackMemoryR
 
 export function analyzeReferences(token: string, input: AnalyzeReferencesRequest) {
   return requestJson<AnalyzeReferencesResponse>('/v1/ai/analyze', token, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function buildWritingProfile(token: string, input: BuildWritingProfileRequest) {
+  return requestJson<BuildWritingProfileResponse>('/v1/ai/writing-profile', token, {
     method: 'POST',
     body: input,
   })

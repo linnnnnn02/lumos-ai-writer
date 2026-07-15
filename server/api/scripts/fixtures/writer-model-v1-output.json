@@ -1,0 +1,84 @@
+{
+  "summary": "用户偏好用真实使用顺序和可观察动作形成判断，语气像向朋友复盘；不堆参数，也不在结尾突然拔高。",
+  "decisionPrinciples": [
+    "先写实际发生的变化，再给出判断",
+    "用具体动作替代熟练、轻松等概括词"
+  ],
+  "contentPatterns": [
+    "选择能够呈现前后变化的真实场景",
+    "从读者常见担心切入，再把问题落到具体动作"
+  ],
+  "structurePatterns": [
+    "按第一次、后续尝试和现在的顺序推进",
+    "写到具体感受或下一步动作自然结束"
+  ],
+  "voicePatterns": [
+    "像向朋友复盘，不使用攻略站或参数说明书口吻",
+    "多用时间、地点和动作词承载变化"
+  ],
+  "readerRelationship": [
+    "先承认读者的真实担心，再分享自己如何处理"
+  ],
+  "mustKeep": [
+    "具体时间变化",
+    "可观察动作",
+    "克制的真人复盘语气"
+  ],
+  "mustAvoid": [
+    "参数堆砌",
+    "空泛地说越来越好",
+    "结尾突然总结上价值"
+  ],
+  "preferences": [
+    {
+      "id": "concrete-change-over-summary",
+      "dimension": "progression",
+      "statement": "偏好用时间节点和具体动作证明变化。",
+      "application": "初稿推进时至少放入一个前后可比较的时间节点，并写出动作如何变化。",
+      "avoid": "不要只写逐渐熟悉、越来越轻松等概括结论。",
+      "scope": "account",
+      "confidence": 0.88,
+      "supportCount": 4,
+      "evidenceIds": [
+        "snippet-concrete-change",
+        "snippet-use-sequence",
+        "feedback-manual-concrete-edit",
+        "feedback-final-camera"
+      ],
+      "contradictions": []
+    },
+    {
+      "id": "friend-review-tone",
+      "dimension": "tone",
+      "statement": "偏好像向朋友复盘，而不是输出标准攻略。",
+      "application": "从自己遇到的问题和调整过程展开，让判断跟在经历之后。",
+      "avoid": "避免先列步骤、参数和统一结论。",
+      "scope": "account",
+      "confidence": 0.7,
+      "supportCount": 2,
+      "evidenceIds": [
+        "snippet-counter-intuition",
+        "feedback-rewrite-review-tone"
+      ],
+      "contradictions": []
+    },
+    {
+      "id": "no-elevated-ending",
+      "dimension": "ending",
+      "statement": "不喜欢在结尾突然总结上价值。",
+      "application": "在最后一个具体感受、动作或仍然保留的疑问处自然结束。",
+      "avoid": "不要追加改变生活、成为更好的自己等拔高句。",
+      "scope": "account",
+      "confidence": 0.85,
+      "supportCount": 1,
+      "evidenceIds": [
+        "feedback-explicit-no-elevation"
+      ],
+      "contradictions": []
+    }
+  ],
+  "openQuestions": [
+    "反常识开头是否适用于所有内容类型，还是只在体验复盘中使用？"
+  ],
+  "evidenceCount": 10
+}

@@ -1842,6 +1842,8 @@ AI_DAILY_BUDGET_CNY=...
 
 当前状态：`reference-analysis@1.0.0` 已完成版本化 Skill、结构化契约、Prompt Hash 和离线评测。线上仍保持 `AI_FEATURE_ENABLED=false`，真实付费输出质量尚未验收。
 
+核心学习层已调整为 `user-writing-model@1.0.0`：账号级长期画像从素材共性、标注理由、改写要求、手动修改和最终选稿中学习；项目级 revision 只保存当前项目覆盖。学习拆解和初稿生成改为该写作模型的消费者，而不是各自推断用户风格。
+
 ### Phase 7：真实初稿生成
 
 目标：替换本地 `buildInitialDraftCopy`。

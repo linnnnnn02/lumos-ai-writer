@@ -2,6 +2,7 @@ import {
   aiDraftCopySchema,
   type AiDraftCopy,
   type GenerateDraftRequest,
+  type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
 import { antiAiWritingRulesV1 } from '../shared/anti-ai-writing-rules-v1.js'
@@ -27,6 +28,13 @@ export const draftLengthPolicies = {
   },
 } as const
 
+export type DraftSkillInput = GenerateDraftRequest & {
+  writingProfileContext?: {
+    accountProfile: WritingProfileRevisionDto | null
+    projectProfile: WritingProfileRevisionDto | null
+  }
+}
+
 const outputContract = {
   title: '一条不超过 35 个汉字的小红书标题',
   body: ['独立正文段落 1', '独立正文段落 2', '独立正文段落 3'],
@@ -36,13 +44,39 @@ function trimText(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
 }
 
-export function compactDraftSkillInput(input: GenerateDraftRequest) {
+function compactProfile(revision: WritingProfileRevisionDto | null | undefined) {
+  if (!revision) return null
+  return {
+    version: revision.version,
+    summary: revision.profile.summary,
+    decisionPrinciples: revision.profile.decisionPrinciples,
+    contentPatterns: revision.profile.contentPatterns,
+    structurePatterns: revision.profile.structurePatterns,
+    voicePatterns: revision.profile.voicePatterns,
+    readerRelationship: revision.profile.readerRelationship,
+    mustKeep: revision.profile.mustKeep,
+    mustAvoid: revision.profile.mustAvoid,
+    preferences: revision.profile.preferences.map((preference) => ({
+      dimension: preference.dimension,
+      statement: preference.statement,
+      application: preference.application,
+      avoid: preference.avoid,
+      confidence: preference.confidence,
+    })),
+  }
+}
+
+export function compactDraftSkillInput(input: DraftSkillInput) {
   return {
     projectName: input.projectName,
     topic: input.topic,
     targetAudience: input.targetAudience,
     length: input.length,
     brief: input.brief,
+    writingProfile: {
+      account: compactProfile(input.writingProfileContext?.accountProfile),
+      project: compactProfile(input.writingProfileContext?.projectProfile),
+    },
     analysis: {
       writingPath: input.analysis.aiLearningMethod.writingPath,
       reusableMechanisms: input.analysis.aiLearningMethod.reusableMechanisms,
@@ -113,7 +147,8 @@ export function validateDraftSkillOutput(
 const draftSystemPrompt = [
   '你是 Lumos AI Writer 的小红书初稿生成 Skill。',
   '目标是依据用户选题、目标读者、明确要求和已完成的学习拆解，生成一版可以继续编辑的中文初稿。',
-  '指令优先级：brief.mustInclude 与 brief.avoidTone > analysis 的风格约束与避坑点 > 用户标注理由和标签 > 参考文案。',
+  '指令优先级：brief.mustInclude 与 brief.avoidTone > project writingProfile > account writingProfile > analysis 的风格约束与避坑点 > 用户标注理由和标签 > 参考文案。',
+  'writingProfile 是对用户长期写作方式的证据化总结。高置信度偏好优先应用；低置信度偏好只能轻量尝试，不能压过当前明确要求。',
   '参考文案只提供写作机制，不提供可直接挪用的个人经历、产品事实、数据或句子。',
   '只有 topic 或 brief 明确支持时才使用第一人称经历；不得把参考作者的经历写成用户经历。',
   'brief.mustInclude 非空时必须自然包含其中的信息，brief.avoidTone 非空时必须视为硬性禁用语气。',
@@ -132,7 +167,7 @@ const draftSystemPrompt = [
 ].join('\n')
 
 export const draftSkillV1: AiSkillDefinition<
-  GenerateDraftRequest,
+  DraftSkillInput,
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',

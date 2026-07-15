@@ -19,6 +19,7 @@ const expectedTables = [
   'drafts',
   'ai_runs',
   'feedback_memories',
+  'writing_profile_revisions',
 ]
 
 function parseDotenv(content) {

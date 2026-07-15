@@ -4,6 +4,7 @@ import {
   aiDraftCopySchema,
   generateDraftRequestSchema,
   generateDraftResponseSchema,
+  writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
 import {
@@ -25,12 +26,38 @@ const input = generateDraftRequestSchema.parse(
 const expectedOutput = aiDraftCopySchema.parse(
   await readJsonFixture('draft-v1-output.json'),
 )
-const prepared = await prepareAiSkill(draftSkillV1, input)
+const accountWritingProfile = writingProfileSchema.parse(
+  await readJsonFixture('writer-model-v1-output.json'),
+)
+const prepared = await prepareAiSkill(draftSkillV1, {
+  ...input,
+  writingProfileContext: {
+    accountProfile: {
+      id: '33333333-3333-4333-8333-333333333333',
+      scope: 'account',
+      projectId: null,
+      version: 1,
+      profile: accountWritingProfile,
+      evidenceIds: [],
+      skill: {
+        id: 'user-writing-model',
+        version: '1.0.0',
+        promptHash: 'a'.repeat(64),
+      },
+      createdAt: '2026-06-12T09:00:00.000Z',
+    },
+    projectProfile: null,
+  },
+})
 const userPayload = JSON.parse(prepared.userPrompt) as {
   task: string
   input: {
     length: keyof typeof draftLengthPolicies
     brief: { mustInclude: string; avoidTone: string }
+    writingProfile: {
+      account: { summary: string; mustAvoid: string[] } | null
+      project: unknown | null
+    }
     notes: Array<{ contentText: string }>
     snippets: Array<{ selectedText: string; reasonText: string }>
   }
@@ -43,6 +70,9 @@ assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
 assert.equal(userPayload.input.brief.mustInclude, input.brief.mustInclude)
 assert.equal(userPayload.input.brief.avoidTone, input.brief.avoidTone)
+assert.equal(userPayload.input.writingProfile.account?.summary, accountWritingProfile.summary)
+assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
+assert.equal(userPayload.input.writingProfile.project, null)
 assert.ok(userPayload.input.notes.every((note) => note.contentText.length <= 903))
 assert.ok(userPayload.input.snippets.every((snippet) => snippet.selectedText.length <= 503))
 assert.ok(userPayload.input.snippets.every((snippet) => snippet.reasonText.length <= 303))

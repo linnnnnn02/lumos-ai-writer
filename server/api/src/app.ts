@@ -6,6 +6,8 @@ import { ZodError, type ZodSchema } from 'zod'
 import {
   analyzeReferencesRequestSchema,
   analyzeReferencesResponseSchema,
+  buildWritingProfileRequestSchema,
+  buildWritingProfileResponseSchema,
   createFolderRequestSchema,
   createFolderResponseSchema,
   createFeedbackMemoryRequestSchema,
@@ -16,6 +18,7 @@ import {
   deleteResourceResponseSchema,
   generateDraftRequestSchema,
   generateDraftResponseSchema,
+  getWritingProfileResponseSchema,
   getWorkspaceResponseSchema,
   healthResponseSchema,
   listFoldersResponseSchema,
@@ -39,10 +42,12 @@ import {
   analyzeReferencesWithDeepSeek,
   DEEPSEEK_ANALYZE_MODEL,
   DEEPSEEK_DRAFT_MODEL,
+  DEEPSEEK_WRITER_MODEL,
   DeepSeekNotConfiguredError,
   DeepSeekUpstreamError,
   generateDraftWithDeepSeek,
   getDeepSeekConfigStatus,
+  learnWritingProfileWithDeepSeek,
 } from './ai/deepseek.js'
 import { requireCurrentUser } from './auth.js'
 import { getConfigChecks, isSupabaseConfigured, readConfig, type RuntimeBindings } from './env.js'
@@ -76,6 +81,11 @@ import {
   syncWorkspace,
   WorkspaceOwnershipError,
 } from './workspace.js'
+import {
+  collectWritingEvidenceIds,
+  createWritingProfileRevision,
+  getWritingProfileContext,
+} from './writing-profile.js'
 
 type ApiVariables = {
   config: ReturnType<typeof readConfig>
@@ -885,6 +895,169 @@ export function createApiApp() {
     }
   })
 
+  app.get('/v1/writing-profile', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Writing profiles are unavailable.',
+        status: 503,
+      })
+    }
+
+    const projectId = c.req.query('projectId')
+    if (projectId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId)) {
+      return jsonError(c, {
+        code: 'validation_failed',
+        message: 'projectId is invalid.',
+        status: 400,
+      })
+    }
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const profiles = await getWritingProfileContext(config, user, projectId)
+      return c.json(getWritingProfileResponseSchema.parse({ ok: true, ...profiles }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      throw error
+    }
+  })
+
+  app.post('/v1/ai/writing-profile', async (c) => {
+    const config = c.get('config')
+    if (!config.AI_FEATURE_ENABLED) {
+      return jsonError(c, {
+        code: 'feature_disabled',
+        message: 'Writing profile learning is paused until writer-model-v1 passes evaluation.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, buildWritingProfileRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    const startedAt = Date.now()
+    try {
+      const profileContext = await getWritingProfileContext(config, user, body.projectId)
+      const currentRevision =
+        body.scope === 'account'
+          ? profileContext.accountProfile
+          : profileContext.projectProfile
+      const evidenceIds = collectWritingEvidenceIds(body)
+      const hasSameEvidence =
+        currentRevision !== null &&
+        currentRevision.evidenceIds.length === evidenceIds.length &&
+        evidenceIds.every((id) => currentRevision.evidenceIds.includes(id))
+
+      if (currentRevision && hasSameEvidence) {
+        return c.json(
+          buildWritingProfileResponseSchema.parse({
+            ok: true,
+            provider: 'deepseek',
+            model: DEEPSEEK_WRITER_MODEL,
+            skill: currentRevision.skill,
+            profile: currentRevision.profile,
+            revision: currentRevision,
+            reused: true,
+            usage: null,
+          }),
+        )
+      }
+
+      const learningInput = {
+        ...body,
+        previousProfile: currentRevision?.profile ?? null,
+      }
+      const result = await learnWritingProfileWithDeepSeek(config, learningInput)
+      const revision = await createWritingProfileRevision(
+        config,
+        user,
+        learningInput,
+        result.profile,
+        result.skill,
+      )
+      await recordAiRunSafely(config, user, {
+        taskType: 'profile-learn',
+        provider: 'deepseek',
+        model: result.model,
+        status: 'succeeded',
+        usage: result.usage,
+        promptHash: result.skill.promptHash,
+        costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
+        latencyMs: Date.now() - startedAt,
+      })
+      return c.json(
+        buildWritingProfileResponseSchema.parse({
+          ok: true,
+          provider: 'deepseek',
+          model: result.model,
+          skill: result.skill,
+          profile: result.profile,
+          revision,
+          reused: false,
+          usage: result.usage,
+        }),
+      )
+    } catch (error) {
+      await recordAiRunSafely(config, user, {
+        taskType: 'profile-learn',
+        provider: 'deepseek',
+        model: DEEPSEEK_WRITER_MODEL,
+        status: 'failed',
+        latencyMs: Date.now() - startedAt,
+        errorCode:
+          error instanceof AiFeatureDisabledError
+            ? 'feature_disabled'
+            : error instanceof DeepSeekNotConfiguredError
+            ? 'service_not_configured'
+            : error instanceof DeepSeekUpstreamError || error instanceof ZodError
+              ? 'upstream_error'
+              : 'internal_error',
+        errorMessage: getErrorMessage(error),
+      })
+
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      if (error instanceof DeepSeekNotConfiguredError) {
+        return jsonError(c, {
+          code: 'service_not_configured',
+          message: 'DeepSeek API key is not configured yet.',
+          status: 503,
+        })
+      }
+      if (error instanceof DeepSeekUpstreamError || error instanceof ZodError) {
+        return jsonError(c, {
+          code: 'upstream_error',
+          message:
+            error instanceof DeepSeekUpstreamError
+              ? error.message
+              : 'DeepSeek returned a writing profile in an unexpected format.',
+          status: error instanceof DeepSeekUpstreamError && error.status === 504 ? 504 : 502,
+        })
+      }
+      throw error
+    }
+  })
+
   app.post('/v1/ai/analyze', async (c) => {
     const config = c.get('config')
     if (!config.AI_FEATURE_ENABLED) {
@@ -996,7 +1169,12 @@ export function createApiApp() {
 
     const startedAt = Date.now()
     try {
-      const result = await generateDraftWithDeepSeek(config, body)
+      const writingProfileContext = await getWritingProfileContext(
+        config,
+        user,
+        body.projectId,
+      )
+      const result = await generateDraftWithDeepSeek(config, body, writingProfileContext)
       await recordAiRunSafely(config, user, {
         taskType: 'draft',
         provider: 'deepseek',
@@ -1034,6 +1212,15 @@ export function createApiApp() {
               : 'internal_error',
         errorMessage: getErrorMessage(error),
       })
+
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
 
       if (error instanceof AiFeatureDisabledError) {
         return jsonError(c, {

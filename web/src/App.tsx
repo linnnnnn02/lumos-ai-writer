@@ -85,6 +85,7 @@ import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
   analyzeReferences,
+  buildWritingProfile,
   createFolder,
   createSnippet,
   deleteFolder,
@@ -1045,6 +1046,7 @@ function App() {
     status: cloudWorkspaceStatus,
     userId: cloudWorkspaceUserId,
     projects: cloudWorkspaceProjects,
+    feedbackMemories: cloudFeedbackMemories,
     error: cloudWorkspaceError,
     save: saveCloudWorkspace,
     remember: rememberCloudFeedback,
@@ -2328,6 +2330,34 @@ function App() {
           ...current,
           [conversationId]: response.usage,
         }))
+
+        void buildWritingProfile(accessToken, {
+          scope: 'account',
+          libraryEvidence: {
+            notes: libraryNotes.slice(0, 60).map((note) => ({
+              id: note.id,
+              title: note.title,
+              contentText: note.contentText,
+            })),
+            snippets: librarySnippets.slice(0, 240).map((snippet) => ({
+              id: snippet.id,
+              selectedText: snippet.selectedText,
+              reasonText: snippet.reasonText,
+              colorTagName: snippet.colorTagName,
+            })),
+          },
+          feedbackEvidence: cloudFeedbackMemories.slice(0, 400).map((memory) => ({
+            id: memory.id,
+            projectId: memory.projectId,
+            type: memory.type,
+            content: memory.content,
+            context: memory.context,
+            source: memory.source,
+            createdAt: memory.createdAt,
+          })),
+        }).catch((profileError) => {
+          console.warn('Writing profile update was skipped.', profileError)
+        })
       }
 
       const analysisMessages = buildAnalysisChat(nextAnalysis)
@@ -2419,6 +2449,7 @@ function App() {
         }
 
         const response = await generateDraft(accessToken, {
+          projectId,
           projectName: activeProject.name,
           topic: activeConversation.topic,
           targetAudience: activeConversation.targetAudience,
@@ -2646,15 +2677,29 @@ function App() {
 
   function commitRewriteDraftFieldEdit(fieldId: string, nextValue: string) {
     const normalizedValue = normalizeEditableDraftText(nextValue)
+    const previousValue = getDraftFieldValue(initialDraftCopy, fieldId)
+    if (previousValue === normalizedValue) return
 
     setDraftCopyByConversation((current) => {
       const currentDraft = current[activeConversation.id] ?? generatedInitialDraftCopy
-      if (getDraftFieldValue(currentDraft, fieldId) === normalizedValue) return current
-
       return {
         ...current,
         [activeConversation.id]: setDraftFieldValue(currentDraft, fieldId, normalizedValue),
       }
+    })
+
+    rememberExplicitFeedback({
+      projectId: activeProject.id,
+      conversationId: activeConversation.id,
+      type: 'manual_edit',
+      content: normalizedValue,
+      context: {
+        fieldId,
+        beforeText: previousValue,
+        afterText: normalizedValue,
+        step: 'rewrite',
+      },
+      source: 'manual_editor',
     })
 
     if (
@@ -3670,6 +3715,8 @@ function App() {
         content: question,
         context: {
           selectedText: selection,
+          draftTitle: initialDraftCopy.title,
+          selectedFieldId: selectedRewriteFieldId,
           step: 'rewrite',
         },
       })

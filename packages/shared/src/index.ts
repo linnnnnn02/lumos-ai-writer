@@ -3,6 +3,7 @@ export const projectLengths = ['short', 'medium', 'long'] as const
 export * from './schemas/api.js'
 export * from './schemas/ai.js'
 export * from './schemas/library.js'
+export * from './schemas/writing-profile.js'
 export * from './schemas/workspace.js'
 
 export type ProjectLength = (typeof projectLengths)[number]
