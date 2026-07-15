@@ -1,7 +1,12 @@
 import type { AiSkillMetadata } from '@lumos-ai/shared'
 import type { ZodType } from 'zod'
 
-export type AiSkillTaskType = 'analyze' | 'draft' | 'rewrite' | 'reader-preview'
+export type AiSkillTaskType =
+  | 'analyze'
+  | 'profile-learn'
+  | 'draft'
+  | 'rewrite'
+  | 'reader-preview'
 
 export type AiSkillDefinition<TInput, TOutput> = {
   id: string

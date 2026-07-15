@@ -1,20 +1,28 @@
 import type { AppConfig } from '../env.js'
 import {
-  aiDraftCopySchema,
   type AiAnalysisResult,
   type AiDraftCopy,
   type AiSkillMetadata,
   type AiUsage,
   type AnalyzeReferencesRequest,
+  type BuildWritingProfileRequest,
   type GenerateDraftRequest,
+  type WritingProfile,
 } from '@lumos-ai/shared'
 import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
+import {
+  draftSkillV1,
+  validateDraftSkillOutput,
+} from '../skills/draft-v1/index.js'
 import { prepareAiSkill } from '../skills/runtime.js'
+import { writerModelSkillV1 } from '../skills/writer-model-v1/index.js'
+import type { WritingProfileContext } from '../writing-profile.js'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 export const DEEPSEEK_ANALYZE_MODEL = analysisSkillV1.model
-export const DEEPSEEK_DRAFT_MODEL = 'deepseek-v4-flash'
+export const DEEPSEEK_WRITER_MODEL = writerModelSkillV1.model
+export const DEEPSEEK_DRAFT_MODEL = draftSkillV1.model
 
 type DeepSeekChatCompletionRequest = {
   model: string
@@ -85,71 +93,6 @@ export function getDeepSeekConfigStatus(config: AppConfig) {
     dailyBudgetCny: config.AI_DAILY_BUDGET_CNY ?? null,
     model: DEEPSEEK_ANALYZE_MODEL,
   }
-}
-
-function trimText(text: string, maxLength: number) {
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
-}
-
-function compactDraftInput(input: GenerateDraftRequest) {
-  return {
-    projectName: input.projectName,
-    topic: input.topic,
-    targetAudience: input.targetAudience,
-    length: input.length,
-    brief: input.brief,
-    analysis: {
-      writingPath: input.analysis.aiLearningMethod.writingPath,
-      reusableMechanisms: input.analysis.aiLearningMethod.reusableMechanisms,
-      styleConstraints: input.analysis.aiLearningMethod.styleConstraints,
-      coreJudgement: input.analysis.coreJudgement,
-      effectivePatterns: input.analysis.effectivePatterns,
-      userPreference: input.analysis.userPreference,
-      reuseSuggestion: input.analysis.reuseSuggestion,
-      avoidPitfall: input.analysis.avoidPitfall,
-      writingMove: input.analysis.writingMove,
-    },
-    notes: input.notes.slice(0, 6).map((note) => ({
-      title: note.title,
-      authorName: note.authorName,
-      contentText: trimText(note.contentText, 900),
-    })),
-    snippets: input.snippets.slice(0, 16).map((snippet) => ({
-      selectedText: trimText(snippet.selectedText, 500),
-      reasonText: trimText(snippet.reasonText, 300),
-      colorTagName: snippet.colorTagName,
-    })),
-  }
-}
-
-function getDraftLengthInstruction(length: GenerateDraftRequest['length']) {
-  if (length === 'short') return '正文控制在 3-5 段，总字数约 120-220 字。'
-  if (length === 'medium') return '正文控制在 5-7 段，总字数约 300-520 字。'
-  return '正文控制在 7-10 段，总字数约 650-950 字。'
-}
-
-function buildDraftSystemPrompt(input: GenerateDraftRequest) {
-  return [
-    '你是 Lumos AI Writer 的小红书初稿写作助手。',
-    '你会根据学习拆解结果和用户补充信息生成第一版可编辑文案。',
-    '只输出一个 JSON object，不要 Markdown，不要代码块，不要解释。',
-    '必须使用中文，语气自然、具体、像真人分享，避免广告腔和模板总结。',
-    getDraftLengthInstruction(input.length),
-    'JSON 字段必须严格匹配：',
-    JSON.stringify({
-      title: '一条小红书标题，不超过 35 个汉字',
-      body: ['正文段落1', '正文段落2', '正文段落3'],
-    }),
-    'body 每个数组元素是一段正文，不要把所有内容塞进一个字符串。',
-    '可以适度使用 emoji，但不要堆砌；不要编造无法从输入推断的事实。',
-  ].join('\n')
-}
-
-function buildDraftUserPrompt(input: GenerateDraftRequest) {
-  return JSON.stringify({
-    task: 'generate_xiaohongshu_draft',
-    input: compactDraftInput(input),
-  })
 }
 
 function parseJsonContent(content: string): unknown {
@@ -294,8 +237,10 @@ export async function analyzeReferencesWithDeepSeek(
 export async function generateDraftWithDeepSeek(
   config: AppConfig,
   input: GenerateDraftRequest,
+  writingProfileContext?: WritingProfileContext,
 ): Promise<{
   draft: AiDraftCopy
+  skill: AiSkillMetadata
   model: string
   usage: AiUsage | null
 }> {
@@ -307,16 +252,21 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekNotConfiguredError()
   }
 
+  const preparedSkill = await prepareAiSkill(draftSkillV1, {
+    ...input,
+    writingProfileContext,
+  })
+
   const data = await requestDeepSeekChatCompletion(config, {
-    model: DEEPSEEK_DRAFT_MODEL,
+    model: preparedSkill.model,
     messages: [
       {
         role: 'system',
-        content: buildDraftSystemPrompt(input),
+        content: preparedSkill.systemPrompt,
       },
       {
         role: 'user',
-        content: buildDraftUserPrompt(input),
+        content: preparedSkill.userPrompt,
       },
     ],
     response_format: {
@@ -325,8 +275,8 @@ export async function generateDraftWithDeepSeek(
     thinking: {
       type: 'disabled',
     },
-    max_tokens: 2600,
-    temperature: 0.72,
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
     stream: false,
   })
 
@@ -342,9 +292,60 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty draft.', 502)
   }
 
+  const draft = preparedSkill.outputSchema.parse(parseJsonContent(content))
+
   return {
-    draft: aiDraftCopySchema.parse(parseJsonContent(content)),
-    model: DEEPSEEK_DRAFT_MODEL,
+    draft: validateDraftSkillOutput(draft, input.length),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
+    usage: toUsage(data.usage),
+  }
+}
+
+export async function learnWritingProfileWithDeepSeek(
+  config: AppConfig,
+  input: BuildWritingProfileRequest,
+): Promise<{
+  profile: WritingProfile
+  skill: AiSkillMetadata
+  model: string
+  usage: AiUsage | null
+}> {
+  if (!config.AI_FEATURE_ENABLED) {
+    throw new AiFeatureDisabledError()
+  }
+
+  if (!config.DEEPSEEK_API_KEY) {
+    throw new DeepSeekNotConfiguredError()
+  }
+
+  const preparedSkill = await prepareAiSkill(writerModelSkillV1, input)
+  const data = await requestDeepSeekChatCompletion(config, {
+    model: preparedSkill.model,
+    messages: [
+      { role: 'system', content: preparedSkill.systemPrompt },
+      { role: 'user', content: preparedSkill.userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    thinking: { type: 'disabled' },
+    max_tokens: preparedSkill.maxTokens,
+    temperature: preparedSkill.temperature,
+    stream: false,
+  })
+
+  if (data.error?.message) {
+    throw new DeepSeekUpstreamError(data.error.message, 502)
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new DeepSeekUpstreamError('DeepSeek returned an empty writing profile.', 502)
+  }
+
+  return {
+    profile: preparedSkill.outputSchema.parse(parseJsonContent(content)),
+    skill: preparedSkill.metadata,
+    model: preparedSkill.model,
     usage: toUsage(data.usage),
   }
 }

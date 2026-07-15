@@ -52,6 +52,7 @@ export const analyzeReferencesRequestSchema = z.object({
 })
 
 export const generateDraftRequestSchema = z.object({
+  projectId: z.string().uuid().optional(),
   projectName: z.string().trim().min(1).max(160),
   topic: z.string().trim().min(1).max(800),
   targetAudience: z.string().trim().min(1).max(800),
@@ -90,6 +91,7 @@ export const generateDraftResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
   model: z.string(),
+  skill: aiSkillMetadataSchema,
   draft: aiDraftCopySchema,
   usage: aiUsageSchema.nullable(),
 })

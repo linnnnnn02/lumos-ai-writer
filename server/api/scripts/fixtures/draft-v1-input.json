@@ -1,0 +1,106 @@
+{
+  "projectName": "深圳通勤骑行分享",
+  "topic": "第一次在深圳骑车通勤后的真实感受",
+  "targetAudience": "想尝试骑车通勤但担心太累的上班族",
+  "length": "medium",
+  "analysis": {
+    "projectName": "深圳通勤骑行分享",
+    "aiLearningMethod": {
+      "writingPath": "先拆掉体力焦虑，再用连续几天的具体变化证明通勤正在变容易。",
+      "reusableMechanisms": [
+        "用反常识判断替换常见担忧",
+        "用路口和路线等具体场景承载体验",
+        "用时间变化证明熟练度"
+      ],
+      "styleConstraints": [
+        "不夸大骑行带来的生活改变",
+        "不编造距离、速度和身体数据"
+      ]
+    },
+    "coreJudgement": "先改写读者最担心的问题，再用每天发生的细节建立可信度。",
+    "evidence": "用户两条标注分别强调反常识判断和时间变化，并明确偏好真人复盘式表达。",
+    "effectivePatterns": [
+      "开头直接说出发前最担心的事",
+      "中段用路线、路口和时间变化展开",
+      "收尾给出下一次通勤会继续保留的动作"
+    ],
+    "featuredSnippets": [
+      {
+        "quote": "最难的不是距离，而是找到一条不用频繁和汽车抢道的路线。",
+        "noteTitle": "骑了七天后，我终于不再挤早高峰",
+        "noteUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+        "label": "反常识判断",
+        "description": "把泛化的体力焦虑改成可解决的路线问题。",
+        "reason": "先推翻读者对体力的担心，再给出更具体的问题，很像真人复盘。"
+      }
+    ],
+    "userPreference": "目前更偏好用具体问题和时间变化表达体验，这是基于两条标注的待验证偏好。",
+    "reuseSuggestion": "下一篇先写出门前的一个担心，再按第一天、第三天和现在各放一个具体变化。",
+    "avoidPitfall": "不要把一次通勤写成彻底改变生活，也不要补充输入中没有的里程和速度。",
+    "preferenceQuestion": "你更想保留反常识开头，还是按天推进的记录感？",
+    "writingMove": "把‘骑行越来越轻松’改成一个具体路口前后动作的变化。",
+    "summary": "用担心、场景和时间变化组成一条可信的通勤复盘路径。",
+    "wording": [
+      "多用路口、提前减速等动作词",
+      "少用治愈、自由、松弛等泛化词"
+    ],
+    "structure": [
+      "担心切入",
+      "连续变化",
+      "保留动作"
+    ],
+    "preference": [
+      "真人复盘",
+      "具体变化"
+    ],
+    "readerView": [
+      "读者能判断自己真正需要准备什么",
+      "细节比结论更容易建立信任"
+    ],
+    "nextStep": [
+      "确认开头采用哪条担心",
+      "补充一个真实通勤路口细节"
+    ]
+  },
+  "notes": [
+    {
+      "id": "note-fixture-1",
+      "folderId": "folder-fixture-1",
+      "folderName": "骑行参考库",
+      "filename": "通勤骑行真实记录.md",
+      "title": "骑了七天后，我终于不再挤早高峰",
+      "authorName": "测试作者",
+      "sourceUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "contentText": "第一天出门前我最担心迟到，所以提前二十分钟下楼。真正骑起来后，最难的不是距离，而是找到一条不用频繁和汽车抢道的路线。第三天开始，我已经知道在哪个路口提前减速，也知道哪一段可以放松骑。",
+      "savedAt": "2026-05-01T08:00:00.000Z"
+    }
+  ],
+  "snippets": [
+    {
+      "id": "snippet-fixture-1",
+      "noteUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "noteTitle": "骑了七天后，我终于不再挤早高峰",
+      "noteAuthorName": "测试作者",
+      "selectedText": "最难的不是距离，而是找到一条不用频繁和汽车抢道的路线。",
+      "reasonText": "先推翻读者对体力的担心，再给出更具体的问题，很像真人复盘。",
+      "colorTagName": "反常识判断",
+      "colorValue": "#d97757",
+      "createdAt": "2026-05-01T08:10:00.000Z"
+    },
+    {
+      "id": "snippet-fixture-2",
+      "noteUrl": "https://www.xiaohongshu.com/explore/fixture-1",
+      "noteTitle": "骑了七天后，我终于不再挤早高峰",
+      "noteAuthorName": "测试作者",
+      "selectedText": "第三天开始，我已经知道在哪个路口提前减速。",
+      "reasonText": "用时间变化证明体验，不用空泛地说越来越熟练。",
+      "colorTagName": "具体场景",
+      "colorValue": "#d5a84b",
+      "createdAt": "2026-05-01T08:12:00.000Z"
+    }
+  ],
+  "brief": {
+    "mustInclude": "第一天提前二十分钟下楼；第三天已经知道在哪个路口提前减速。",
+    "avoidTone": "热血逆袭、过度治愈、把骑行写成彻底改变生活。"
+  }
+}

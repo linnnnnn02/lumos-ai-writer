@@ -54,6 +54,10 @@ export const feedbackMemoryTypeSchema = z.enum([
   'like',
   'dislike',
   'rewrite_preference',
+  'manual_edit',
+  'accepted_rewrite',
+  'rejected_rewrite',
+  'profile_correction',
   'ai_smell_feedback',
   'final_choice',
 ])

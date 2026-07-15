@@ -324,15 +324,32 @@ async function main() {
       body: {
         projectId,
         conversationId,
-        type: 'rewrite_preference',
-        content: '更具体一点，减少模板化表达。',
-        context: { source: 'smoke_test' },
+        type: 'manual_edit',
+        content: '第三天，我已经知道在哪个路口提前减速。',
+        context: {
+          beforeText: '后来我逐渐熟悉了路线。',
+          afterText: '第三天，我已经知道在哪个路口提前减速。',
+          source: 'smoke_test',
+        },
       },
     })
-    if (!memory?.ok || memory.memory?.type !== 'rewrite_preference') {
+    if (!memory?.ok || memory.memory?.type !== 'manual_edit') {
       throw new Error('/v1/feedback-memories did not create a memory.')
     }
     printStep('created feedback memory')
+
+    const writingProfiles = await apiRequest(
+      `/v1/writing-profile?projectId=${projectId}`,
+      accessToken,
+    )
+    if (
+      !writingProfiles?.ok ||
+      writingProfiles.accountProfile !== null ||
+      writingProfiles.projectProfile !== null
+    ) {
+      throw new Error('/v1/writing-profile did not return an empty profile context.')
+    }
+    printStep('read writing profile context', 'account and project revisions are empty')
 
     if (shouldCheckAi) {
       const ai = await apiRequest('/v1/ai/analyze', accessToken, {

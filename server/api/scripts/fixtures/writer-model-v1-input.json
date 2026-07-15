@@ -1,0 +1,101 @@
+{
+  "scope": "account",
+  "previousProfile": null,
+  "libraryEvidence": {
+    "notes": [
+      {
+        "id": "note-riding-review",
+        "title": "骑车通勤一周后的真实记录",
+        "contentText": "第一天担心迟到，第三天开始记住需要提前减速的路口。最难的不是体力，而是路线判断。"
+      },
+      {
+        "id": "note-camera-review",
+        "title": "相机用了一个月，我留下的是这三个习惯",
+        "contentText": "没有先列参数，而是从第一次带出门、第三次拍夜景和现在的使用变化展开。"
+      }
+    ],
+    "snippets": [
+      {
+        "id": "snippet-concrete-change",
+        "noteId": "note-riding-review",
+        "selectedText": "第三天开始记住需要提前减速的路口。",
+        "reasonText": "用时间和动作证明变化，不用空泛地说越来越熟练。",
+        "colorTagName": "具体变化"
+      },
+      {
+        "id": "snippet-counter-intuition",
+        "noteId": "note-riding-review",
+        "selectedText": "最难的不是体力，而是路线判断。",
+        "reasonText": "先推翻常见担心，再给出更具体的问题，像真人复盘。",
+        "colorTagName": "反常识判断"
+      },
+      {
+        "id": "snippet-use-sequence",
+        "noteId": "note-camera-review",
+        "selectedText": "第一次带出门、第三次拍夜景和现在的使用变化。",
+        "reasonText": "喜欢按实际使用顺序讲，不先堆参数和结论。",
+        "colorTagName": "使用顺序"
+      }
+    ]
+  },
+  "feedbackEvidence": [
+    {
+      "id": "feedback-rewrite-review-tone",
+      "projectId": "11111111-1111-4111-8111-111111111111",
+      "type": "rewrite_preference",
+      "content": "不要像攻略，改成像跟朋友复盘自己怎么慢慢适应。",
+      "context": {
+        "selectedText": "通勤骑行需要先规划路线并准备装备。",
+        "step": "rewrite"
+      },
+      "source": "explicit_user_action",
+      "createdAt": "2026-06-01T08:00:00.000Z"
+    },
+    {
+      "id": "feedback-manual-concrete-edit",
+      "projectId": "11111111-1111-4111-8111-111111111111",
+      "type": "manual_edit",
+      "content": "第三天，我已经知道在哪个路口提前减速。",
+      "context": {
+        "beforeText": "后来我逐渐熟悉了骑行通勤。",
+        "afterText": "第三天，我已经知道在哪个路口提前减速。",
+        "fieldId": "body-2"
+      },
+      "source": "manual_editor",
+      "createdAt": "2026-06-01T08:10:00.000Z"
+    },
+    {
+      "id": "feedback-final-camera",
+      "projectId": "22222222-2222-4222-8222-222222222222",
+      "type": "final_choice",
+      "content": "第一次带出门时我只拍了白天。第三次拍夜景后，才知道自己真正需要调的是哪一项。",
+      "context": {
+        "step": "reader"
+      },
+      "source": "explicit_user_action",
+      "createdAt": "2026-06-10T08:00:00.000Z"
+    },
+    {
+      "id": "feedback-explicit-no-elevation",
+      "projectId": null,
+      "type": "profile_correction",
+      "content": "我不喜欢最后突然总结上价值，写到具体感受结束就好。",
+      "context": {
+        "dimension": "ending"
+      },
+      "source": "explicit_profile_correction",
+      "createdAt": "2026-06-12T08:00:00.000Z"
+    },
+    {
+      "id": "feedback-project-route-only",
+      "projectId": "11111111-1111-4111-8111-111111111111",
+      "type": "rewrite_preference",
+      "content": "这一篇必须写深圳南山的路线。",
+      "context": {
+        "scope": "project"
+      },
+      "source": "explicit_user_action",
+      "createdAt": "2026-06-01T08:20:00.000Z"
+    }
+  ]
+}
