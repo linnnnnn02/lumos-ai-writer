@@ -19,6 +19,8 @@ import type {
   ListSnippetsResponse,
   ListTrashResponse,
   MeResponse,
+  PreviewDraftForReaderRequest,
+  PreviewDraftForReaderResponse,
   PublicConfigResponse,
   RewriteDraftRequest,
   RewriteDraftResponse,
@@ -225,6 +227,16 @@ export function generateDraft(token: string, input: GenerateDraftRequest) {
 
 export function rewriteDraft(token: string, input: RewriteDraftRequest) {
   return requestJson<RewriteDraftResponse>('/v1/ai/rewrite', token, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function previewDraftForReader(
+  token: string,
+  input: PreviewDraftForReaderRequest,
+) {
+  return requestJson<PreviewDraftForReaderResponse>('/v1/ai/reader-preview', token, {
     method: 'POST',
     body: input,
   })
