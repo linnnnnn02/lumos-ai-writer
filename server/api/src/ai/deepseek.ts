@@ -95,6 +95,18 @@ export class DeepSeekUpstreamError extends Error {
   }
 }
 
+export class DeepSeekOutputValidationError extends Error {
+  usage: AiUsage | null
+  promptHash: string
+
+  constructor(error: unknown, usage: AiUsage | null, promptHash: string) {
+    super(getErrorMessage(error))
+    this.name = 'DeepSeekOutputValidationError'
+    this.usage = usage
+    this.promptHash = promptHash
+  }
+}
+
 export function isDeepSeekConfigured(config: AppConfig) {
   return Boolean(config.DEEPSEEK_API_KEY)
 }
@@ -125,6 +137,24 @@ function toUsage(usage: DeepSeekChatCompletionResponse['usage']): AiUsage | null
     promptTokens: usage.prompt_tokens ?? null,
     completionTokens: usage.completion_tokens ?? null,
     totalTokens: usage.total_tokens ?? null,
+  }
+}
+
+function parseValidatedDeepSeekOutput<T>(
+  content: string,
+  data: DeepSeekChatCompletionResponse,
+  skill: AiSkillMetadata,
+  validate: (value: unknown) => T,
+) {
+  const usage = toUsage(data.usage)
+
+  try {
+    return {
+      value: validate(parseJsonContent(content)),
+      usage,
+    }
+  } catch (error) {
+    throw new DeepSeekOutputValidationError(error, usage, skill.promptHash)
   }
 }
 
@@ -240,11 +270,18 @@ export async function analyzeReferencesWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty analysis.', 502)
   }
 
+  const parsed = parseValidatedDeepSeekOutput(
+    content,
+    data,
+    preparedSkill.metadata,
+    (value) => preparedSkill.outputSchema.parse(value),
+  )
+
   return {
-    analysis: preparedSkill.outputSchema.parse(parseJsonContent(content)),
+    analysis: parsed.value,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: toUsage(data.usage),
+    usage: parsed.usage,
   }
 }
 
@@ -306,13 +343,18 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty draft.', 502)
   }
 
-  const draft = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  const parsed = parseValidatedDeepSeekOutput(
+    content,
+    data,
+    preparedSkill.metadata,
+    (value) => validateDraftSkillOutput(preparedSkill.outputSchema.parse(value), input.length),
+  )
 
   return {
-    draft: validateDraftSkillOutput(draft, input.length),
+    draft: parsed.value,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: toUsage(data.usage),
+    usage: parsed.usage,
   }
 }
 
@@ -360,12 +402,20 @@ export async function rewriteDraftWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty rewrite.', 502)
   }
 
-  const rewrite = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  const parsed = parseValidatedDeepSeekOutput(
+    content,
+    data,
+    preparedSkill.metadata,
+    (value) => validateRewriteSkillOutput(
+      preparedSkill.outputSchema.parse(value),
+      input.selectedText,
+    ),
+  )
   return {
-    rewrite: validateRewriteSkillOutput(rewrite, input.selectedText),
+    rewrite: parsed.value,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: toUsage(data.usage),
+    usage: parsed.usage,
   }
 }
 
@@ -413,12 +463,20 @@ export async function previewDraftForReaderWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty reader preview.', 502)
   }
 
-  const preview = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  const parsed = parseValidatedDeepSeekOutput(
+    content,
+    data,
+    preparedSkill.metadata,
+    (value) => validateReaderPreviewSkillOutput(
+      preparedSkill.outputSchema.parse(value),
+      input.draft,
+    ),
+  )
   return {
-    preview: validateReaderPreviewSkillOutput(preview, input.draft),
+    preview: parsed.value,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: toUsage(data.usage),
+    usage: parsed.usage,
   }
 }
 
@@ -462,10 +520,17 @@ export async function learnWritingProfileWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty writing profile.', 502)
   }
 
+  const parsed = parseValidatedDeepSeekOutput(
+    content,
+    data,
+    preparedSkill.metadata,
+    (value) => preparedSkill.outputSchema.parse(value),
+  )
+
   return {
-    profile: preparedSkill.outputSchema.parse(parseJsonContent(content)),
+    profile: parsed.value,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: toUsage(data.usage),
+    usage: parsed.usage,
   }
 }

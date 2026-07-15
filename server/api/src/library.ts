@@ -934,7 +934,7 @@ export async function getAiDailySpendCny(
     .from('ai_runs')
     .select('cost_estimate_cny')
     .eq('user_id', user.id)
-    .eq('status', 'succeeded')
+    .not('cost_estimate_cny', 'is', null)
     .gte('created_at', startOfChinaDay.toISOString())
 
   assertNoDatabaseError(error)
