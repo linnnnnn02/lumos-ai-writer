@@ -13,18 +13,27 @@ export const draftLengthPolicies = {
     maxParagraphs: 5,
     minCharacters: 120,
     maxCharacters: 220,
+    preferredParagraphs: 4,
+    preferredMinCharactersPerParagraph: 35,
+    preferredMaxCharactersPerParagraph: 50,
   },
   medium: {
     minParagraphs: 5,
     maxParagraphs: 7,
     minCharacters: 300,
     maxCharacters: 520,
+    preferredParagraphs: 6,
+    preferredMinCharactersPerParagraph: 55,
+    preferredMaxCharactersPerParagraph: 75,
   },
   long: {
     minParagraphs: 7,
     maxParagraphs: 10,
     minCharacters: 650,
     maxCharacters: 950,
+    preferredParagraphs: 8,
+    preferredMinCharactersPerParagraph: 85,
+    preferredMaxCharactersPerParagraph: 105,
   },
 } as const
 
@@ -79,6 +88,11 @@ export function compactDraftSkillInput(input: DraftSkillInput) {
       maxParagraphs: lengthPolicy.maxParagraphs,
       minBodyCharacters: lengthPolicy.minCharacters,
       maxBodyCharacters: lengthPolicy.maxCharacters,
+      preferredParagraphs: lengthPolicy.preferredParagraphs,
+      preferredCharactersPerParagraph: {
+        min: lengthPolicy.preferredMinCharactersPerParagraph,
+        max: lengthPolicy.preferredMaxCharactersPerParagraph,
+      },
       countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
     },
     brief: input.brief,
@@ -135,7 +149,7 @@ export function validateDraftSkillOutput(
         context.addIssue({
           code: 'custom',
           path: ['body'],
-          message: `Draft must contain ${policy.minParagraphs}-${policy.maxParagraphs} paragraphs for ${length} length.`,
+          message: `Draft must contain ${policy.minParagraphs}-${policy.maxParagraphs} paragraphs for ${length} length; received ${value.body.length}.`,
         })
       }
 
@@ -146,7 +160,7 @@ export function validateDraftSkillOutput(
         context.addIssue({
           code: 'custom',
           path: ['body'],
-          message: `Draft must contain ${policy.minCharacters}-${policy.maxCharacters} characters for ${length} length.`,
+          message: `Draft must contain ${policy.minCharacters}-${policy.maxCharacters} characters for ${length} length; received ${bodyCharacterCount}.`,
         })
       }
     })
@@ -164,10 +178,10 @@ const draftSystemPrompt = [
   '标题必须具体、克制且与正文一致，不超过 35 个汉字，不用夸张承诺或无依据的数字。',
   'body 每个数组元素必须是一个完整段落，段落之间要有清晰推进，不写提纲标签或段落功能说明。',
   '长度规则必须按 input.length 执行：',
-  `short：${draftLengthPolicies.short.minParagraphs}-${draftLengthPolicies.short.maxParagraphs} 段，总字数约 ${draftLengthPolicies.short.minCharacters}-${draftLengthPolicies.short.maxCharacters} 字。`,
-  `medium：${draftLengthPolicies.medium.minParagraphs}-${draftLengthPolicies.medium.maxParagraphs} 段，总字数约 ${draftLengthPolicies.medium.minCharacters}-${draftLengthPolicies.medium.maxCharacters} 字。`,
-  `long：${draftLengthPolicies.long.minParagraphs}-${draftLengthPolicies.long.maxParagraphs} 段，总字数约 ${draftLengthPolicies.long.minCharacters}-${draftLengthPolicies.long.maxCharacters} 字。`,
-  'input.outputRequirements 是本次输出的硬约束。写完后必须在内部逐项核对段落数和正文总字数；不满足时先调整，再输出最终 JSON。',
+  `short：必须 ${draftLengthPolicies.short.minParagraphs}-${draftLengthPolicies.short.maxParagraphs} 段、${draftLengthPolicies.short.minCharacters}-${draftLengthPolicies.short.maxCharacters} 字；优先写 ${draftLengthPolicies.short.preferredParagraphs} 段，每段 ${draftLengthPolicies.short.preferredMinCharactersPerParagraph}-${draftLengthPolicies.short.preferredMaxCharactersPerParagraph} 字。`,
+  `medium：必须 ${draftLengthPolicies.medium.minParagraphs}-${draftLengthPolicies.medium.maxParagraphs} 段、${draftLengthPolicies.medium.minCharacters}-${draftLengthPolicies.medium.maxCharacters} 字；优先写 ${draftLengthPolicies.medium.preferredParagraphs} 段，每段 ${draftLengthPolicies.medium.preferredMinCharactersPerParagraph}-${draftLengthPolicies.medium.preferredMaxCharactersPerParagraph} 字。`,
+  `long：必须 ${draftLengthPolicies.long.minParagraphs}-${draftLengthPolicies.long.maxParagraphs} 段、${draftLengthPolicies.long.minCharacters}-${draftLengthPolicies.long.maxCharacters} 字；优先写 ${draftLengthPolicies.long.preferredParagraphs} 段，每段 ${draftLengthPolicies.long.preferredMinCharactersPerParagraph}-${draftLengthPolicies.long.preferredMaxCharactersPerParagraph} 字。`,
+  'input.outputRequirements 是本次输出的硬约束。先按 preferredParagraphs 和 preferredCharactersPerParagraph 写足内容，再核对段落数与去除空白后的正文总字数；不足时补充具体场景、动作或判断，不得用空话凑字，满足后才能输出最终 JSON。',
   '默认不用 emoji；确有语气需要时整篇最多 2 个。结尾可以互动，但不能强行要求点赞、收藏或关注。',
   '去 AI 味规则：',
   ...antiAiWritingRulesV1.map((rule, index) => `${index + 1}. ${rule}`),
@@ -181,11 +195,11 @@ export const draftSkillV1: AiSkillDefinition<
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',
-  version: '1.0.1',
+  version: '1.0.2',
   taskType: 'draft',
   model: 'deepseek-v4-flash',
   maxTokens: 2600,
-  temperature: 0.58,
+  temperature: 0.45,
   systemPrompt: draftSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "generate_xiaohongshu_draft", input: compactDraftSkillInput(input) })',
