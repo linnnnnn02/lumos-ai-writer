@@ -14,6 +14,7 @@ import {
 } from 'react'
 import type {
   AiAnalysisResult,
+  AiReaderPreviewResult,
   AiUsage,
   CreateFeedbackMemoryRequest,
   ProjectLength,
@@ -23,7 +24,7 @@ import type {
   SyncWorkspaceRequest,
   WorkspaceProjectDto,
 } from '@lumos-ai/shared'
-import { normalizeNoteUrl } from '@lumos-ai/shared'
+import { aiReaderPreviewResultSchema, normalizeNoteUrl } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
@@ -37,6 +38,7 @@ import {
   Highlighter,
   Image,
   Layers3,
+  Loader2,
   MessageCircle,
   MoreHorizontal,
   MousePointer2,
@@ -95,6 +97,7 @@ import {
   deleteSnippet,
   emptyTrash,
   generateDraft,
+  previewDraftForReader,
   restoreFolder,
   restoreNote,
   updateFolder,
@@ -405,6 +408,12 @@ type ReaderPreviewFeedback = {
   blocks: ReaderFeedbackBlock[]
 }
 
+type ReaderPreviewRecord = {
+  audience: string
+  draft: InitialDraftCopy
+  preview: AiReaderPreviewResult
+}
+
 type HydratedCloudWorkspace = {
   projects: ProjectRecord[]
   analysisByConversation: Record<string, AiAnalysisResult>
@@ -413,6 +422,7 @@ type HydratedCloudWorkspace = {
   rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
+  readerPreviewByConversation: Record<string, ReaderPreviewRecord>
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -428,6 +438,23 @@ function isInitialDraftCopy(value: unknown): value is InitialDraftCopy {
   )
 }
 
+function isReaderPreviewRecord(value: unknown): value is ReaderPreviewRecord {
+  return (
+    isObject(value) &&
+    typeof value.audience === 'string' &&
+    isInitialDraftCopy(value.draft) &&
+    aiReaderPreviewResultSchema.safeParse(value.preview).success
+  )
+}
+
+function isSameDraftCopy(first: InitialDraftCopy, second: InitialDraftCopy) {
+  return (
+    first.title === second.title &&
+    first.body.length === second.body.length &&
+    first.body.every((paragraph, index) => paragraph === second.body[index])
+  )
+}
+
 function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCloudWorkspace {
   const analysisByConversation: Record<string, AiAnalysisResult> = {}
   const draftCopyByConversation: Record<string, InitialDraftCopy> = {}
@@ -435,6 +462,7 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
   const rewriteMessagesByConversation: Record<string, RewriteChatMessage[]> = {}
   const planAttachmentsByConversation: Record<string, PlanAttachment[]> = {}
   const readerAudienceByConversation: Record<string, string> = {}
+  const readerPreviewByConversation: Record<string, ReaderPreviewRecord> = {}
 
   const projects = cloudProjects.map((project): ProjectRecord => {
     const conversations = project.conversations.map((conversation): ConversationRecord => {
@@ -452,6 +480,9 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       }
       if (typeof state.readerAudience === 'string') {
         readerAudienceByConversation[conversation.id] = state.readerAudience
+      }
+      if (isReaderPreviewRecord(state.readerPreview)) {
+        readerPreviewByConversation[conversation.id] = state.readerPreview
       }
 
       const draft = conversation.draft
@@ -518,6 +549,7 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
     rewriteMessagesByConversation,
     planAttachmentsByConversation,
     readerAudienceByConversation,
+    readerPreviewByConversation,
   }
 }
 
@@ -534,6 +566,7 @@ function buildWorkspaceSyncPayload(input: {
   rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
+  readerPreviewByConversation: Record<string, ReaderPreviewRecord>
 }): SyncWorkspaceRequest {
   return {
     projects: input.projects.map((project) => ({
@@ -563,6 +596,9 @@ function buildWorkspaceSyncPayload(input: {
           rewriteMessages: input.rewriteMessagesByConversation[conversation.id] ?? [],
           planAttachments: input.planAttachmentsByConversation[conversation.id] ?? [],
           readerAudience: input.readerAudienceByConversation[conversation.id] ?? '',
+          ...(input.readerPreviewByConversation[conversation.id]
+            ? { readerPreview: input.readerPreviewByConversation[conversation.id] }
+            : {}),
           ...(conversation.finalDraft ? { finalDraft: conversation.finalDraft } : {}),
         },
         messages: conversation.chatMessages.map((message, index) => {
@@ -967,6 +1003,62 @@ function buildReaderPreviewFeedback(input: {
   }
 }
 
+function buildAiReaderPreviewFeedback(
+  preview: AiReaderPreviewResult,
+  draft: InitialDraftCopy,
+): ReaderPreviewFeedback {
+  const priorityLabels = {
+    high: '高优先级',
+    medium: '中优先级',
+    low: '低优先级',
+  } as const
+  const annotations = preview.annotations
+    .map((annotation) => {
+      const fieldValue = annotation.fieldId === 'title'
+        ? draft.title
+        : draft.body[Number(annotation.fieldId.replace('body-', ''))] ?? ''
+      return {
+        fieldId: annotation.fieldId,
+        id: annotation.id,
+        label: annotation.label,
+        lines: [
+          annotation.reaction,
+          `${annotation.reason}（预演置信度 ${Math.round(annotation.confidence * 100)}%）`,
+        ],
+        noteNumber: 0,
+        startIndex: fieldValue.indexOf(annotation.quote),
+        text: annotation.quote,
+        title: annotation.title,
+        tone: annotation.tone,
+      } satisfies ReaderDraftAnnotation
+    })
+    .filter((annotation) => annotation.startIndex >= 0)
+    .sort(
+      (first, second) =>
+        getReaderAnnotationFieldOrder(first.fieldId) - getReaderAnnotationFieldOrder(second.fieldId) ||
+        first.startIndex - second.startIndex,
+    )
+    .map((annotation, index) => ({
+      ...annotation,
+      noteNumber: index + 1,
+    }))
+
+  return {
+    annotations,
+    blocks: [
+      {
+        title: '优先修改建议',
+        label: '建议',
+        tone: 'suggestion',
+        lines: preview.suggestions.map(
+          (suggestion) =>
+            `${priorityLabels[suggestion.priority]}：${suggestion.instruction} ${suggestion.rationale}`,
+        ),
+      },
+    ],
+  }
+}
+
 function ShellStepPills({ step }: { step: PageStep }) {
   return (
     <div className="hidden items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] p-1 shadow-none lg:flex">
@@ -1023,6 +1115,16 @@ function App() {
   >({})
   const [readerAudienceByConversation, setReaderAudienceByConversation] = useState<
     Record<string, string>
+  >({})
+  const [readerPreviewByConversation, setReaderPreviewByConversation] = useState<
+    Record<string, ReaderPreviewRecord>
+  >({})
+  const [readerPreviewPendingConversationId, setReaderPreviewPendingConversationId] = useState('')
+  const [readerPreviewErrorByConversation, setReaderPreviewErrorByConversation] = useState<
+    Record<string, string>
+  >({})
+  const [, setReaderPreviewUsageByConversation] = useState<
+    Record<string, AiUsage | null>
   >({})
   const [isReaderAudienceOpen, setIsReaderAudienceOpen] = useState(false)
   const [activeReaderAnnotationId, setActiveReaderAnnotationId] = useState('')
@@ -1119,6 +1221,7 @@ function App() {
         rewriteMessagesByConversation,
         planAttachmentsByConversation,
         readerAudienceByConversation,
+        readerPreviewByConversation,
       }),
     [
       analysisByConversation,
@@ -1127,6 +1230,7 @@ function App() {
       planAttachmentsByConversation,
       projects,
       readerAudienceByConversation,
+      readerPreviewByConversation,
       rewriteMessagesByConversation,
     ],
   )
@@ -1186,6 +1290,8 @@ function App() {
       setRewriteMessagesByConversation({})
       setPlanAttachmentsByConversation({})
       setReaderAudienceByConversation({})
+      setReaderPreviewByConversation({})
+      setReaderPreviewErrorByConversation({})
       setIsWorkspaceOpen(true)
       setIsLibraryOpen(false)
       return
@@ -1213,6 +1319,8 @@ function App() {
     setRewriteMessagesByConversation(hydrated.rewriteMessagesByConversation)
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
     setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
+    setReaderPreviewByConversation(hydrated.readerPreviewByConversation)
+    setReaderPreviewErrorByConversation({})
     setIsWorkspaceOpen(true)
     setIsLibraryOpen(false)
   }, [cloudWorkspaceProjects, cloudWorkspaceStatus, cloudWorkspaceUserId])
@@ -1646,7 +1754,15 @@ function App() {
   const rewriteMessages = rewriteMessagesByConversation[activeConversation.id] ?? []
   const planAttachments = planAttachmentsByConversation[activeConversation.id] ?? []
   const readerAudienceDraft = readerAudienceByConversation[activeConversation.id] ?? ''
-  const readerPreviewFeedback = useMemo(
+  const effectiveReaderAudience = readerAudienceDraft.trim() || activeConversation.targetAudience
+  const readerPreviewRecord = readerPreviewByConversation[activeConversation.id]
+  const activeReaderPreview =
+    readerPreviewRecord &&
+    readerPreviewRecord.audience === effectiveReaderAudience &&
+    isSameDraftCopy(readerPreviewRecord.draft, initialDraftCopy)
+      ? readerPreviewRecord.preview
+      : null
+  const fallbackReaderPreviewFeedback = useMemo(
     () =>
       buildReaderPreviewFeedback({
         draft: initialDraftCopy,
@@ -1659,6 +1775,14 @@ function App() {
       readerAudienceDraft,
     ],
   )
+  const readerPreviewFeedback = useMemo(
+    () =>
+      activeReaderPreview
+        ? buildAiReaderPreviewFeedback(activeReaderPreview, initialDraftCopy)
+        : fallbackReaderPreviewFeedback,
+    [activeReaderPreview, fallbackReaderPreviewFeedback, initialDraftCopy],
+  )
+  const readerPreviewError = readerPreviewErrorByConversation[activeConversation.id] ?? ''
   const draftBridgeMessages = draftBridgeMessagesByConversation[activeConversation.id] ?? []
   const draftMoveHistory = draftMoveHistoryByConversation[activeConversation.id] ?? {
     redo: [],
@@ -1788,6 +1912,12 @@ function App() {
       setIsLibraryOpen(false)
       handleBackToSelection()
       updateConversationStep(activeProject.id, activeConversation.id, 'learn')
+      return
+    }
+
+    if (nextStep === 'reader') {
+      goToStep('reader')
+      void handleGenerateReaderPreview()
       return
     }
 
@@ -3745,6 +3875,83 @@ function App() {
     window.setTimeout(() => rewriteInputRef.current?.focus(), 0)
   }
 
+  async function handleGenerateReaderPreview(force = false) {
+    const conversationId = activeConversation.id
+    if (
+      !hasDraftReady ||
+      readerPreviewPendingConversationId ||
+      (!force && activeReaderPreview)
+    ) {
+      return
+    }
+
+    setReaderPreviewErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+
+    if (cloudWorkspaceStatus === 'guest') {
+      if (force) showFinalCopyToast('已按当前目标用户更新演示预演')
+      return
+    }
+    if (cloudWorkspaceStatus !== 'ready') {
+      setReaderPreviewErrorByConversation((current) => ({
+        ...current,
+        [conversationId]: '云端工作区还在连接中，当前先展示演示预演。',
+      }))
+      return
+    }
+
+    setReaderPreviewPendingConversationId(conversationId)
+    try {
+      const accessToken = await getCurrentAccessToken()
+      if (!accessToken) {
+        throw new Error('登录状态已过期，请重新登录后再生成读者预演。')
+      }
+
+      const response = await previewDraftForReader(accessToken, {
+        projectId: activeProject.id,
+        projectName: activeProject.name,
+        topic: activeConversation.topic,
+        targetAudience: activeConversation.targetAudience,
+        readerAudience: readerAudienceDraft.trim(),
+        draft: initialDraftCopy,
+        analysis: activeConversation.analysisReady ? analysis : undefined,
+      })
+      setReaderPreviewByConversation((current) => ({
+        ...current,
+        [conversationId]: {
+          audience: effectiveReaderAudience,
+          draft: initialDraftCopy,
+          preview: response.preview,
+        },
+      }))
+      setReaderPreviewUsageByConversation((current) => ({
+        ...current,
+        [conversationId]: response.usage,
+      }))
+    } catch (error) {
+      const message = getErrorMessage(error)
+      const friendlyMessage = message.includes('paused until reader-preview-v1 passes evaluation')
+        ? 'AI 读者预演仍在评测阶段，当前展示演示预演。'
+        : message
+      setReaderPreviewErrorByConversation((current) => ({
+        ...current,
+        [conversationId]: friendlyMessage,
+      }))
+    } finally {
+      setReaderPreviewPendingConversationId((current) =>
+        current === conversationId ? '' : current,
+      )
+    }
+  }
+
+  function handleOpenReaderPreview() {
+    goToStep('reader')
+    void handleGenerateReaderPreview()
+  }
+
   function showFinalCopyToast(message: string) {
     setFinalCopyToast(message)
     if (finalCopyToastTimerRef.current) {
@@ -3773,7 +3980,7 @@ function App() {
         type: 'final_choice',
         content: formatDraftCopyForClipboard(initialDraftCopy),
         context: {
-          targetAudience: readerAudienceDraft,
+          targetAudience: effectiveReaderAudience,
           step: 'reader',
         },
       })
@@ -5425,7 +5632,7 @@ function App() {
               <Button variant="secondary" size="sm" onClick={() => goToStep('plan')}>
                 上一步
               </Button>
-              <Button size="sm" onClick={() => goToStep('reader')} disabled={!hasDraftReady}>
+              <Button size="sm" onClick={handleOpenReaderPreview} disabled={!hasDraftReady}>
                 下一步
               </Button>
             </div>
@@ -5727,12 +5934,17 @@ function App() {
                       </span>
                       <Textarea
                         value={readerAudienceDraft}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           setReaderAudienceByConversation((current) => ({
                             ...current,
                             [activeConversation.id]: event.target.value,
                           }))
-                        }
+                          setReaderPreviewErrorByConversation((current) => {
+                            const next = { ...current }
+                            delete next[activeConversation.id]
+                            return next
+                          })
+                        }}
                         className="min-h-[104px] resize-none rounded-[var(--ui-field-radius)] bg-white/84 text-sm leading-6 shadow-none"
                         placeholder="例如：刚开始骑行、怕路线太难、想找周末轻松路线的新手"
                       />
@@ -5740,6 +5952,19 @@ function App() {
                   </div>
                 ) : null}
               </div>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => void handleGenerateReaderPreview(true)}
+                disabled={readerPreviewPendingConversationId === activeConversation.id}
+              >
+                {readerPreviewPendingConversationId === activeConversation.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+                {readerPreviewPendingConversationId === activeConversation.id ? '预演中' : '重新预演'}
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => goToStep('rewrite')}>
                 上一步
               </Button>
@@ -5765,6 +5990,26 @@ function App() {
                 <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none">
                   <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-6">
                     <div className="grid gap-4">
+                      <section className="rounded-[var(--ui-radius-card)] border border-white/76 bg-white/68 px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.035)]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={activeReaderPreview ? 'accent' : 'outline'}>
+                            {activeReaderPreview ? 'AI 预演' : '演示预演'}
+                          </Badge>
+                          <span className="text-xs text-[var(--soft-foreground)]">
+                            这是推演，不代表真实用户调研或效果预测
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                          {activeReaderPreview?.audienceSummary ??
+                            `当前以“${effectiveReaderAudience}”为视角，根据文案结构生成演示反馈。`}
+                        </p>
+                        {readerPreviewError ? (
+                          <p className="mt-2 text-xs leading-5 text-[#b94f38]">
+                            {readerPreviewError}
+                          </p>
+                        ) : null}
+                      </section>
+
                       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
                         <div className="flex items-center gap-2">
                           <Badge variant="accent">批注</Badge>

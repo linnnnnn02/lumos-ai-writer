@@ -19,6 +19,8 @@ import type {
   ListSnippetsResponse,
   ListTrashResponse,
   MeResponse,
+  PreviewDraftForReaderRequest,
+  PreviewDraftForReaderResponse,
   PublicConfigResponse,
   SyncWorkspaceRequest,
   SyncWorkspaceResponse,
@@ -216,6 +218,16 @@ export function buildWritingProfile(token: string, input: BuildWritingProfileReq
 
 export function generateDraft(token: string, input: GenerateDraftRequest) {
   return requestJson<GenerateDraftResponse>('/v1/ai/draft', token, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function previewDraftForReader(
+  token: string,
+  input: PreviewDraftForReaderRequest,
+) {
+  return requestJson<PreviewDraftForReaderResponse>('/v1/ai/reader-preview', token, {
     method: 'POST',
     body: input,
   })

@@ -11,7 +11,8 @@
     "eval:analysis": "tsx scripts/eval-analysis-skill.ts",
     "eval:writer-model": "tsx scripts/eval-writer-model-skill.ts",
     "eval:draft": "tsx scripts/eval-draft-skill.ts",
-    "eval:skills": "pnpm eval:analysis && pnpm eval:writer-model && pnpm eval:draft",
+    "eval:reader-preview": "tsx scripts/eval-reader-preview-skill.ts",
+    "eval:skills": "pnpm eval:analysis && pnpm eval:writer-model && pnpm eval:draft && pnpm eval:reader-preview",
     "build": "tsc -p tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"

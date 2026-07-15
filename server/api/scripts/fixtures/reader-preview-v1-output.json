@@ -1,0 +1,87 @@
+{
+  "audienceSummary": "以想尝试骑车通勤、但担心体力和路线判断压力的上班族视角预演；重点看草稿是否用具体动作降低不确定感，而不是预测真实转化。",
+  "annotations": [
+    {
+      "id": "opening-time-detail",
+      "fieldId": "body-0",
+      "quote": "第一天我干脆提前二十分钟下楼",
+      "tone": "interest",
+      "label": "停留点",
+      "title": "具体时间让担心可感知",
+      "reaction": "担心通勤迟到的读者可能会在这里停一下，因为这不是泛泛说紧张，而是一个能想象出来的出门动作。",
+      "reason": "原文同时给出第一天、提前二十分钟和下楼三个具体信息，直接对应读者对迟到的顾虑。",
+      "confidence": 0.86
+    },
+    {
+      "id": "third-day-action",
+      "fieldId": "body-2",
+      "quote": "到了第三天，我已经知道在哪个路口提前减速",
+      "tone": "interest",
+      "label": "可信细节",
+      "title": "变化落在可观察动作上",
+      "reaction": "读者可能会把这句话理解成路线正在变熟，而不是作者突然变得很会骑。",
+      "reason": "第三天和提前减速形成前后变化，证明方式与目标读者关心的上手难度相关。",
+      "confidence": 0.84
+    },
+    {
+      "id": "route-smooth-question",
+      "fieldId": "body-3",
+      "quote": "先把路线走顺",
+      "tone": "question",
+      "label": "自然疑问",
+      "title": "走顺的判断还不够具体",
+      "reaction": "第一次骑通勤路线的读者可能会想知道，怎样才算已经把路线走顺。",
+      "reason": "这句话给出了建议方向，但没有直接连接前文已经出现的路口判断和提前减速动作。",
+      "confidence": 0.73
+    },
+    {
+      "id": "light-benefit-risk",
+      "fieldId": "body-3",
+      "quote": "都会让下一次出门轻松一些",
+      "tone": "risk",
+      "label": "表达风险",
+      "title": "轻松是概括而不是证据",
+      "reaction": "读者可能理解这句话的方向，但在连续具体细节之后，这个概括会显得稍微松了一点。",
+      "reason": "草稿前文一直用路口和减速动作证明变化，这里改用轻松概括，证据密度突然下降。",
+      "confidence": 0.76
+    },
+    {
+      "id": "restrained-ending",
+      "fieldId": "body-4",
+      "quote": "这几天没有让我得出什么很大的结论",
+      "tone": "interest",
+      "label": "语气保留",
+      "title": "克制收尾符合复盘口吻",
+      "reaction": "不喜欢被强行说服的读者可能会觉得这里更像真实复盘，而不是突然拔高骑行的意义。",
+      "reason": "这句主动限制结论力度，也与用户写作模型中避免结尾上价值的偏好一致。",
+      "confidence": 0.8
+    }
+  ],
+  "suggestions": [
+    {
+      "priority": "high",
+      "instruction": "把“先把路线走顺”改成与前文路口判断、提前减速直接对应的动作表达。",
+      "rationale": "这样能回答新手怎样判断路线正在变熟，同时不需要新增里程或速度数据。",
+      "annotationIds": [
+        "route-smooth-question",
+        "third-day-action"
+      ]
+    },
+    {
+      "priority": "medium",
+      "instruction": "把“轻松一些”收回到少一次临时判断或更早知道何时减速这类已有细节。",
+      "rationale": "保持整篇用可观察动作证明变化的方式，也避免空泛概括。",
+      "annotationIds": [
+        "light-benefit-risk"
+      ]
+    },
+    {
+      "priority": "low",
+      "instruction": "保留最后一段克制结论的力度，不追加改变生活或成长意义。",
+      "rationale": "这一处已经符合用户偏好的真人复盘口吻，不需要套用通用的价值升华。",
+      "annotationIds": [
+        "restrained-ending"
+      ]
+    }
+  ]
+}
