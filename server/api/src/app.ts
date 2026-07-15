@@ -1003,6 +1003,7 @@ export function createApiApp() {
         model: result.model,
         status: 'succeeded',
         usage: result.usage,
+        promptHash: result.skill.promptHash,
         costEstimateCny: estimateDeepSeekCostCny(config, result.usage),
         latencyMs: Date.now() - startedAt,
       })
@@ -1011,6 +1012,7 @@ export function createApiApp() {
           ok: true,
           provider: 'deepseek',
           model: result.model,
+          skill: result.skill,
           draft: result.draft,
           usage: result.usage,
         }),

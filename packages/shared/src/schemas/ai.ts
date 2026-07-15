@@ -90,6 +90,7 @@ export const generateDraftResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
   model: z.string(),
+  skill: aiSkillMetadataSchema,
   draft: aiDraftCopySchema,
   usage: aiUsageSchema.nullable(),
 })

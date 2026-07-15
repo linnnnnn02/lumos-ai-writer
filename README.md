@@ -132,7 +132,7 @@ Lumos AI Writer 当前已经具备完整的前端产品、浏览器插件采集�
 - 插件可以本地保存，也可以登录云端同步到 Supabase。
 - 网页端登录后会读取云端文案库；未登录时展示本地 demo 数据。
 - 网页端登录后会自动保存项目、对话、消息、当前步骤、工作草稿和明确反馈；未登录时不会上传 demo 项目。
-- DeepSeek 密钥已接入后端，但 `AI_FEATURE_ENABLED=false` 时分析和初稿接口会在调用模型前被拦截。
+- DeepSeek 密钥已接入后端，学习拆解与初稿生成均已使用版本化 Skill；`AI_FEATURE_ENABLED=false` 时两个接口都会在调用模型前被拦截。
 - API 已允许本地网页端和 Chrome 插件来源跨域调用；线上域名可以通过 `CORS_ALLOWED_ORIGINS` 补充。
 - 后续需要补充预算、限流和线上部署策略。
 - Chrome 里如果还看到旧的 `XHS AI Studio`，那是旧扩展残留；当前代码构建出的插件名是 `Lumos AI Writer`。
@@ -184,7 +184,7 @@ pnpm smoke:p0
 pnpm smoke:p0:ai
 ```
 
-运行付费 AI 测试前，必须先通过 Skill 离线评测：
+运行付费 AI 测试前，必须先通过学习拆解与初稿 Skill 的离线评测：
 
 ```bash
 pnpm eval:skills
