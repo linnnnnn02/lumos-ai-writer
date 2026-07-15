@@ -7,6 +7,26 @@ const featureFlagSchema = z
   .enum(['true', 'false'])
   .default('false')
   .transform((value) => value === 'true')
+const userIdListSchema = z
+  .string()
+  .default('')
+  .transform((value, context) => {
+    const userIds = value
+      .split(',')
+      .map((userId) => userId.trim())
+      .filter(Boolean)
+
+    for (const userId of userIds) {
+      if (!z.string().uuid().safeParse(userId).success) {
+        context.addIssue({
+          code: 'custom',
+          message: 'AI_PILOT_USER_IDS must contain comma-separated UUIDs.',
+        })
+      }
+    }
+
+    return Array.from(new Set(userIds))
+  })
 
 const configSchema = z.object({
   APP_ENV: appEnvSchema.default('local'),
@@ -18,6 +38,7 @@ const configSchema = z.object({
   AUTH_OAUTH_PROVIDERS: z.string().default('github,google'),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   AI_FEATURE_ENABLED: featureFlagSchema,
+  AI_PILOT_USER_IDS: userIdListSchema,
   AI_PROVIDER_PRIMARY: z.literal('deepseek').default('deepseek'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   AI_DAILY_BUDGET_CNY: z.coerce.number().nonnegative().optional(),
@@ -48,6 +69,7 @@ export function readConfig(bindings: RuntimeBindings = {}): AppConfig {
     AUTH_OAUTH_PROVIDERS: raw.AUTH_OAUTH_PROVIDERS || undefined,
     CORS_ALLOWED_ORIGINS: raw.CORS_ALLOWED_ORIGINS || undefined,
     AI_FEATURE_ENABLED: raw.AI_FEATURE_ENABLED || undefined,
+    AI_PILOT_USER_IDS: raw.AI_PILOT_USER_IDS || undefined,
     AI_PROVIDER_PRIMARY: raw.AI_PROVIDER_PRIMARY || undefined,
     DEEPSEEK_API_KEY: raw.DEEPSEEK_API_KEY || undefined,
     AI_DAILY_BUDGET_CNY: raw.AI_DAILY_BUDGET_CNY || undefined,

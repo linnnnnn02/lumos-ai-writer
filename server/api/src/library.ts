@@ -918,3 +918,31 @@ export async function recordAiRun(
 
   assertNoDatabaseError(error)
 }
+
+export async function getAiDailySpendCny(
+  config: AppConfig,
+  user: User,
+  now = new Date(),
+): Promise<number> {
+  const supabase = getAdminClient(config)
+  const chinaOffsetMs = 8 * 60 * 60 * 1000
+  const chinaTime = new Date(now.getTime() + chinaOffsetMs)
+  chinaTime.setUTCHours(0, 0, 0, 0)
+  const startOfChinaDay = new Date(chinaTime.getTime() - chinaOffsetMs)
+
+  const { data, error } = await supabase
+    .from('ai_runs')
+    .select('cost_estimate_cny')
+    .eq('user_id', user.id)
+    .eq('status', 'succeeded')
+    .gte('created_at', startOfChinaDay.toISOString())
+
+  assertNoDatabaseError(error)
+
+  const total = (data ?? []).reduce((sum, row) => {
+    const cost = Number(row.cost_estimate_cny ?? 0)
+    return Number.isFinite(cost) ? sum + cost : sum
+  }, 0)
+
+  return Number(total.toFixed(6))
+}
