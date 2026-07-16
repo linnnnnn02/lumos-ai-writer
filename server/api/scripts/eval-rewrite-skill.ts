@@ -116,13 +116,40 @@ assert.ok(
   ),
 )
 assert.equal(new Set(expectedOutput.suggestions.map((item) => item.text)).size, 3)
-for (const editorialTerm of ['也就', '就不', '不好', '心里', '摸清']) {
+for (const editorialTerm of [
+  '也就',
+  '就不',
+  '不好',
+  '心里',
+  '摸清',
+  '起来',
+  '关键',
+  '实际',
+  '下来',
+  '还好',
+]) {
   assert.deepEqual(
     findUnsupportedMaterialTerms(editorialTerm, '', 'rewrite'),
     [],
   )
 }
 assert.deepEqual(findUnsupportedMaterialTerms('多花', '花', 'rewrite'), [])
+assert.deepEqual(
+  findUnsupportedMaterialTerms('摸熟', '需要花几天熟悉路线', 'rewrite'),
+  [],
+)
+assert.deepEqual(
+  findUnsupportedMaterialTerms(
+    '实际骑下来也就还好，关键是把路线摸熟。',
+    '骑车通勤需要花几天熟悉路线。',
+    'rewrite',
+  ),
+  [],
+)
+assert.deepEqual(findUnsupportedMaterialTerms('摸熟', '', 'rewrite'), ['摸熟'])
+assert.deepEqual(findUnsupportedMaterialTerms('累倒', '这几天确实有点累', 'rewrite'), [
+  '累倒',
+])
 assert.deepEqual(findUnsupportedNumericClaims('先骑两三天', groundingSource), [
   '两三天',
 ])
