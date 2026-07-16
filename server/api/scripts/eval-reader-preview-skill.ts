@@ -9,7 +9,10 @@ import {
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
-import { previewDraftForReaderWithDeepSeek } from '../src/ai/deepseek.js'
+import {
+  parseJsonContent,
+  previewDraftForReaderWithDeepSeek,
+} from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
   buildReaderPreviewRepairUserPrompt,
@@ -105,6 +108,14 @@ assert.ok(prepared.systemPrompt.includes('这不是用户调研、真实阅读�
 assert.ok(prepared.systemPrompt.includes('逐字复制一段连续原文'))
 assert.ok(prepared.systemPrompt.includes('不得要求补写输入中不存在'))
 assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
+assert.deepEqual(
+  parseJsonContent('{"items":[{"id":1}\n {"id":2}]}'),
+  { items: [{ id: 1 }, { id: 2 }] },
+)
+assert.throws(() =>
+  parseJsonContent('{"items":[{"id":1}\n {"id":2}\n {"id":3}]}'),
+)
+assert.throws(() => parseJsonContent('{"first":1\n "second":2}'))
 
 assert.doesNotThrow(() =>
   validateReaderPreviewSkillOutput(expectedOutput, draft, groundingSource),
@@ -213,6 +224,13 @@ try {
 }
 
 const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
+const repairedPreviewEnvelope = JSON.stringify(
+  { repairedOutput: { payload: expectedOutput } },
+  null,
+  2,
+)
+const malformedRepairedPreview = repairedPreviewEnvelope.replace(/},(\s*){/, '}$1{')
+assert.notEqual(malformedRepairedPreview, repairedPreviewEnvelope)
 let responseIndex = 0
 globalThis.fetch = async (_request, init) => {
   mockedRequests.push(JSON.parse(String(init?.body)))
@@ -222,11 +240,9 @@ globalThis.fetch = async (_request, init) => {
     JSON.stringify({
       choices: [{
         message: {
-          content: JSON.stringify(
-            first
-              ? invalidGroundingOutput
-              : { repairedOutput: { payload: expectedOutput } },
-          ),
+          content: first
+            ? JSON.stringify(invalidGroundingOutput)
+            : malformedRepairedPreview,
         },
       }],
       usage: first
