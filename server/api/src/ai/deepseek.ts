@@ -146,10 +146,9 @@ function parseJsonWithSingleMissingArrayComma(content: string): unknown {
 
     const before = content.slice(0, position)
     const after = content.slice(position)
-    const previousToken = before.match(/\S(?=\s*$)/)?.[0]
-    const nextToken = after.match(/^\s*([\[{])/)?.[1]
-    if (!previousToken || !'}]'.includes(previousToken) || !nextToken) throw error
-
+    // The parser has already confirmed that one array value ended here. A
+    // successful full parse after this single insertion proves no other
+    // syntax repair was needed, regardless of the JSON value types involved.
     return JSON.parse(`${before},${after}`)
   }
 }
