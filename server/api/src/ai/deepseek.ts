@@ -129,13 +129,38 @@ export function getDeepSeekConfigStatus(config: AppConfig) {
   }
 }
 
-function parseJsonContent(content: string): unknown {
+function parseJsonWithSingleMissingArrayComma(content: string): unknown {
+  try {
+    return JSON.parse(content)
+  } catch (error) {
+    const positionMatch =
+      error instanceof SyntaxError
+        ? error.message.match(
+            /Expected ',' or '\]' after array element in JSON at position (\d+)/,
+          )
+        : null
+    const position = Number(positionMatch?.[1])
+    if (!Number.isInteger(position) || position <= 0 || position >= content.length) {
+      throw error
+    }
+
+    const before = content.slice(0, position)
+    const after = content.slice(position)
+    const previousToken = before.match(/\S(?=\s*$)/)?.[0]
+    const nextToken = after.match(/^\s*([\[{])/)?.[1]
+    if (!previousToken || !'}]'.includes(previousToken) || !nextToken) throw error
+
+    return JSON.parse(`${before},${after}`)
+  }
+}
+
+export function parseJsonContent(content: string): unknown {
   try {
     return JSON.parse(content)
   } catch {
     const match = content.match(/\{[\s\S]*\}/)
     if (!match) throw new DeepSeekUpstreamError('DeepSeek returned non-JSON content.', 502)
-    return JSON.parse(match[0])
+    return parseJsonWithSingleMissingArrayComma(match[0])
   }
 }
 
