@@ -1,6 +1,6 @@
 ---
 id: selection-rewrite
-version: 1.0.2
+version: 1.0.3
 task: rewrite
 model: deepseek-v4-flash
 ---
@@ -27,12 +27,14 @@ Rewrite only the text selected by the user while preserving facts, continuity, a
 - Treat the input as a closed-world fact set; every concrete detail in a suggestion must be traceable to the selection, context, draft, or analysis.
 - Produce structured JSON that passes `aiRewriteResultSchema`.
 - If grounding validation fails, make at most one repair attempt using the exact validation error and aggregate both calls in usage accounting.
+- Reject unsupported material terms as well as unsupported numeric claims before returning suggestions.
 
 ## Forbidden Behavior
 
 - Do not rewrite or return unselected parts of the draft.
 - Do not invent facts, experiences, products, places, times, numbers, results, or causes.
 - Do not provide fictional examples when the user asks for specificity; ask for missing information or stay within grounded details.
+- Do not treat common lifestyle details as harmless implications when the evidence does not contain them.
 - Do not override the current instruction with a writing-profile preference.
 - Do not output Markdown, explanations, or chain-of-thought.
 - Do not loop or make more than one grounding repair attempt.

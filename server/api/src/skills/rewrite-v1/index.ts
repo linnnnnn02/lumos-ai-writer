@@ -6,7 +6,10 @@ import {
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
 import { antiAiWritingRulesV1 } from '../shared/anti-ai-writing-rules-v1.js'
-import { findUnsupportedNumericClaims } from '../shared/grounding.js'
+import {
+  findUnsupportedMaterialTerms,
+  findUnsupportedNumericClaims,
+} from '../shared/grounding.js'
 
 export type RewriteSkillInput = RewriteDraftRequest & {
   writingProfileContext?: {
@@ -133,6 +136,18 @@ export function validateRewriteSkillOutput(
             message: `Rewrite suggestion contains unsupported numeric claims: ${unsupportedClaims.join(', ')}.`,
           })
         }
+        const unsupportedTerms = findUnsupportedMaterialTerms(
+          suggestion.text,
+          groundingSource,
+          'rewrite',
+        )
+        if (unsupportedTerms.length > 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['suggestions', index, 'text'],
+            message: `Rewrite suggestion contains unsupported material terms: ${unsupportedTerms.join(', ')}.`,
+          })
+        }
         seen.add(normalized)
       })
     })
@@ -145,8 +160,9 @@ export const rewriteRepairSystemPrompt = [
   '所有 suggestion.text 必须遵守原始输入的闭世界事实规则；具体动作、地点、时间、数字、结果和因果必须能在 originalInput 中找到直接证据。',
   'validationError 明确列出了被拒绝的问题。必须逐项移除；禁止只换一种说法继续保留同一个虚构信息。',
   '如果用户要求具体动作，但 originalInput 没有可用动作，就用已有信息自然收住，或明确请用户补充，不得编例子。',
+  '不得把通勤方式、天气、消费、休息、饮食等常见生活场景当作可自由补充的合理联想。',
   '仍需返回 2-3 个可直接替换 selectedText 的不同版本，并正确设置 recommendedIndex。',
-  '只输出一个符合原始 JSON contract 的 object，不要 Markdown、解释或思考过程。',
+  '只输出原始 JSON contract 的裸 object；禁止包在 rewrite、result、data 或其他外层字段中，不要 Markdown、解释或思考过程。',
 ].join('\n')
 
 export const rewriteRepairUserPromptTemplate =
@@ -176,6 +192,7 @@ const rewriteSystemPrompt = [
   '输入采用闭世界事实规则：suggestion.text 中每个新增事实、动作、地点、时间、数字、结果和因果，都必须能在 selection、fullDraft 或 analysis 中找到直接证据。',
   'instruction 要求“更具体”时，只能复用输入里已有的具体动作和细节；输入没有可用细节时，应保持克制或请用户补充，禁止编写虚构示例。',
   '输出前逐条做事实溯源：无法指出输入证据的新增名词、动作或数字必须删除。rationale 不能把编造包装成“更有画面感”。',
+  '通勤方式、天气、消费、休息、饮食等常见生活场景也属于新增事实，输入没写就不能补。',
   '必须阅读 contextBefore、contextAfter 和 fullDraft，确保替换后语法、指代、时态和语气能够自然承接。',
   '不同版本必须有明显差异，例如停顿位置、具体程度或语气强弱不同，不能只替换一两个同义词。',
   '不得编造输入中没有的人物、经历、产品、地点、时间、数字、结果或因果。信息不足时宁可克制表达。',
@@ -190,7 +207,7 @@ const rewriteSystemPrompt = [
 
 export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResult> = {
   id: 'selection-rewrite',
-  version: '1.0.2',
+  version: '1.0.3',
   taskType: 'rewrite',
   model: 'deepseek-v4-flash',
   maxTokens: 1600,

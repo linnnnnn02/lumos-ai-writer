@@ -6,7 +6,10 @@ import {
   type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
-import { findUnsupportedNumericClaims } from '../shared/grounding.js'
+import {
+  findUnsupportedMaterialTerms,
+  findUnsupportedNumericClaims,
+} from '../shared/grounding.js'
 
 export type ReaderPreviewSkillInput = PreviewDraftForReaderRequest & {
   writingProfileContext?: {
@@ -158,6 +161,18 @@ export function validateReaderPreviewSkillOutput(
             message: `Reader suggestion contains unsupported numeric claims: ${unsupportedClaims.join(', ')}.`,
           })
         }
+        const unsupportedTerms = findUnsupportedMaterialTerms(
+          suggestion.instruction,
+          groundingSource,
+          'reader-instruction',
+        )
+        if (unsupportedTerms.length > 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['suggestions', index, 'instruction'],
+            message: `Reader suggestion contains unsupported material terms: ${unsupportedTerms.join(', ')}.`,
+          })
+        }
       })
     })
     .parse(preview)
@@ -169,8 +184,9 @@ export const readerPreviewRepairSystemPrompt = [
   'suggestion.instruction 中的具体动作、地点、时间、数字、结果和因果必须能在 originalInput 的 draft 或 analysis 中找到直接证据。',
   'validationError 明确列出了被拒绝的问题。必须逐项删除；不能用另一个虚构示例替换。',
   '如果读者需要原文没有的信息，只能条件式建议用户核实后补充；不得替用户给出示例数字或答案。',
+  '不得把通勤方式、天气、消费、休息、饮食等常见生活场景当作可自由补充的合理联想。',
   '保留 2-6 条逐字引用的 annotations，并让每条 suggestion 继续引用有效 annotationIds。',
-  '只输出一个符合原始 JSON contract 的 object，不要 Markdown、解释或思考过程。',
+  '只输出原始 JSON contract 的裸 object；禁止包在 preview、result、data 或其他外层字段中，不要 Markdown、解释或思考过程。',
 ].join('\n')
 
 export const readerPreviewRepairUserPromptTemplate =
@@ -203,6 +219,7 @@ const readerPreviewSystemPrompt = [
   '输入采用闭世界事实规则：suggestion.instruction 不得代写任何输入中不存在的事实、动作或数字，也不得用“例如”给出看似具体但无证据的内容。',
   '如果读者需要草稿未提供的信息，只能建议“若用户有真实信息则核实后补充，否则保持定性表达”，不能替用户填写答案。',
   '输出前逐条检查 suggestion.instruction：其中每个具体动作、地点、时间、数字、结果和因果必须能在 draft 或 analysis 中找到证据；找不到就删除或改成条件式核实建议。',
+  '通勤方式、天气、消费、休息、饮食等常见生活场景也属于新增事实，输入没写就不能补。',
   '高置信度用户偏好应被尊重。不能因为通用平台套路而建议用户违背 mustAvoid，也不能把互动、数字、冲突或夸张标题视为必需。',
   '只输出一个 JSON object，不要 Markdown，不要代码块，不要解释或思考过程。',
   'JSON 字段必须严格匹配：',
@@ -214,7 +231,7 @@ export const readerPreviewSkillV1: AiSkillDefinition<
   AiReaderPreviewResult
 > = {
   id: 'target-reader-preview',
-  version: '1.0.2',
+  version: '1.0.3',
   taskType: 'reader-preview',
   model: 'deepseek-v4-flash',
   maxTokens: 2200,
