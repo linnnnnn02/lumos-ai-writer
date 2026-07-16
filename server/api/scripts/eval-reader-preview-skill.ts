@@ -175,7 +175,9 @@ globalThis.fetch = async (_request, init) => {
       choices: [{
         message: {
           content: JSON.stringify(
-            first ? invalidGroundingOutput : { preview: expectedOutput },
+            first
+              ? invalidGroundingOutput
+              : { repairedOutput: { payload: expectedOutput } },
           ),
         },
       }],
