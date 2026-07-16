@@ -84,7 +84,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'xiaohongshu-draft')
-assert.equal(prepared.metadata.version, '1.0.3')
+assert.equal(prepared.metadata.version, '1.0.4')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
@@ -92,11 +92,11 @@ assert.deepEqual(userPayload.input.outputRequirements, {
   maxTitleCharacters: 35,
   minParagraphs: 5,
   maxParagraphs: 7,
-  minBodyCharacters: 300,
-  maxBodyCharacters: 520,
+  minBodyCharacters: 201,
+  maxBodyCharacters: 600,
   preferredParagraphs: 6,
   preferredCharactersPerParagraph: {
-    min: 55,
+    min: 45,
     max: 75,
   },
   countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
@@ -113,9 +113,24 @@ assert.ok(prepared.systemPrompt.includes('不得把参考作者的经历写成�
 assert.ok(prepared.systemPrompt.includes('brief.mustInclude'))
 assert.ok(prepared.systemPrompt.includes('medium：必须 5-7 段'))
 assert.ok(prepared.systemPrompt.includes('input.outputRequirements 是本次输出的硬约束'))
-assert.ok(prepared.systemPrompt.includes('优先写 6 段，每段 55-75 字'))
+assert.ok(prepared.systemPrompt.includes('优先写 6 段，每段 45-75 字'))
 assert.doesNotThrow(() => prepared.outputSchema.parse(expectedOutput))
 assert.doesNotThrow(() => validateDraftSkillOutput(expectedOutput, input.length))
+assert.doesNotThrow(() =>
+  validateDraftSkillOutput(
+    {
+      title: expectedOutput.title,
+      body: [
+        '字'.repeat(54),
+        '字'.repeat(54),
+        '字'.repeat(54),
+        '字'.repeat(54),
+        '字'.repeat(52),
+      ],
+    },
+    input.length,
+  ),
+)
 assert.throws(() =>
   validateDraftSkillOutput(
     {
@@ -150,11 +165,11 @@ assert.doesNotThrow(() =>
 const underLengthOutput = aiDraftCopySchema.parse({
   title: expectedOutput.title,
   body: [
-    '字'.repeat(54),
-    '字'.repeat(54),
-    '字'.repeat(54),
-    '字'.repeat(54),
-    '字'.repeat(52),
+    '字'.repeat(36),
+    '字'.repeat(36),
+    '字'.repeat(36),
+    '字'.repeat(36),
+    '字'.repeat(36),
   ],
 })
 const repairPrompt = JSON.parse(
@@ -173,11 +188,11 @@ const repairPrompt = JSON.parse(
 assert.equal(repairPrompt.task, 'repair_draft_contract')
 assert.deepEqual(repairPrompt.input.actual, {
   paragraphs: 5,
-  bodyCharacters: 268,
+  bodyCharacters: 180,
 })
-assert.equal(repairPrompt.input.outputRequirements.minBodyCharacters, 300)
-assert.equal(repairPrompt.input.outputRequirements.maxBodyCharacters, 520)
-assert.equal(repairPrompt.input.outputRequirements.repairTargetBodyCharacters, 390)
+assert.equal(repairPrompt.input.outputRequirements.minBodyCharacters, 201)
+assert.equal(repairPrompt.input.outputRequirements.maxBodyCharacters, 600)
+assert.equal(repairPrompt.input.outputRequirements.repairTargetBodyCharacters, 360)
 
 const originalFetch = globalThis.fetch
 const mockedRequests: Array<{

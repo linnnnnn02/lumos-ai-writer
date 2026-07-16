@@ -1,6 +1,6 @@
 ---
 id: xiaohongshu-draft
-version: 1.0.3
+version: 1.0.4
 task: draft
 model: deepseek-v4-flash
 ---
@@ -21,6 +21,7 @@ Turn a user topic, audience, explicit brief, approved analysis, and reference an
 ## Required Behavior
 
 - Follow the paragraph and character range for the selected length.
+- Keep the hard character bands aligned with `XHS_LENGTH_COPY_GUIDE.md`: short 80-200, medium 201-600, and long 601-1000.
 - Read the exact per-request limits from `input.outputRequirements`, draft toward its preferred paragraph count and per-paragraph range, and silently self-check the hard totals before returning JSON.
 - If the first candidate misses only the output contract, run at most one constrained repair that preserves facts and combines both calls in usage accounting.
 - Keep the title specific, restrained, and consistent with the body.
