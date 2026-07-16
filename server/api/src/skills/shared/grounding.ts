@@ -44,6 +44,8 @@ const sharedNonMaterialTerms = new Set([
   '确实',
   '比较',
   '更像',
+  '实际',
+  '关键',
   '的话',
   '时候',
   '之后',
@@ -61,6 +63,7 @@ const sharedNonMaterialTerms = new Set([
   '清楚',
   '明白',
   '不好',
+  '还好',
   '心里',
   '摸清',
   '好像',
@@ -73,6 +76,8 @@ const sharedNonMaterialTerms = new Set([
   '看看',
   '先不',
   '还是',
+  '起来',
+  '下来',
 ])
 
 const readerInstructionTerms = new Set([
@@ -182,6 +187,9 @@ const riskySingleCharacterTerms = new Set([
 
 const removablePrefixes = /^(?:再|先|更|多|也|不|没|很|最|真|就|只|还|会|能|可|要|想|让|把|被|给|去|来)+/
 const removableSuffixes = /(?:了|着|过|一下|一点|起来|下来|出去|回来)$/
+const groundedTermAliases = new Map<string, readonly string[]>([
+  ['摸熟', ['熟悉']],
+])
 
 type MaterialGroundingMode = 'rewrite' | 'reader-instruction'
 
@@ -190,7 +198,11 @@ function isGroundedTerm(term: string, groundingSource: string) {
 
   const withoutPrefix = term.replace(removablePrefixes, '')
   const core = withoutPrefix.replace(removableSuffixes, '')
-  return core.length > 0 && core !== term && groundingSource.includes(core)
+  if (core.length > 0 && core !== term && groundingSource.includes(core)) return true
+
+  return (groundedTermAliases.get(term) ?? []).some((alias) =>
+    groundingSource.includes(alias),
+  )
 }
 
 export function findUnsupportedMaterialTerms(
