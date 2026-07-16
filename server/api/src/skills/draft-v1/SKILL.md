@@ -1,6 +1,6 @@
 ---
 id: xiaohongshu-draft
-version: 1.0.1
+version: 1.0.2
 task: draft
 model: deepseek-v4-flash
 ---
@@ -21,7 +21,7 @@ Turn a user topic, audience, explicit brief, approved analysis, and reference an
 ## Required Behavior
 
 - Follow the paragraph and character range for the selected length.
-- Read the exact per-request limits from `input.outputRequirements` and silently self-check them before returning JSON.
+- Read the exact per-request limits from `input.outputRequirements`, draft toward its preferred paragraph count and per-paragraph range, and silently self-check the hard totals before returning JSON.
 - Keep the title specific, restrained, and consistent with the body.
 - Build one clear progression across complete paragraphs.
 - Include explicit user requirements naturally.

@@ -58,6 +58,11 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       maxParagraphs: number
       minBodyCharacters: number
       maxBodyCharacters: number
+      preferredParagraphs: number
+      preferredCharactersPerParagraph: {
+        min: number
+        max: number
+      }
     }
     brief: { mustInclude: string; avoidTone: string }
     writingProfile: {
@@ -70,7 +75,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'xiaohongshu-draft')
-assert.equal(prepared.metadata.version, '1.0.1')
+assert.equal(prepared.metadata.version, '1.0.2')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
@@ -79,6 +84,11 @@ assert.deepEqual(userPayload.input.outputRequirements, {
   maxParagraphs: 7,
   minBodyCharacters: 300,
   maxBodyCharacters: 520,
+  preferredParagraphs: 6,
+  preferredCharactersPerParagraph: {
+    min: 55,
+    max: 75,
+  },
   countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
 })
 assert.equal(userPayload.input.brief.mustInclude, input.brief.mustInclude)
@@ -91,8 +101,9 @@ assert.ok(userPayload.input.snippets.every((snippet) => snippet.selectedText.len
 assert.ok(userPayload.input.snippets.every((snippet) => snippet.reasonText.length <= 303))
 assert.ok(prepared.systemPrompt.includes('不得把参考作者的经历写成用户经历'))
 assert.ok(prepared.systemPrompt.includes('brief.mustInclude'))
-assert.ok(prepared.systemPrompt.includes('medium：5-7 段'))
+assert.ok(prepared.systemPrompt.includes('medium：必须 5-7 段'))
 assert.ok(prepared.systemPrompt.includes('input.outputRequirements 是本次输出的硬约束'))
+assert.ok(prepared.systemPrompt.includes('优先写 6 段，每段 55-75 字'))
 assert.doesNotThrow(() => prepared.outputSchema.parse(expectedOutput))
 assert.doesNotThrow(() => validateDraftSkillOutput(expectedOutput, input.length))
 assert.throws(() =>
