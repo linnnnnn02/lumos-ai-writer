@@ -129,28 +129,34 @@ export function getDeepSeekConfigStatus(config: AppConfig) {
   }
 }
 
-function parseJsonWithSingleMissingArrayComma(content: string): unknown {
-  try {
-    return JSON.parse(content)
-  } catch (error) {
-    const positionMatch =
-      error instanceof SyntaxError
-        ? error.message.match(
-            /Expected ',' or '\]' after array element in JSON at position (\d+)/,
-          )
-        : null
-    const position = Number(positionMatch?.[1])
-    if (!Number.isInteger(position) || position <= 0 || position >= content.length) {
-      throw error
-    }
+function parseJsonWithBoundedMissingArrayCommas(content: string): unknown {
+  const maxRepairs = 2
+  let candidate = content
 
-    const before = content.slice(0, position)
-    const after = content.slice(position)
-    // The parser has already confirmed that one array value ended here. A
-    // successful full parse after this single insertion proves no other
-    // syntax repair was needed, regardless of the JSON value types involved.
-    return JSON.parse(`${before},${after}`)
+  for (let repairCount = 0; repairCount <= maxRepairs; repairCount += 1) {
+    try {
+      return JSON.parse(candidate)
+    } catch (error) {
+      if (repairCount === maxRepairs) throw error
+
+      const positionMatch =
+        error instanceof SyntaxError
+          ? error.message.match(
+              /Expected ',' or '\]' after array element in JSON at position (\d+)/,
+            )
+          : null
+      const position = Number(positionMatch?.[1])
+      if (!Number.isInteger(position) || position <= 0 || position >= candidate.length) {
+        throw error
+      }
+
+      // Each insertion is anchored to the native parser's exact array error.
+      // Any third syntax defect or non-array error remains rejected.
+      candidate = `${candidate.slice(0, position)},${candidate.slice(position)}`
+    }
   }
+
+  throw new DeepSeekUpstreamError('DeepSeek returned invalid JSON content.', 502)
 }
 
 export function parseJsonContent(content: string): unknown {
@@ -159,7 +165,7 @@ export function parseJsonContent(content: string): unknown {
   } catch {
     const match = content.match(/\{[\s\S]*\}/)
     if (!match) throw new DeepSeekUpstreamError('DeepSeek returned non-JSON content.', 502)
-    return parseJsonWithSingleMissingArrayComma(match[0])
+    return parseJsonWithBoundedMissingArrayCommas(match[0])
   }
 }
 
