@@ -58,11 +58,16 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       account: { mustAvoid: string[] } | null
       project: unknown | null
     }
+    groundingPolicy: {
+      mode: string
+      evidenceSources: string[]
+      missingInformation: string
+    }
   }
 }
 
 assert.equal(prepared.metadata.id, 'selection-rewrite')
-assert.equal(prepared.metadata.version, '1.0.0')
+assert.equal(prepared.metadata.version, '1.0.1')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'rewrite_selected_text')
 assert.equal(userPayload.input.instruction, input.instruction)
@@ -71,10 +76,20 @@ assert.equal(userPayload.input.selection.selectedText, input.selectedText)
 assert.deepEqual(userPayload.input.fullDraft, input.draft)
 assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
 assert.equal(userPayload.input.writingProfile.project, null)
+assert.equal(userPayload.input.groundingPolicy.mode, 'closed_world')
+assert.ok(userPayload.input.groundingPolicy.evidenceSources.includes('fullDraft'))
+assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('不得提供'))
 assert.ok(prepared.systemPrompt.includes('当前 instruction > project writingProfile > account writingProfile'))
 assert.ok(prepared.systemPrompt.includes('不得返回整篇文案、整段未选文字或改写后的 fullDraft'))
+assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
 
-assert.doesNotThrow(() => validateRewriteSkillOutput(expectedOutput, input.selectedText))
+assert.doesNotThrow(() =>
+  validateRewriteSkillOutput(
+    expectedOutput,
+    input.selectedText,
+    prepared.userPrompt,
+  ),
+)
 assert.equal(expectedOutput.suggestions.length, 3)
 assert.ok(expectedOutput.recommendedIndex < expectedOutput.suggestions.length)
 assert.ok(
@@ -92,6 +107,21 @@ assert.throws(() =>
       ),
     },
     input.selectedText,
+    prepared.userPrompt,
+  ),
+)
+assert.throws(() =>
+  validateRewriteSkillOutput(
+    {
+      ...expectedOutput,
+      suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+        index === 0
+          ? { ...suggestion, text: '明天换条路，争取快五分钟。' }
+          : suggestion,
+      ),
+    },
+    input.selectedText,
+    prepared.userPrompt,
   ),
 )
 assert.throws(() =>

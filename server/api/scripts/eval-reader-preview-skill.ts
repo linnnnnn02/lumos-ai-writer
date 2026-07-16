@@ -72,11 +72,16 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       project: unknown | null
     }
     analysis: { readerView: string[] } | null
+    groundingPolicy: {
+      mode: string
+      suggestionRule: string
+      missingInformation: string
+    }
   }
 }
 
 assert.equal(prepared.metadata.id, 'target-reader-preview')
-assert.equal(prepared.metadata.version, '1.0.0')
+assert.equal(prepared.metadata.version, '1.0.1')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
@@ -84,11 +89,17 @@ assert.deepEqual(userPayload.input.draft, input.draft)
 assert.ok(userPayload.input.analysis?.readerView.length)
 assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
 assert.equal(userPayload.input.writingProfile.project, null)
+assert.equal(userPayload.input.groundingPolicy.mode, 'closed_world')
+assert.ok(userPayload.input.groundingPolicy.suggestionRule.includes('不得代写'))
+assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('条件式'))
 assert.ok(prepared.systemPrompt.includes('这不是用户调研、真实阅读数据或效果预测'))
 assert.ok(prepared.systemPrompt.includes('逐字复制一段连续原文'))
 assert.ok(prepared.systemPrompt.includes('不得要求补写输入中不存在'))
+assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
 
-assert.doesNotThrow(() => validateReaderPreviewSkillOutput(expectedOutput, draft))
+assert.doesNotThrow(() =>
+  validateReaderPreviewSkillOutput(expectedOutput, draft, prepared.userPrompt),
+)
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'interest'))
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'risk'))
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'question'))
@@ -119,6 +130,7 @@ assert.throws(() =>
       ),
     },
     draft,
+    prepared.userPrompt,
   ),
 )
 assert.throws(() =>
@@ -130,6 +142,24 @@ assert.throws(() =>
       ),
     },
     draft,
+    prepared.userPrompt,
+  ),
+)
+assert.throws(() =>
+  validateReaderPreviewSkillOutput(
+    {
+      ...expectedOutput,
+      suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+        index === 0
+          ? {
+              ...suggestion,
+              instruction: '补充比第一天快5分钟或节省15%的具体数据。',
+            }
+          : suggestion,
+      ),
+    },
+    draft,
+    prepared.userPrompt,
   ),
 )
 
