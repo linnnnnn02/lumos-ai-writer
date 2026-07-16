@@ -6,6 +6,7 @@ import {
   type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
+import { findUnsupportedNumericClaims } from '../shared/grounding.js'
 
 export type ReaderPreviewSkillInput = PreviewDraftForReaderRequest & {
   writingProfileContext?: {
@@ -83,6 +84,14 @@ export function compactReaderPreviewSkillInput(input: ReaderPreviewSkillInput) {
           readerView: input.analysis.readerView,
         }
       : null,
+    groundingPolicy: {
+      mode: 'closed_world',
+      evidenceSources: ['draft', 'analysis'],
+      suggestionRule:
+        'suggestion.instruction 只能调整、删减、重排或明确已有边界，不得代写输入中不存在的事实、动作、地点、时间、数字、结果或因果',
+      missingInformation:
+        '读者缺少信息时，只能建议用户核实后补充；必须写成条件式，不得给出虚构数字或事实示例',
+    },
   }
 }
 
@@ -95,6 +104,7 @@ function getDraftField(draft: AiDraftCopy, fieldId: string) {
 export function validateReaderPreviewSkillOutput(
   preview: AiReaderPreviewResult,
   draft: AiDraftCopy,
+  groundingSource = JSON.stringify(draft),
 ) {
   return aiReaderPreviewResultSchema
     .superRefine((value, context) => {
@@ -135,6 +145,20 @@ export function validateReaderPreviewSkillOutput(
         }
         locations.add(location)
       })
+
+      value.suggestions.forEach((suggestion, index) => {
+        const unsupportedClaims = findUnsupportedNumericClaims(
+          suggestion.instruction,
+          groundingSource,
+        )
+        if (unsupportedClaims.length > 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['suggestions', index, 'instruction'],
+            message: `Reader suggestion contains unsupported numeric claims: ${unsupportedClaims.join(', ')}.`,
+          })
+        }
+      })
     })
     .parse(preview)
 }
@@ -150,6 +174,9 @@ const readerPreviewSystemPrompt = [
   '不要机械地为每种 tone 各凑一条；草稿没有明显风险时可以多给 interest 或 question，但总批注必须为 2-6 条且位置不同。',
   'suggestions 必须引用一个或多个 annotationIds，并给出能直接执行的修改方向；不得给“更生动、更有共鸣、优化表达”等空泛建议。',
   '建议只能调整表达、顺序、取舍或明确已有边界，不得要求补写输入中不存在的经历、产品事实、地点、时间、数字、效果或因果。',
+  '输入采用闭世界事实规则：suggestion.instruction 不得代写任何输入中不存在的事实、动作或数字，也不得用“例如”给出看似具体但无证据的内容。',
+  '如果读者需要草稿未提供的信息，只能建议“若用户有真实信息则核实后补充，否则保持定性表达”，不能替用户填写答案。',
+  '输出前逐条检查 suggestion.instruction：其中每个具体动作、地点、时间、数字、结果和因果必须能在 draft 或 analysis 中找到证据；找不到就删除或改成条件式核实建议。',
   '高置信度用户偏好应被尊重。不能因为通用平台套路而建议用户违背 mustAvoid，也不能把互动、数字、冲突或夸张标题视为必需。',
   '只输出一个 JSON object，不要 Markdown，不要代码块，不要解释或思考过程。',
   'JSON 字段必须严格匹配：',
@@ -161,11 +188,11 @@ export const readerPreviewSkillV1: AiSkillDefinition<
   AiReaderPreviewResult
 > = {
   id: 'target-reader-preview',
-  version: '1.0.0',
+  version: '1.0.1',
   taskType: 'reader-preview',
   model: 'deepseek-v4-flash',
   maxTokens: 2200,
-  temperature: 0.42,
+  temperature: 0.3,
   systemPrompt: readerPreviewSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "preview_draft_as_target_reader", input: compactReaderPreviewSkillInput(input) })',

@@ -6,6 +6,7 @@ import {
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
 import { antiAiWritingRulesV1 } from '../shared/anti-ai-writing-rules-v1.js'
+import { findUnsupportedNumericClaims } from '../shared/grounding.js'
 
 export type RewriteSkillInput = RewriteDraftRequest & {
   writingProfileContext?: {
@@ -75,6 +76,19 @@ export function compactRewriteSkillInput(input: RewriteSkillInput) {
           writingMove: input.analysis.writingMove,
         }
       : null,
+    groundingPolicy: {
+      mode: 'closed_world',
+      evidenceSources: [
+        'selection.selectedText',
+        'selection.contextBefore',
+        'selection.contextAfter',
+        'fullDraft',
+        'analysis',
+      ],
+      rule: 'suggestion.text 中的每个事实、动作、地点、时间、数字、结果和因果都必须能在 evidenceSources 中找到证据',
+      missingInformation:
+        '没有证据时改写已有表达或明确请用户补充，不得提供看似具体的虚构示例',
+    },
   }
 }
 
@@ -85,6 +99,7 @@ function normalizeComparisonText(value: string) {
 export function validateRewriteSkillOutput(
   rewrite: AiRewriteResult,
   selectedText: string,
+  groundingSource = selectedText,
 ) {
   return aiRewriteResultSchema
     .superRefine((value, context) => {
@@ -107,6 +122,17 @@ export function validateRewriteSkillOutput(
             message: 'Rewrite suggestions must be meaningfully distinct.',
           })
         }
+        const unsupportedClaims = findUnsupportedNumericClaims(
+          suggestion.text,
+          groundingSource,
+        )
+        if (unsupportedClaims.length > 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['suggestions', index, 'text'],
+            message: `Rewrite suggestion contains unsupported numeric claims: ${unsupportedClaims.join(', ')}.`,
+          })
+        }
         seen.add(normalized)
       })
     })
@@ -121,6 +147,9 @@ const rewriteSystemPrompt = [
   '高置信度偏好优先应用；低置信度偏好只能作为轻量倾向。project 模型只覆盖当前项目，不得反向覆盖账号模型。',
   'suggestions 必须提供 2-3 个能够直接替换 selectedText 的完整版本，不得返回整篇文案、整段未选文字或改写后的 fullDraft。',
   '默认保留 selectedText 的事实、指代和核心意思；除非 instruction 明确要求改变表达意图。',
+  '输入采用闭世界事实规则：suggestion.text 中每个新增事实、动作、地点、时间、数字、结果和因果，都必须能在 selection、fullDraft 或 analysis 中找到直接证据。',
+  'instruction 要求“更具体”时，只能复用输入里已有的具体动作和细节；输入没有可用细节时，应保持克制或请用户补充，禁止编写虚构示例。',
+  '输出前逐条做事实溯源：无法指出输入证据的新增名词、动作或数字必须删除。rationale 不能把编造包装成“更有画面感”。',
   '必须阅读 contextBefore、contextAfter 和 fullDraft，确保替换后语法、指代、时态和语气能够自然承接。',
   '不同版本必须有明显差异，例如停顿位置、具体程度或语气强弱不同，不能只替换一两个同义词。',
   '不得编造输入中没有的人物、经历、产品、地点、时间、数字、结果或因果。信息不足时宁可克制表达。',
@@ -135,11 +164,11 @@ const rewriteSystemPrompt = [
 
 export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResult> = {
   id: 'selection-rewrite',
-  version: '1.0.0',
+  version: '1.0.1',
   taskType: 'rewrite',
   model: 'deepseek-v4-flash',
   maxTokens: 1600,
-  temperature: 0.62,
+  temperature: 0.32,
   systemPrompt: rewriteSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "rewrite_selected_text", input: compactRewriteSkillInput(input) })',

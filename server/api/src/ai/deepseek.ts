@@ -511,6 +511,7 @@ export async function rewriteDraftWithDeepSeek(
     (value) => validateRewriteSkillOutput(
       preparedSkill.outputSchema.parse(value),
       input.selectedText,
+      preparedSkill.userPrompt,
     ),
   )
   return {
@@ -572,6 +573,7 @@ export async function previewDraftForReaderWithDeepSeek(
     (value) => validateReaderPreviewSkillOutput(
       preparedSkill.outputSchema.parse(value),
       input.draft,
+      preparedSkill.userPrompt,
     ),
   )
   return {

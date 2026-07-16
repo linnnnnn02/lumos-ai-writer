@@ -1,6 +1,6 @@
 ---
 id: target-reader-preview
-version: 1.0.0
+version: 1.0.1
 task: reader-preview
 model: deepseek-v4-flash
 ---
@@ -26,12 +26,14 @@ Simulate a careful first read of the full draft from the specified audience's pe
 - Use calibrated language and confidence no higher than 0.9.
 - Tie every actionable suggestion to one or more annotations.
 - Preserve evidence-backed user voice and reader-relationship preferences.
+- Keep suggestions closed-world: edit existing material or conditionally ask for verified missing information without supplying fictional examples.
 - Produce structured JSON that passes `aiReaderPreviewResultSchema`.
 
 ## Forbidden Behavior
 
 - Do not claim real research, measured retention, conversion, or guaranteed reader behavior.
 - Do not invent facts, experiences, places, times, numbers, results, or causes.
+- Do not suggest example numbers or actions that are absent from the draft and analysis.
 - Do not require generic platform tricks that conflict with the user's writing model.
 - Do not output Markdown, explanations, or chain-of-thought.
 
