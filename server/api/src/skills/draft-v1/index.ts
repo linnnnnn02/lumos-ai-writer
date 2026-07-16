@@ -44,6 +44,25 @@ export type DraftSkillInput = GenerateDraftRequest & {
   }
 }
 
+export function getDraftOutputRequirements(
+  length: GenerateDraftRequest['length'],
+) {
+  const lengthPolicy = draftLengthPolicies[length]
+  return {
+    maxTitleCharacters: 35,
+    minParagraphs: lengthPolicy.minParagraphs,
+    maxParagraphs: lengthPolicy.maxParagraphs,
+    minBodyCharacters: lengthPolicy.minCharacters,
+    maxBodyCharacters: lengthPolicy.maxCharacters,
+    preferredParagraphs: lengthPolicy.preferredParagraphs,
+    preferredCharactersPerParagraph: {
+      min: lengthPolicy.preferredMinCharactersPerParagraph,
+      max: lengthPolicy.preferredMaxCharactersPerParagraph,
+    },
+    countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
+  }
+}
+
 const outputContract = {
   title: '一条不超过 35 个汉字的小红书标题',
   body: ['完整正文段落；实际数组长度必须严格满足 input.outputRequirements'],
@@ -76,25 +95,12 @@ function compactProfile(revision: WritingProfileRevisionDto | null | undefined) 
 }
 
 export function compactDraftSkillInput(input: DraftSkillInput) {
-  const lengthPolicy = draftLengthPolicies[input.length]
-
   return {
     projectName: input.projectName,
     topic: input.topic,
     targetAudience: input.targetAudience,
     length: input.length,
-    outputRequirements: {
-      minParagraphs: lengthPolicy.minParagraphs,
-      maxParagraphs: lengthPolicy.maxParagraphs,
-      minBodyCharacters: lengthPolicy.minCharacters,
-      maxBodyCharacters: lengthPolicy.maxCharacters,
-      preferredParagraphs: lengthPolicy.preferredParagraphs,
-      preferredCharactersPerParagraph: {
-        min: lengthPolicy.preferredMinCharactersPerParagraph,
-        max: lengthPolicy.preferredMaxCharactersPerParagraph,
-      },
-      countingRule: 'body 数组元素数量按段落计；body 全部字符串去除空白后按 Unicode 字符计数',
-    },
+    outputRequirements: getDraftOutputRequirements(input.length),
     brief: input.brief,
     writingProfile: {
       account: compactProfile(input.writingProfileContext?.accountProfile),
@@ -122,6 +128,53 @@ export function compactDraftSkillInput(input: DraftSkillInput) {
       colorTagName: snippet.colorTagName,
     })),
   }
+}
+
+export const draftRepairSystemPrompt = [
+  '你是 Lumos AI Writer 的小红书草稿约束修复器。',
+  '输入是一版内容方向正确但段落数或字数未达硬约束的候选草稿。你只能修复长度和段落完整性，不能改写成另一篇文章。',
+  '保留候选草稿的标题方向、事实、时间顺序、核心判断和 brief.mustInclude；只有标题超限时才压缩标题，并继续遵守 brief.avoidTone。',
+  '需要增加字数时，只能展开候选草稿已经支持的动作、场景、判断及其因果关系，不得新增经历、数据、地点、产品或效果。',
+  '优先写到 input.outputRequirements.repairTargetBodyCharacters 附近，同时严格落在最小和最大段落数、正文字数范围内。',
+  '修复后在内部按 input.outputRequirements.countingRule 复核；不达标时继续调整，直到达标。',
+  '只输出一个 JSON object，不要 Markdown、代码块、解释或思考过程。',
+  'JSON 字段严格为 title:string 和 body:string[]。',
+].join('\n')
+
+export const draftRepairUserPromptTemplate =
+  'JSON.stringify({ task: "repair_draft_contract", input: { candidateDraft, actual, outputRequirements, brief, topic, targetAudience } })'
+
+export function buildDraftRepairUserPrompt(
+  input: GenerateDraftRequest,
+  candidateDraft: AiDraftCopy,
+) {
+  const requirements = getDraftOutputRequirements(input.length)
+  const preferredCharactersPerParagraph = Math.ceil(
+    (requirements.preferredCharactersPerParagraph.min +
+      requirements.preferredCharactersPerParagraph.max) /
+      2,
+  )
+
+  return JSON.stringify({
+    task: 'repair_draft_contract',
+    input: {
+      candidateDraft,
+      actual: {
+        paragraphs: candidateDraft.body.length,
+        bodyCharacters: Array.from(
+          candidateDraft.body.join('').replace(/\s/g, ''),
+        ).length,
+      },
+      outputRequirements: {
+        ...requirements,
+        repairTargetBodyCharacters:
+          requirements.preferredParagraphs * preferredCharactersPerParagraph,
+      },
+      brief: input.brief,
+      topic: input.topic,
+      targetAudience: input.targetAudience,
+    },
+  })
 }
 
 export function validateDraftSkillOutput(
@@ -195,7 +248,7 @@ export const draftSkillV1: AiSkillDefinition<
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',
-  version: '1.0.2',
+  version: '1.0.3',
   taskType: 'draft',
   model: 'deepseek-v4-flash',
   maxTokens: 2600,
@@ -203,6 +256,10 @@ export const draftSkillV1: AiSkillDefinition<
   systemPrompt: draftSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "generate_xiaohongshu_draft", input: compactDraftSkillInput(input) })',
+  supplementaryPromptTemplates: [
+    draftRepairSystemPrompt,
+    draftRepairUserPromptTemplate,
+  ],
   buildUserPrompt: (input) =>
     JSON.stringify({
       task: 'generate_xiaohongshu_draft',

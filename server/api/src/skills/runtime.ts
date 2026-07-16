@@ -17,6 +17,7 @@ export type AiSkillDefinition<TInput, TOutput> = {
   temperature: number
   systemPrompt: string
   userPromptTemplate: string
+  supplementaryPromptTemplates?: string[]
   buildUserPrompt: (input: TInput) => string
   outputSchema: ZodType<TOutput>
 }
@@ -47,6 +48,7 @@ async function createSkillPromptHash<TInput, TOutput>(
     String(skill.temperature),
     skill.systemPrompt,
     skill.userPromptTemplate,
+    ...(skill.supplementaryPromptTemplates ?? []),
   ].join('\n---\n')
   const digest = await crypto.subtle.digest(
     'SHA-256',

@@ -8,7 +8,14 @@ import {
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
 import {
+  DeepSeekOutputValidationError,
+  generateDraftWithDeepSeek,
+} from '../src/ai/deepseek.js'
+import { readConfig } from '../src/env.js'
+import {
+  buildDraftRepairUserPrompt,
   draftLengthPolicies,
+  draftRepairSystemPrompt,
   draftSkillV1,
   validateDraftSkillOutput,
 } from '../src/skills/draft-v1/index.js'
@@ -54,6 +61,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
   input: {
     length: keyof typeof draftLengthPolicies
     outputRequirements: {
+      maxTitleCharacters: number
       minParagraphs: number
       maxParagraphs: number
       minBodyCharacters: number
@@ -63,6 +71,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
         min: number
         max: number
       }
+      countingRule: string
     }
     brief: { mustInclude: string; avoidTone: string }
     writingProfile: {
@@ -75,11 +84,12 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'xiaohongshu-draft')
-assert.equal(prepared.metadata.version, '1.0.2')
+assert.equal(prepared.metadata.version, '1.0.3')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
 assert.deepEqual(userPayload.input.outputRequirements, {
+  maxTitleCharacters: 35,
   minParagraphs: 5,
   maxParagraphs: 7,
   minBodyCharacters: 300,
@@ -137,6 +147,140 @@ assert.doesNotThrow(() =>
   }),
 )
 
+const underLengthOutput = aiDraftCopySchema.parse({
+  title: expectedOutput.title,
+  body: [
+    '字'.repeat(54),
+    '字'.repeat(54),
+    '字'.repeat(54),
+    '字'.repeat(54),
+    '字'.repeat(52),
+  ],
+})
+const repairPrompt = JSON.parse(
+  buildDraftRepairUserPrompt(input, underLengthOutput),
+) as {
+  task: string
+  input: {
+    actual: { paragraphs: number; bodyCharacters: number }
+    outputRequirements: {
+      minBodyCharacters: number
+      maxBodyCharacters: number
+      repairTargetBodyCharacters: number
+    }
+  }
+}
+assert.equal(repairPrompt.task, 'repair_draft_contract')
+assert.deepEqual(repairPrompt.input.actual, {
+  paragraphs: 5,
+  bodyCharacters: 268,
+})
+assert.equal(repairPrompt.input.outputRequirements.minBodyCharacters, 300)
+assert.equal(repairPrompt.input.outputRequirements.maxBodyCharacters, 520)
+assert.equal(repairPrompt.input.outputRequirements.repairTargetBodyCharacters, 390)
+
+const originalFetch = globalThis.fetch
+const mockedRequests: Array<{
+  messages: Array<{ role: string; content: string }>
+}> = []
+let mockedResponseIndex = 0
+globalThis.fetch = async (_input, init) => {
+  mockedRequests.push(
+    JSON.parse(String(init?.body)) as {
+      messages: Array<{ role: string; content: string }>
+    },
+  )
+  const firstResponse = mockedResponseIndex === 0
+  mockedResponseIndex += 1
+
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(firstResponse ? underLengthOutput : expectedOutput),
+          },
+        },
+      ],
+      usage: firstResponse
+        ? { prompt_tokens: 1200, completion_tokens: 205, total_tokens: 1405 }
+        : { prompt_tokens: 400, completion_tokens: 250, total_tokens: 650 },
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  )
+}
+
+try {
+  const repaired = await generateDraftWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(repaired.draft, expectedOutput)
+  assert.deepEqual(repaired.usage, {
+    promptTokens: 1600,
+    completionTokens: 455,
+    totalTokens: 2055,
+  })
+  assert.equal(mockedRequests.length, 2)
+  assert.equal(
+    mockedRequests[1]?.messages[0]?.content,
+    draftRepairSystemPrompt,
+  )
+  assert.equal(
+    JSON.parse(mockedRequests[1]?.messages[1]?.content ?? '{}').task,
+    'repair_draft_contract',
+  )
+} finally {
+  globalThis.fetch = originalFetch
+}
+
+const failedRepairRequests: unknown[] = []
+globalThis.fetch = async (_input, init) => {
+  failedRepairRequests.push(JSON.parse(String(init?.body)))
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(underLengthOutput) } }],
+      usage: { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 },
+    }),
+    {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    },
+  )
+}
+
+let failedRepairError: unknown
+try {
+  await generateDraftWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+} catch (error) {
+  failedRepairError = error
+} finally {
+  globalThis.fetch = originalFetch
+}
+assert.ok(failedRepairError instanceof DeepSeekOutputValidationError)
+assert.deepEqual(failedRepairError.usage, {
+  promptTokens: 600,
+  completionTokens: 200,
+  totalTokens: 800,
+})
+assert.equal(failedRepairRequests.length, 2)
+
 const api = createApiApp()
 const disabledAiEnv = {
   APP_ENV: 'local',
@@ -163,5 +307,6 @@ console.log('draft-v1 offline evaluation passed')
 console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`fixture length: ${expectedOutput.body.length} paragraphs, ${bodyCharacterCount} characters`)
+console.log('single repair attempt: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')

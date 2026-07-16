@@ -1,6 +1,6 @@
 ---
 id: xiaohongshu-draft
-version: 1.0.2
+version: 1.0.3
 task: draft
 model: deepseek-v4-flash
 ---
@@ -22,6 +22,7 @@ Turn a user topic, audience, explicit brief, approved analysis, and reference an
 
 - Follow the paragraph and character range for the selected length.
 - Read the exact per-request limits from `input.outputRequirements`, draft toward its preferred paragraph count and per-paragraph range, and silently self-check the hard totals before returning JSON.
+- If the first candidate misses only the output contract, run at most one constrained repair that preserves facts and combines both calls in usage accounting.
 - Keep the title specific, restrained, and consistent with the body.
 - Build one clear progression across complete paragraphs.
 - Include explicit user requirements naturally.
@@ -33,6 +34,7 @@ Turn a user topic, audience, explicit brief, approved analysis, and reference an
 - Do not invent products, measurements, results, personal history, or numerical claims.
 - Do not output section labels, writing explanations, Markdown, or chain-of-thought.
 - Do not add forced engagement requests or generic motivational conclusions.
+- Do not loop or make more than one repair attempt.
 
 ## Evaluation Gate
 
