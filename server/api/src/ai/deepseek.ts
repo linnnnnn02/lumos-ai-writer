@@ -23,12 +23,14 @@ import {
 import { prepareAiSkill } from '../skills/runtime.js'
 import {
   buildRewriteRepairUserPrompt,
+  filterGroundedRewriteSuggestions,
   rewriteRepairSystemPrompt,
   rewriteSkillV1,
   validateRewriteSkillOutput,
 } from '../skills/rewrite-v1/index.js'
 import {
   buildReaderPreviewRepairUserPrompt,
+  filterGroundedReaderSuggestions,
   readerPreviewRepairSystemPrompt,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
@@ -589,6 +591,28 @@ export async function rewriteDraftWithDeepSeek(
       groundingSource,
     )
   } catch (validationError) {
+    const filteredRewrite = filterGroundedRewriteSuggestions(
+      candidateRewrite,
+      groundingSource,
+    )
+    if (filteredRewrite.suggestions.length >= 2) {
+      try {
+        candidateRewrite = validateRewriteSkillOutput(
+          filteredRewrite,
+          input.selectedText,
+          groundingSource,
+        )
+        return {
+          rewrite: candidateRewrite,
+          skill: preparedSkill.metadata,
+          model: preparedSkill.model,
+          usage: initialUsage,
+        }
+      } catch {
+        // Non-grounding contract errors still get the single repair attempt below.
+      }
+    }
+
     let repairData: DeepSeekChatCompletionResponse
     try {
       repairData = await requestDeepSeekChatCompletion(config, {
@@ -631,13 +655,18 @@ export async function rewriteDraftWithDeepSeek(
     }
 
     try {
-      candidateRewrite = validateRewriteSkillOutput(
-        preparedSkill.outputSchema.parse(
-          unwrapDeepSeekObject(
-            parseJsonContent(repairContent),
-            ['summary', 'suggestions', 'recommendedIndex'],
-          ),
+      const repairedRewrite = preparedSkill.outputSchema.parse(
+        unwrapDeepSeekObject(
+          parseJsonContent(repairContent),
+          ['summary', 'suggestions', 'recommendedIndex'],
         ),
+      )
+      const filteredRepair = filterGroundedRewriteSuggestions(
+        repairedRewrite,
+        groundingSource,
+      )
+      candidateRewrite = validateRewriteSkillOutput(
+        filteredRepair.suggestions.length >= 2 ? filteredRepair : repairedRewrite,
         input.selectedText,
         groundingSource,
       )
@@ -734,6 +763,28 @@ export async function previewDraftForReaderWithDeepSeek(
       groundingSource,
     )
   } catch (validationError) {
+    const filteredPreview = filterGroundedReaderSuggestions(
+      candidatePreview,
+      groundingSource,
+    )
+    if (filteredPreview.suggestions.length >= 1) {
+      try {
+        candidatePreview = validateReaderPreviewSkillOutput(
+          filteredPreview,
+          input.draft,
+          groundingSource,
+        )
+        return {
+          preview: candidatePreview,
+          skill: preparedSkill.metadata,
+          model: preparedSkill.model,
+          usage: initialUsage,
+        }
+      } catch {
+        // Non-grounding contract errors still get the single repair attempt below.
+      }
+    }
+
     let repairData: DeepSeekChatCompletionResponse
     try {
       repairData = await requestDeepSeekChatCompletion(config, {
@@ -776,13 +827,18 @@ export async function previewDraftForReaderWithDeepSeek(
     }
 
     try {
-      candidatePreview = validateReaderPreviewSkillOutput(
-        preparedSkill.outputSchema.parse(
-          unwrapDeepSeekObject(
-            parseJsonContent(repairContent),
-            ['audienceSummary', 'annotations', 'suggestions'],
-          ),
+      const repairedPreview = preparedSkill.outputSchema.parse(
+        unwrapDeepSeekObject(
+          parseJsonContent(repairContent),
+          ['audienceSummary', 'annotations', 'suggestions'],
         ),
+      )
+      const filteredRepair = filterGroundedReaderSuggestions(
+        repairedPreview,
+        groundingSource,
+      )
+      candidatePreview = validateReaderPreviewSkillOutput(
+        filteredRepair.suggestions.length >= 1 ? filteredRepair : repairedPreview,
         input.draft,
         groundingSource,
       )

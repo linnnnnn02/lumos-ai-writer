@@ -99,6 +99,30 @@ function normalizeComparisonText(value: string) {
   return value.replace(/\s+/g, '').replace(/[，。！？、；：“”‘’（）《》]/g, '')
 }
 
+function isGroundedRewriteSuggestion(text: string, groundingSource: string) {
+  return (
+    findUnsupportedNumericClaims(text, groundingSource).length === 0 &&
+    findUnsupportedMaterialTerms(text, groundingSource, 'rewrite').length === 0
+  )
+}
+
+export function filterGroundedRewriteSuggestions(
+  rewrite: AiRewriteResult,
+  groundingSource: string,
+) {
+  const recommended = rewrite.suggestions[rewrite.recommendedIndex]
+  const suggestions = rewrite.suggestions.filter((suggestion) =>
+    isGroundedRewriteSuggestion(suggestion.text, groundingSource),
+  )
+  const recommendedIndex = recommended ? suggestions.indexOf(recommended) : -1
+
+  return {
+    ...rewrite,
+    suggestions,
+    recommendedIndex: recommendedIndex >= 0 ? recommendedIndex : 0,
+  }
+}
+
 export function validateRewriteSkillOutput(
   rewrite: AiRewriteResult,
   selectedText: string,

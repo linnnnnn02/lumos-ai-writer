@@ -11,11 +11,16 @@ import { rewriteDraftWithDeepSeek } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
   buildRewriteRepairUserPrompt,
+  filterGroundedRewriteSuggestions,
   rewriteRepairSystemPrompt,
   rewriteSkillV1,
   validateRewriteSkillOutput,
 } from '../src/skills/rewrite-v1/index.js'
 import { prepareAiSkill } from '../src/skills/runtime.js'
+import {
+  findUnsupportedMaterialTerms,
+  findUnsupportedNumericClaims,
+} from '../src/skills/shared/grounding.js'
 
 async function readJsonFixture(name: string) {
   return JSON.parse(
@@ -111,6 +116,16 @@ assert.ok(
   ),
 )
 assert.equal(new Set(expectedOutput.suggestions.map((item) => item.text)).size, 3)
+for (const editorialTerm of ['也就', '就不', '不好', '心里', '摸清']) {
+  assert.deepEqual(
+    findUnsupportedMaterialTerms(editorialTerm, '', 'rewrite'),
+    [],
+  )
+}
+assert.deepEqual(findUnsupportedMaterialTerms('多花', '花', 'rewrite'), [])
+assert.deepEqual(findUnsupportedNumericClaims('先骑两三天', groundingSource), [
+  '两三天',
+])
 assert.throws(() =>
   validateRewriteSkillOutput(
     {
@@ -129,7 +144,9 @@ const invalidGroundingOutput = aiRewriteResultSchema.parse({
   suggestions: expectedOutput.suggestions.map((suggestion, index) =>
     index === 0
       ? { ...suggestion, text: '明天换条路，争取快五分钟。' }
-      : suggestion,
+      : index === 1
+        ? { ...suggestion, text: '明天改坐地铁，顺便休息一下。' }
+        : { ...suggestion, text: '先骑两三天，不好再说。' },
   ),
 })
 const repairPrompt = JSON.parse(
@@ -142,7 +159,50 @@ const repairPrompt = JSON.parse(
 assert.equal(repairPrompt.task, 'repair_grounding_violation')
 assert.ok(repairPrompt.validationError.includes('五分钟'))
 
+const partiallyInvalidOutput = aiRewriteResultSchema.parse({
+  ...expectedOutput,
+  suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+    index === 2 ? { ...suggestion, text: '先骑两三天，不好再说。' } : suggestion,
+  ),
+})
+const filteredOutput = filterGroundedRewriteSuggestions(
+  partiallyInvalidOutput,
+  groundingSource,
+)
+assert.equal(filteredOutput.suggestions.length, 2)
+assert.doesNotThrow(() =>
+  validateRewriteSkillOutput(filteredOutput, input.selectedText, groundingSource),
+)
+
 const originalFetch = globalThis.fetch
+const filteringRequests: unknown[] = []
+globalThis.fetch = async (_request, init) => {
+  filteringRequests.push(JSON.parse(String(init?.body)))
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(partiallyInvalidOutput) } }],
+      usage: { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  const filtered = await rewriteDraftWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(filtered.rewrite, filteredOutput)
+  assert.equal(filteringRequests.length, 1)
+} finally {
+  globalThis.fetch = originalFetch
+}
+
 const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
 let responseIndex = 0
 globalThis.fetch = async (_request, init) => {

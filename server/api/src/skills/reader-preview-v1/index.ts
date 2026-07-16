@@ -104,6 +104,29 @@ function getDraftField(draft: AiDraftCopy, fieldId: string) {
   return match ? draft.body[Number(match[1])] : undefined
 }
 
+function isGroundedReaderSuggestion(instruction: string, groundingSource: string) {
+  return (
+    findUnsupportedNumericClaims(instruction, groundingSource).length === 0 &&
+    findUnsupportedMaterialTerms(
+      instruction,
+      groundingSource,
+      'reader-instruction',
+    ).length === 0
+  )
+}
+
+export function filterGroundedReaderSuggestions(
+  preview: AiReaderPreviewResult,
+  groundingSource: string,
+) {
+  return {
+    ...preview,
+    suggestions: preview.suggestions.filter((suggestion) =>
+      isGroundedReaderSuggestion(suggestion.instruction, groundingSource),
+    ),
+  }
+}
+
 export function validateReaderPreviewSkillOutput(
   preview: AiReaderPreviewResult,
   draft: AiDraftCopy,
