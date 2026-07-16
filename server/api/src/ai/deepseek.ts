@@ -30,8 +30,10 @@ import {
 } from '../skills/rewrite-v1/index.js'
 import {
   buildReaderPreviewRepairUserPrompt,
+  canRepairReaderPreviewSuggestions,
   filterGroundedReaderSuggestions,
   readerPreviewRepairSystemPrompt,
+  readerPreviewSuggestionRepairSchema,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../skills/reader-preview-v1/index.js'
@@ -811,8 +813,16 @@ export async function previewDraftForReaderWithDeepSeek(
           usage: initialUsage,
         }
       } catch {
-        // Non-grounding contract errors still get the single repair attempt below.
+        // A suggestion reference error may remain and can use the bounded repair below.
       }
+    }
+
+    if (!canRepairReaderPreviewSuggestions(validationError)) {
+      throw new DeepSeekOutputValidationError(
+        validationError,
+        initialUsage,
+        preparedSkill.metadata.promptHash,
+      )
     }
 
     let repairData: DeepSeekChatCompletionResponse
@@ -832,7 +842,7 @@ export async function previewDraftForReaderWithDeepSeek(
         ],
         response_format: { type: 'json_object' },
         thinking: { type: 'disabled' },
-        max_tokens: preparedSkill.maxTokens,
+        max_tokens: Math.min(preparedSkill.maxTokens, 1200),
         temperature: 0.1,
         stream: false,
       })
@@ -849,7 +859,7 @@ export async function previewDraftForReaderWithDeepSeek(
     if (repairData.error?.message || !repairContent) {
       throw new DeepSeekOutputValidationError(
         new Error(
-          repairData.error?.message || 'DeepSeek returned an empty repaired reader preview.',
+          repairData.error?.message || 'DeepSeek returned empty repaired reader suggestions.',
         ),
         combinedUsage,
         preparedSkill.metadata.promptHash,
@@ -857,12 +867,16 @@ export async function previewDraftForReaderWithDeepSeek(
     }
 
     try {
-      const repairedPreview = preparedSkill.outputSchema.parse(
+      const repairedSuggestions = readerPreviewSuggestionRepairSchema.parse(
         unwrapDeepSeekObject(
           parseJsonContent(repairContent),
-          ['audienceSummary', 'annotations', 'suggestions'],
+          ['suggestions'],
         ),
       )
+      const repairedPreview = {
+        ...candidatePreview,
+        suggestions: repairedSuggestions.suggestions,
+      }
       const filteredRepair = filterGroundedReaderSuggestions(
         repairedPreview,
         groundingSource,
