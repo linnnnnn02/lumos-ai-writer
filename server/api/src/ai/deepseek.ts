@@ -140,24 +140,38 @@ function parseJsonContent(content: string): unknown {
 function unwrapDeepSeekObject(
   value: unknown,
   requiredKeys: string[],
-  envelopeKeys: string[],
 ) {
-  let current = value
+  const queue: Array<{ candidate: unknown; depth: number }> = [
+    { candidate: value, depth: 0 },
+  ]
+  let visited = 0
 
-  for (let depth = 0; depth < 3; depth += 1) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return current
-    const record = current as Record<string, unknown>
-    if (requiredKeys.every((key) => key in record)) return current
+  while (queue.length > 0 && visited < 24) {
+    const current = queue.shift()
+    if (!current) break
+    visited += 1
 
-    const envelopeKey = envelopeKeys.find((key) => {
-      const nested = record[key]
-      return nested !== null && typeof nested === 'object' && !Array.isArray(nested)
-    })
-    if (!envelopeKey) return current
-    current = record[envelopeKey]
+    if (
+      current.candidate &&
+      typeof current.candidate === 'object' &&
+      !Array.isArray(current.candidate)
+    ) {
+      const record = current.candidate as Record<string, unknown>
+      if (requiredKeys.every((key) => key in record)) return current.candidate
+    }
+
+    if (current.depth >= 3 || !current.candidate || typeof current.candidate !== 'object') {
+      continue
+    }
+
+    for (const nested of Object.values(current.candidate)) {
+      if (nested && typeof nested === 'object') {
+        queue.push({ candidate: nested, depth: current.depth + 1 })
+      }
+    }
   }
 
-  return current
+  return value
 }
 
 function getRewriteGroundingSource(input: RewriteDraftRequest) {
@@ -558,7 +572,6 @@ export async function rewriteDraftWithDeepSeek(
       unwrapDeepSeekObject(
         parseJsonContent(content),
         ['summary', 'suggestions', 'recommendedIndex'],
-        ['rewrite', 'result', 'output', 'data'],
       ),
     )
   } catch (error) {
@@ -623,7 +636,6 @@ export async function rewriteDraftWithDeepSeek(
           unwrapDeepSeekObject(
             parseJsonContent(repairContent),
             ['summary', 'suggestions', 'recommendedIndex'],
-            ['rewrite', 'result', 'output', 'data'],
           ),
         ),
         input.selectedText,
@@ -705,7 +717,6 @@ export async function previewDraftForReaderWithDeepSeek(
       unwrapDeepSeekObject(
         parseJsonContent(content),
         ['audienceSummary', 'annotations', 'suggestions'],
-        ['preview', 'readerPreview', 'reader_preview', 'result', 'output', 'data'],
       ),
     )
   } catch (error) {
@@ -770,7 +781,6 @@ export async function previewDraftForReaderWithDeepSeek(
           unwrapDeepSeekObject(
             parseJsonContent(repairContent),
             ['audienceSummary', 'annotations', 'suggestions'],
-            ['preview', 'readerPreview', 'reader_preview', 'result', 'output', 'data'],
           ),
         ),
         input.draft,
