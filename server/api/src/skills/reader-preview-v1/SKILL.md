@@ -1,6 +1,6 @@
 ---
 id: target-reader-preview
-version: 1.0.1
+version: 1.0.2
 task: reader-preview
 model: deepseek-v4-flash
 ---
@@ -28,6 +28,7 @@ Simulate a careful first read of the full draft from the specified audience's pe
 - Preserve evidence-backed user voice and reader-relationship preferences.
 - Keep suggestions closed-world: edit existing material or conditionally ask for verified missing information without supplying fictional examples.
 - Produce structured JSON that passes `aiReaderPreviewResultSchema`.
+- If suggestion grounding fails, make at most one repair attempt using the exact validation error and aggregate both calls in usage accounting.
 
 ## Forbidden Behavior
 
@@ -36,6 +37,7 @@ Simulate a careful first read of the full draft from the specified audience's pe
 - Do not suggest example numbers or actions that are absent from the draft and analysis.
 - Do not require generic platform tricks that conflict with the user's writing model.
 - Do not output Markdown, explanations, or chain-of-thought.
+- Do not loop or make more than one grounding repair attempt.
 
 ## Evaluation Gate
 

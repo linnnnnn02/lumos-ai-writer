@@ -9,7 +9,11 @@ import {
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
+import { previewDraftForReaderWithDeepSeek } from '../src/ai/deepseek.js'
+import { readConfig } from '../src/env.js'
 import {
+  buildReaderPreviewRepairUserPrompt,
+  readerPreviewRepairSystemPrompt,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../src/skills/reader-preview-v1/index.js'
@@ -81,7 +85,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'target-reader-preview')
-assert.equal(prepared.metadata.version, '1.0.1')
+assert.equal(prepared.metadata.version, '1.0.2')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
@@ -133,6 +137,70 @@ assert.throws(() =>
     prepared.userPrompt,
   ),
 )
+
+const invalidGroundingOutput = aiReaderPreviewResultSchema.parse({
+  ...expectedOutput,
+  suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+    index === 0
+      ? {
+          ...suggestion,
+          instruction: '补充比第一天快5分钟或节省15%的具体数据。',
+        }
+      : suggestion,
+  ),
+})
+const repairPrompt = JSON.parse(
+  buildReaderPreviewRepairUserPrompt(
+    prepared.userPrompt,
+    invalidGroundingOutput,
+    'unsupported numeric claims: 5分钟, 15%',
+  ),
+) as { task: string; validationError: string }
+assert.equal(repairPrompt.task, 'repair_reader_preview_grounding')
+assert.ok(repairPrompt.validationError.includes('15%'))
+
+const originalFetch = globalThis.fetch
+const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
+let responseIndex = 0
+globalThis.fetch = async (_request, init) => {
+  mockedRequests.push(JSON.parse(String(init?.body)))
+  const first = responseIndex === 0
+  responseIndex += 1
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(first ? invalidGroundingOutput : expectedOutput) } }],
+      usage: first
+        ? { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 }
+        : { prompt_tokens: 300, completion_tokens: 250, total_tokens: 550 },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  const repaired = await previewDraftForReaderWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(repaired.preview, expectedOutput)
+  assert.deepEqual(repaired.usage, {
+    promptTokens: 700,
+    completionTokens: 450,
+    totalTokens: 1150,
+  })
+  assert.equal(mockedRequests.length, 2)
+  assert.equal(
+    mockedRequests[1]?.messages[0]?.content,
+    readerPreviewRepairSystemPrompt,
+  )
+} finally {
+  globalThis.fetch = originalFetch
+}
 assert.throws(() =>
   validateReaderPreviewSkillOutput(
     {
@@ -200,5 +268,6 @@ console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`grounded annotations: ${expectedOutput.annotations.length}`)
 console.log('real-research claim: forbidden')
+console.log('single grounding repair: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')

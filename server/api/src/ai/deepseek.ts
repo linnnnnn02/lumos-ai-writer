@@ -22,10 +22,14 @@ import {
 } from '../skills/draft-v1/index.js'
 import { prepareAiSkill } from '../skills/runtime.js'
 import {
+  buildRewriteRepairUserPrompt,
+  rewriteRepairSystemPrompt,
   rewriteSkillV1,
   validateRewriteSkillOutput,
 } from '../skills/rewrite-v1/index.js'
 import {
+  buildReaderPreviewRepairUserPrompt,
+  readerPreviewRepairSystemPrompt,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../skills/reader-preview-v1/index.js'
@@ -504,21 +508,93 @@ export async function rewriteDraftWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty rewrite.', 502)
   }
 
-  const parsed = parseValidatedDeepSeekOutput(
-    content,
-    data,
-    preparedSkill.metadata,
-    (value) => validateRewriteSkillOutput(
-      preparedSkill.outputSchema.parse(value),
+  const initialUsage = toUsage(data.usage)
+  let candidateRewrite: AiRewriteResult
+  try {
+    candidateRewrite = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  } catch (error) {
+    throw new DeepSeekOutputValidationError(
+      error,
+      initialUsage,
+      preparedSkill.metadata.promptHash,
+    )
+  }
+
+  try {
+    candidateRewrite = validateRewriteSkillOutput(
+      candidateRewrite,
       input.selectedText,
       preparedSkill.userPrompt,
-    ),
-  )
+    )
+  } catch (validationError) {
+    let repairData: DeepSeekChatCompletionResponse
+    try {
+      repairData = await requestDeepSeekChatCompletion(config, {
+        model: preparedSkill.model,
+        messages: [
+          { role: 'system', content: rewriteRepairSystemPrompt },
+          {
+            role: 'user',
+            content: buildRewriteRepairUserPrompt(
+              preparedSkill.userPrompt,
+              candidateRewrite,
+              getErrorMessage(validationError),
+            ),
+          },
+        ],
+        response_format: { type: 'json_object' },
+        thinking: { type: 'disabled' },
+        max_tokens: preparedSkill.maxTokens,
+        temperature: 0.1,
+        stream: false,
+      })
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        initialUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    const combinedUsage = mergeAiUsage(initialUsage, toUsage(repairData.usage))
+    const repairContent = repairData.choices?.[0]?.message?.content
+    if (repairData.error?.message || !repairContent) {
+      throw new DeepSeekOutputValidationError(
+        new Error(
+          repairData.error?.message || 'DeepSeek returned an empty repaired rewrite.',
+        ),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    try {
+      candidateRewrite = validateRewriteSkillOutput(
+        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
+        input.selectedText,
+        preparedSkill.userPrompt,
+      )
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    return {
+      rewrite: candidateRewrite,
+      skill: preparedSkill.metadata,
+      model: preparedSkill.model,
+      usage: combinedUsage,
+    }
+  }
+
   return {
-    rewrite: parsed.value,
+    rewrite: candidateRewrite,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: parsed.usage,
+    usage: initialUsage,
   }
 }
 
@@ -566,21 +642,93 @@ export async function previewDraftForReaderWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty reader preview.', 502)
   }
 
-  const parsed = parseValidatedDeepSeekOutput(
-    content,
-    data,
-    preparedSkill.metadata,
-    (value) => validateReaderPreviewSkillOutput(
-      preparedSkill.outputSchema.parse(value),
+  const initialUsage = toUsage(data.usage)
+  let candidatePreview: AiReaderPreviewResult
+  try {
+    candidatePreview = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  } catch (error) {
+    throw new DeepSeekOutputValidationError(
+      error,
+      initialUsage,
+      preparedSkill.metadata.promptHash,
+    )
+  }
+
+  try {
+    candidatePreview = validateReaderPreviewSkillOutput(
+      candidatePreview,
       input.draft,
       preparedSkill.userPrompt,
-    ),
-  )
+    )
+  } catch (validationError) {
+    let repairData: DeepSeekChatCompletionResponse
+    try {
+      repairData = await requestDeepSeekChatCompletion(config, {
+        model: preparedSkill.model,
+        messages: [
+          { role: 'system', content: readerPreviewRepairSystemPrompt },
+          {
+            role: 'user',
+            content: buildReaderPreviewRepairUserPrompt(
+              preparedSkill.userPrompt,
+              candidatePreview,
+              getErrorMessage(validationError),
+            ),
+          },
+        ],
+        response_format: { type: 'json_object' },
+        thinking: { type: 'disabled' },
+        max_tokens: preparedSkill.maxTokens,
+        temperature: 0.1,
+        stream: false,
+      })
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        initialUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    const combinedUsage = mergeAiUsage(initialUsage, toUsage(repairData.usage))
+    const repairContent = repairData.choices?.[0]?.message?.content
+    if (repairData.error?.message || !repairContent) {
+      throw new DeepSeekOutputValidationError(
+        new Error(
+          repairData.error?.message || 'DeepSeek returned an empty repaired reader preview.',
+        ),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    try {
+      candidatePreview = validateReaderPreviewSkillOutput(
+        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
+        input.draft,
+        preparedSkill.userPrompt,
+      )
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    return {
+      preview: candidatePreview,
+      skill: preparedSkill.metadata,
+      model: preparedSkill.model,
+      usage: combinedUsage,
+    }
+  }
+
   return {
-    preview: parsed.value,
+    preview: candidatePreview,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: parsed.usage,
+    usage: initialUsage,
   }
 }
 
