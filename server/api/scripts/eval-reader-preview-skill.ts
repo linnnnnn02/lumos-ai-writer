@@ -120,8 +120,14 @@ assert.deepEqual(
   parseJsonContent('{"confidenceBands":[0.7\n 0.9]}'),
   { confidenceBands: [0.7, 0.9] },
 )
-assert.throws(() =>
+assert.deepEqual(
   parseJsonContent('{"items":[{"id":1}\n {"id":2}\n {"id":3}]}'),
+  { items: [{ id: 1 }, { id: 2 }, { id: 3 }] },
+)
+assert.throws(() =>
+  parseJsonContent(
+    '{"items":[{"id":1}\n {"id":2}\n {"id":3}\n {"id":4}]}',
+  ),
 )
 assert.throws(() => parseJsonContent('{"first":1\n "second":2}'))
 assert.throws(() => parseJsonContent('{"items":["first"\n invalid]}'))
