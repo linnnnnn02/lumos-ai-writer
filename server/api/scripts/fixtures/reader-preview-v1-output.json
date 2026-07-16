@@ -69,7 +69,7 @@
     },
     {
       "priority": "medium",
-      "instruction": "把“轻松一些”收回到少一次临时判断或更早知道何时减速这类已有细节。",
+      "instruction": "把“轻松一些”改成前文已经出现的“在哪个路口提前减速”这类细节。",
       "rationale": "保持整篇用可观察动作证明变化的方式，也避免空泛概括。",
       "annotationIds": [
         "light-benefit-risk"

@@ -52,6 +52,15 @@ const prepared = await prepareAiSkill(rewriteSkillV1, {
     projectProfile: null,
   },
 })
+const groundingSource = JSON.stringify({
+  selection: {
+    selectedText: input.selectedText,
+    contextBefore: input.contextBefore,
+    contextAfter: input.contextAfter,
+  },
+  fullDraft: input.draft,
+  analysis: input.analysis ?? null,
+})
 const userPayload = JSON.parse(prepared.userPrompt) as {
   task: string
   input: {
@@ -71,7 +80,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'selection-rewrite')
-assert.equal(prepared.metadata.version, '1.0.2')
+assert.equal(prepared.metadata.version, '1.0.3')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'rewrite_selected_text')
 assert.equal(userPayload.input.instruction, input.instruction)
@@ -91,7 +100,7 @@ assert.doesNotThrow(() =>
   validateRewriteSkillOutput(
     expectedOutput,
     input.selectedText,
-    prepared.userPrompt,
+    groundingSource,
   ),
 )
 assert.equal(expectedOutput.suggestions.length, 3)
@@ -111,7 +120,7 @@ assert.throws(() =>
       ),
     },
     input.selectedText,
-    prepared.userPrompt,
+    groundingSource,
   ),
 )
 
@@ -142,7 +151,13 @@ globalThis.fetch = async (_request, init) => {
   responseIndex += 1
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content: JSON.stringify(first ? invalidGroundingOutput : expectedOutput) } }],
+      choices: [{
+        message: {
+          content: JSON.stringify(
+            first ? invalidGroundingOutput : { rewrite: expectedOutput },
+          ),
+        },
+      }],
       usage: first
         ? { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 }
         : { prompt_tokens: 200, completion_tokens: 120, total_tokens: 320 },
@@ -183,7 +198,38 @@ assert.throws(() =>
       ),
     },
     input.selectedText,
-    prepared.userPrompt,
+    groundingSource,
+  ),
+)
+assert.throws(() =>
+  validateRewriteSkillOutput(
+    {
+      ...expectedOutput,
+      suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+        index === 0
+          ? {
+              ...suggestion,
+              text: '所以明天早上查好路线，反正比挤地铁凉快。',
+            }
+          : suggestion,
+      ),
+    },
+    input.selectedText,
+    groundingSource,
+  ),
+)
+assert.throws(() =>
+  validateRewriteSkillOutput(
+    {
+      ...expectedOutput,
+      suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+        index === 0
+          ? { ...suggestion, text: '今天骑慢点，多吹会儿风。' }
+          : suggestion,
+      ),
+    },
+    input.selectedText,
+    groundingSource,
   ),
 )
 assert.throws(() =>

@@ -137,6 +137,48 @@ function parseJsonContent(content: string): unknown {
   }
 }
 
+function unwrapDeepSeekObject(
+  value: unknown,
+  requiredKeys: string[],
+  envelopeKeys: string[],
+) {
+  let current = value
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return current
+    const record = current as Record<string, unknown>
+    if (requiredKeys.every((key) => key in record)) return current
+
+    const envelopeKey = envelopeKeys.find((key) => {
+      const nested = record[key]
+      return nested !== null && typeof nested === 'object' && !Array.isArray(nested)
+    })
+    if (!envelopeKey) return current
+    current = record[envelopeKey]
+  }
+
+  return current
+}
+
+function getRewriteGroundingSource(input: RewriteDraftRequest) {
+  return JSON.stringify({
+    selection: {
+      selectedText: input.selectedText,
+      contextBefore: input.contextBefore,
+      contextAfter: input.contextAfter,
+    },
+    fullDraft: input.draft,
+    analysis: input.analysis ?? null,
+  })
+}
+
+function getReaderPreviewGroundingSource(input: PreviewDraftForReaderRequest) {
+  return JSON.stringify({
+    draft: input.draft,
+    analysis: input.analysis ?? null,
+  })
+}
+
 function toUsage(usage: DeepSeekChatCompletionResponse['usage']): AiUsage | null {
   if (!usage) return null
   return {
@@ -509,9 +551,16 @@ export async function rewriteDraftWithDeepSeek(
   }
 
   const initialUsage = toUsage(data.usage)
+  const groundingSource = getRewriteGroundingSource(input)
   let candidateRewrite: AiRewriteResult
   try {
-    candidateRewrite = preparedSkill.outputSchema.parse(parseJsonContent(content))
+    candidateRewrite = preparedSkill.outputSchema.parse(
+      unwrapDeepSeekObject(
+        parseJsonContent(content),
+        ['summary', 'suggestions', 'recommendedIndex'],
+        ['rewrite', 'result', 'output', 'data'],
+      ),
+    )
   } catch (error) {
     throw new DeepSeekOutputValidationError(
       error,
@@ -524,7 +573,7 @@ export async function rewriteDraftWithDeepSeek(
     candidateRewrite = validateRewriteSkillOutput(
       candidateRewrite,
       input.selectedText,
-      preparedSkill.userPrompt,
+      groundingSource,
     )
   } catch (validationError) {
     let repairData: DeepSeekChatCompletionResponse
@@ -570,9 +619,15 @@ export async function rewriteDraftWithDeepSeek(
 
     try {
       candidateRewrite = validateRewriteSkillOutput(
-        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
+        preparedSkill.outputSchema.parse(
+          unwrapDeepSeekObject(
+            parseJsonContent(repairContent),
+            ['summary', 'suggestions', 'recommendedIndex'],
+            ['rewrite', 'result', 'output', 'data'],
+          ),
+        ),
         input.selectedText,
-        preparedSkill.userPrompt,
+        groundingSource,
       )
     } catch (error) {
       throw new DeepSeekOutputValidationError(
@@ -643,9 +698,16 @@ export async function previewDraftForReaderWithDeepSeek(
   }
 
   const initialUsage = toUsage(data.usage)
+  const groundingSource = getReaderPreviewGroundingSource(input)
   let candidatePreview: AiReaderPreviewResult
   try {
-    candidatePreview = preparedSkill.outputSchema.parse(parseJsonContent(content))
+    candidatePreview = preparedSkill.outputSchema.parse(
+      unwrapDeepSeekObject(
+        parseJsonContent(content),
+        ['audienceSummary', 'annotations', 'suggestions'],
+        ['preview', 'readerPreview', 'reader_preview', 'result', 'output', 'data'],
+      ),
+    )
   } catch (error) {
     throw new DeepSeekOutputValidationError(
       error,
@@ -658,7 +720,7 @@ export async function previewDraftForReaderWithDeepSeek(
     candidatePreview = validateReaderPreviewSkillOutput(
       candidatePreview,
       input.draft,
-      preparedSkill.userPrompt,
+      groundingSource,
     )
   } catch (validationError) {
     let repairData: DeepSeekChatCompletionResponse
@@ -704,9 +766,15 @@ export async function previewDraftForReaderWithDeepSeek(
 
     try {
       candidatePreview = validateReaderPreviewSkillOutput(
-        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
+        preparedSkill.outputSchema.parse(
+          unwrapDeepSeekObject(
+            parseJsonContent(repairContent),
+            ['audienceSummary', 'annotations', 'suggestions'],
+            ['preview', 'readerPreview', 'reader_preview', 'result', 'output', 'data'],
+          ),
+        ),
         input.draft,
-        preparedSkill.userPrompt,
+        groundingSource,
       )
     } catch (error) {
       throw new DeepSeekOutputValidationError(

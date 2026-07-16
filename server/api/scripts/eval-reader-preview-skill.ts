@@ -66,6 +66,10 @@ const prepared = await prepareAiSkill(readerPreviewSkillV1, {
     projectProfile: null,
   },
 })
+const groundingSource = JSON.stringify({
+  draft: input.draft,
+  analysis: input.analysis ?? null,
+})
 const userPayload = JSON.parse(prepared.userPrompt) as {
   task: string
   input: {
@@ -85,7 +89,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'target-reader-preview')
-assert.equal(prepared.metadata.version, '1.0.2')
+assert.equal(prepared.metadata.version, '1.0.3')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
@@ -102,7 +106,7 @@ assert.ok(prepared.systemPrompt.includes('不得要求补写输入中不存在')
 assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
 
 assert.doesNotThrow(() =>
-  validateReaderPreviewSkillOutput(expectedOutput, draft, prepared.userPrompt),
+  validateReaderPreviewSkillOutput(expectedOutput, draft, groundingSource),
 )
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'interest'))
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'risk'))
@@ -134,7 +138,7 @@ assert.throws(() =>
       ),
     },
     draft,
-    prepared.userPrompt,
+    groundingSource,
   ),
 )
 
@@ -168,7 +172,13 @@ globalThis.fetch = async (_request, init) => {
   responseIndex += 1
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content: JSON.stringify(first ? invalidGroundingOutput : expectedOutput) } }],
+      choices: [{
+        message: {
+          content: JSON.stringify(
+            first ? invalidGroundingOutput : { preview: expectedOutput },
+          ),
+        },
+      }],
       usage: first
         ? { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 }
         : { prompt_tokens: 300, completion_tokens: 250, total_tokens: 550 },
@@ -210,7 +220,7 @@ assert.throws(() =>
       ),
     },
     draft,
-    prepared.userPrompt,
+    groundingSource,
   ),
 )
 assert.throws(() =>
@@ -227,7 +237,24 @@ assert.throws(() =>
       ),
     },
     draft,
-    prepared.userPrompt,
+    groundingSource,
+  ),
+)
+assert.throws(() =>
+  validateReaderPreviewSkillOutput(
+    {
+      ...expectedOutput,
+      suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+        index === 0
+          ? {
+              ...suggestion,
+              instruction: '补充靠右骑行和观察后视镜的应对方法。',
+            }
+          : suggestion,
+      ),
+    },
+    draft,
+    groundingSource,
   ),
 )
 
