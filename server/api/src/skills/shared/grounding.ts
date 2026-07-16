@@ -38,6 +38,8 @@ const sharedNonMaterialTerms = new Set([
   '觉得',
   '来说',
   '就是',
+  '也就',
+  '就不',
   '真的',
   '确实',
   '比较',
@@ -58,6 +60,9 @@ const sharedNonMaterialTerms = new Set([
   '轻松',
   '清楚',
   '明白',
+  '不好',
+  '心里',
+  '摸清',
   '好像',
   '没关系',
   '下次',
@@ -175,7 +180,7 @@ const riskySingleCharacterTerms = new Set([
   '饭',
 ])
 
-const removablePrefixes = /^(?:再|先|更|也|不|没|很|最|真|就|只|还|会|能|可|要|想|让|把|被|给|去|来)+/
+const removablePrefixes = /^(?:再|先|更|多|也|不|没|很|最|真|就|只|还|会|能|可|要|想|让|把|被|给|去|来)+/
 const removableSuffixes = /(?:了|着|过|一下|一点|起来|下来|出去|回来)$/
 
 type MaterialGroundingMode = 'rewrite' | 'reader-instruction'

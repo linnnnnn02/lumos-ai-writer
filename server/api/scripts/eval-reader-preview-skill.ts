@@ -13,6 +13,7 @@ import { previewDraftForReaderWithDeepSeek } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
   buildReaderPreviewRepairUserPrompt,
+  filterGroundedReaderSuggestions,
   readerPreviewRepairSystemPrompt,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
@@ -150,7 +151,9 @@ const invalidGroundingOutput = aiReaderPreviewResultSchema.parse({
           ...suggestion,
           instruction: '补充比第一天快5分钟或节省15%的具体数据。',
         }
-      : suggestion,
+      : index === 1
+        ? { ...suggestion, instruction: '补充节省15%的具体结果。' }
+        : { ...suggestion, instruction: '增加两分钟的行动示例。' },
   ),
 })
 const repairPrompt = JSON.parse(
@@ -163,7 +166,52 @@ const repairPrompt = JSON.parse(
 assert.equal(repairPrompt.task, 'repair_reader_preview_grounding')
 assert.ok(repairPrompt.validationError.includes('15%'))
 
+const partiallyInvalidOutput = aiReaderPreviewResultSchema.parse({
+  ...expectedOutput,
+  suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+    index === 0
+      ? { ...suggestion, instruction: '补充比第一天快5分钟的具体数据。' }
+      : suggestion,
+  ),
+})
+const filteredOutput = filterGroundedReaderSuggestions(
+  partiallyInvalidOutput,
+  groundingSource,
+)
+assert.equal(filteredOutput.suggestions.length, 2)
+assert.doesNotThrow(() =>
+  validateReaderPreviewSkillOutput(filteredOutput, draft, groundingSource),
+)
+
 const originalFetch = globalThis.fetch
+const filteringRequests: unknown[] = []
+globalThis.fetch = async (_request, init) => {
+  filteringRequests.push(JSON.parse(String(init?.body)))
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(partiallyInvalidOutput) } }],
+      usage: { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  const filtered = await previewDraftForReaderWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(filtered.preview, filteredOutput)
+  assert.equal(filteringRequests.length, 1)
+} finally {
+  globalThis.fetch = originalFetch
+}
+
 const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
 let responseIndex = 0
 globalThis.fetch = async (_request, init) => {
