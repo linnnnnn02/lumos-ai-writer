@@ -15,6 +15,8 @@ import {
 } from '@lumos-ai/shared'
 import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
 import {
+  buildDraftRepairUserPrompt,
+  draftRepairSystemPrompt,
   draftSkillV1,
   validateDraftSkillOutput,
 } from '../skills/draft-v1/index.js'
@@ -137,6 +139,26 @@ function toUsage(usage: DeepSeekChatCompletionResponse['usage']): AiUsage | null
     promptTokens: usage.prompt_tokens ?? null,
     completionTokens: usage.completion_tokens ?? null,
     totalTokens: usage.total_tokens ?? null,
+  }
+}
+
+export function mergeAiUsage(...usages: Array<AiUsage | null>): AiUsage | null {
+  const populated = usages.filter((usage): usage is AiUsage => usage !== null)
+  if (populated.length === 0) return null
+
+  const sum = (field: keyof AiUsage) => {
+    const values = populated
+      .map((usage) => usage[field])
+      .filter((value): value is number => value !== null)
+    return values.length > 0
+      ? values.reduce((total, value) => total + value, 0)
+      : null
+  }
+
+  return {
+    promptTokens: sum('promptTokens'),
+    completionTokens: sum('completionTokens'),
+    totalTokens: sum('totalTokens'),
   }
 }
 
@@ -343,18 +365,98 @@ export async function generateDraftWithDeepSeek(
     throw new DeepSeekUpstreamError('DeepSeek returned an empty draft.', 502)
   }
 
-  const parsed = parseValidatedDeepSeekOutput(
-    content,
-    data,
-    preparedSkill.metadata,
-    (value) => validateDraftSkillOutput(preparedSkill.outputSchema.parse(value), input.length),
-  )
+  const initialUsage = toUsage(data.usage)
+  let candidateDraft: AiDraftCopy
+
+  try {
+    candidateDraft = preparedSkill.outputSchema.parse(parseJsonContent(content))
+  } catch (error) {
+    throw new DeepSeekOutputValidationError(
+      error,
+      initialUsage,
+      preparedSkill.metadata.promptHash,
+    )
+  }
+
+  try {
+    candidateDraft = validateDraftSkillOutput(candidateDraft, input.length)
+  } catch {
+    let repairData: DeepSeekChatCompletionResponse
+    try {
+      repairData = await requestDeepSeekChatCompletion(config, {
+        model: preparedSkill.model,
+        messages: [
+          {
+            role: 'system',
+            content: draftRepairSystemPrompt,
+          },
+          {
+            role: 'user',
+            content: buildDraftRepairUserPrompt(input, candidateDraft),
+          },
+        ],
+        response_format: {
+          type: 'json_object',
+        },
+        thinking: {
+          type: 'disabled',
+        },
+        max_tokens: preparedSkill.maxTokens,
+        temperature: 0.2,
+        stream: false,
+      })
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        initialUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    const repairUsage = toUsage(repairData.usage)
+    const combinedUsage = mergeAiUsage(initialUsage, repairUsage)
+    if (repairData.error?.message) {
+      throw new DeepSeekOutputValidationError(
+        new DeepSeekUpstreamError(repairData.error.message, 502),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+    const repairContent = repairData.choices?.[0]?.message?.content
+    if (!repairContent) {
+      throw new DeepSeekOutputValidationError(
+        new Error('DeepSeek returned an empty repaired draft.'),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    try {
+      candidateDraft = validateDraftSkillOutput(
+        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
+        input.length,
+      )
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    return {
+      draft: candidateDraft,
+      skill: preparedSkill.metadata,
+      model: preparedSkill.model,
+      usage: combinedUsage,
+    }
+  }
 
   return {
-    draft: parsed.value,
+    draft: candidateDraft,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
-    usage: parsed.usage,
+    usage: initialUsage,
   }
 }
 
