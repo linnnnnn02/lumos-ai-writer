@@ -139,6 +139,32 @@ export function validateRewriteSkillOutput(
     .parse(rewrite)
 }
 
+export const rewriteRepairSystemPrompt = [
+  '你是 Lumos AI Writer 的局部改写结果修复器。',
+  '候选结果已经因为包含无证据内容被拒绝。你只能删除或改写无证据内容，不能引入新的事实。',
+  '所有 suggestion.text 必须遵守原始输入的闭世界事实规则；具体动作、地点、时间、数字、结果和因果必须能在 originalInput 中找到直接证据。',
+  'validationError 明确列出了被拒绝的问题。必须逐项移除；禁止只换一种说法继续保留同一个虚构信息。',
+  '如果用户要求具体动作，但 originalInput 没有可用动作，就用已有信息自然收住，或明确请用户补充，不得编例子。',
+  '仍需返回 2-3 个可直接替换 selectedText 的不同版本，并正确设置 recommendedIndex。',
+  '只输出一个符合原始 JSON contract 的 object，不要 Markdown、解释或思考过程。',
+].join('\n')
+
+export const rewriteRepairUserPromptTemplate =
+  'JSON.stringify({ task: "repair_grounding_violation", originalInput, candidateRewrite, validationError })'
+
+export function buildRewriteRepairUserPrompt(
+  originalUserPrompt: string,
+  candidateRewrite: AiRewriteResult,
+  validationError: string,
+) {
+  return JSON.stringify({
+    task: 'repair_grounding_violation',
+    originalInput: JSON.parse(originalUserPrompt),
+    candidateRewrite,
+    validationError,
+  })
+}
+
 const rewriteSystemPrompt = [
   '你是 Lumos AI Writer 的局部改写 Skill。',
   '目标是只替换用户当前选中的文字，让它更符合用户的明确要求、写作模型和整篇上下文。',
@@ -164,7 +190,7 @@ const rewriteSystemPrompt = [
 
 export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResult> = {
   id: 'selection-rewrite',
-  version: '1.0.1',
+  version: '1.0.2',
   taskType: 'rewrite',
   model: 'deepseek-v4-flash',
   maxTokens: 1600,
@@ -172,6 +198,10 @@ export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResul
   systemPrompt: rewriteSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "rewrite_selected_text", input: compactRewriteSkillInput(input) })',
+  supplementaryPromptTemplates: [
+    rewriteRepairSystemPrompt,
+    rewriteRepairUserPromptTemplate,
+  ],
   buildUserPrompt: (input) =>
     JSON.stringify({
       task: 'rewrite_selected_text',

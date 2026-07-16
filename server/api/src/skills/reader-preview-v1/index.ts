@@ -163,6 +163,32 @@ export function validateReaderPreviewSkillOutput(
     .parse(preview)
 }
 
+export const readerPreviewRepairSystemPrompt = [
+  '你是 Lumos AI Writer 的目标读者预演结果修复器。',
+  '候选结果已经因为建议包含无证据内容被拒绝。你只能修复违规建议，不得改变已有批注的证据边界。',
+  'suggestion.instruction 中的具体动作、地点、时间、数字、结果和因果必须能在 originalInput 的 draft 或 analysis 中找到直接证据。',
+  'validationError 明确列出了被拒绝的问题。必须逐项删除；不能用另一个虚构示例替换。',
+  '如果读者需要原文没有的信息，只能条件式建议用户核实后补充；不得替用户给出示例数字或答案。',
+  '保留 2-6 条逐字引用的 annotations，并让每条 suggestion 继续引用有效 annotationIds。',
+  '只输出一个符合原始 JSON contract 的 object，不要 Markdown、解释或思考过程。',
+].join('\n')
+
+export const readerPreviewRepairUserPromptTemplate =
+  'JSON.stringify({ task: "repair_reader_preview_grounding", originalInput, candidatePreview, validationError })'
+
+export function buildReaderPreviewRepairUserPrompt(
+  originalUserPrompt: string,
+  candidatePreview: AiReaderPreviewResult,
+  validationError: string,
+) {
+  return JSON.stringify({
+    task: 'repair_reader_preview_grounding',
+    originalInput: JSON.parse(originalUserPrompt),
+    candidatePreview,
+    validationError,
+  })
+}
+
 const readerPreviewSystemPrompt = [
   '你是 Lumos AI Writer 的目标读者预演 Skill。',
   '目标是基于指定读者视角，对完整草稿做一次有依据的阅读预演，标出可能的停留点、划走风险和自然疑问，并给出克制的修改建议。',
@@ -188,7 +214,7 @@ export const readerPreviewSkillV1: AiSkillDefinition<
   AiReaderPreviewResult
 > = {
   id: 'target-reader-preview',
-  version: '1.0.1',
+  version: '1.0.2',
   taskType: 'reader-preview',
   model: 'deepseek-v4-flash',
   maxTokens: 2200,
@@ -196,6 +222,10 @@ export const readerPreviewSkillV1: AiSkillDefinition<
   systemPrompt: readerPreviewSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "preview_draft_as_target_reader", input: compactReaderPreviewSkillInput(input) })',
+  supplementaryPromptTemplates: [
+    readerPreviewRepairSystemPrompt,
+    readerPreviewRepairUserPromptTemplate,
+  ],
   buildUserPrompt: (input) =>
     JSON.stringify({
       task: 'preview_draft_as_target_reader',

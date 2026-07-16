@@ -7,7 +7,11 @@ import {
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
+import { rewriteDraftWithDeepSeek } from '../src/ai/deepseek.js'
+import { readConfig } from '../src/env.js'
 import {
+  buildRewriteRepairUserPrompt,
+  rewriteRepairSystemPrompt,
   rewriteSkillV1,
   validateRewriteSkillOutput,
 } from '../src/skills/rewrite-v1/index.js'
@@ -67,7 +71,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'selection-rewrite')
-assert.equal(prepared.metadata.version, '1.0.1')
+assert.equal(prepared.metadata.version, '1.0.2')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'rewrite_selected_text')
 assert.equal(userPayload.input.instruction, input.instruction)
@@ -110,6 +114,64 @@ assert.throws(() =>
     prepared.userPrompt,
   ),
 )
+
+const invalidGroundingOutput = aiRewriteResultSchema.parse({
+  ...expectedOutput,
+  suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+    index === 0
+      ? { ...suggestion, text: '明天换条路，争取快五分钟。' }
+      : suggestion,
+  ),
+})
+const repairPrompt = JSON.parse(
+  buildRewriteRepairUserPrompt(
+    prepared.userPrompt,
+    invalidGroundingOutput,
+    'unsupported numeric claims: 五分钟',
+  ),
+) as { task: string; validationError: string }
+assert.equal(repairPrompt.task, 'repair_grounding_violation')
+assert.ok(repairPrompt.validationError.includes('五分钟'))
+
+const originalFetch = globalThis.fetch
+const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
+let responseIndex = 0
+globalThis.fetch = async (_request, init) => {
+  mockedRequests.push(JSON.parse(String(init?.body)))
+  const first = responseIndex === 0
+  responseIndex += 1
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(first ? invalidGroundingOutput : expectedOutput) } }],
+      usage: first
+        ? { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 }
+        : { prompt_tokens: 200, completion_tokens: 120, total_tokens: 320 },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  const repaired = await rewriteDraftWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(repaired.rewrite, expectedOutput)
+  assert.deepEqual(repaired.usage, {
+    promptTokens: 500,
+    completionTokens: 220,
+    totalTokens: 720,
+  })
+  assert.equal(mockedRequests.length, 2)
+  assert.equal(mockedRequests[1]?.messages[0]?.content, rewriteRepairSystemPrompt)
+} finally {
+  globalThis.fetch = originalFetch
+}
 assert.throws(() =>
   validateRewriteSkillOutput(
     {
@@ -168,5 +230,6 @@ console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`fixture suggestions: ${expectedOutput.suggestions.length}`)
 console.log('selection-only contract: enforced')
+console.log('single grounding repair: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')
