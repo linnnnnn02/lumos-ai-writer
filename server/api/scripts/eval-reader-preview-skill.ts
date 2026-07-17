@@ -93,7 +93,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'target-reader-preview')
-assert.equal(prepared.metadata.version, '1.0.3')
+assert.equal(prepared.metadata.version, '1.0.4')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
@@ -156,17 +156,14 @@ assert.ok(
 assert.ok(
   expectedOutput.suggestions.some((item) => item.instruction.includes('不追加改变生活')),
 )
-assert.throws(() =>
-  validateReaderPreviewSkillOutput(
-    {
-      ...expectedOutput,
-      annotations: expectedOutput.annotations.map((annotation, index) =>
-        index === 0 ? { ...annotation, quote: '草稿中不存在的原句' } : annotation,
-      ),
-    },
-    draft,
-    groundingSource,
+const invalidAnnotationOutput = aiReaderPreviewResultSchema.parse({
+  ...expectedOutput,
+  annotations: expectedOutput.annotations.map((annotation, index) =>
+    index === 0 ? { ...annotation, quote: '草稿中不存在的原句' } : annotation,
   ),
+})
+assert.throws(() =>
+  validateReaderPreviewSkillOutput(invalidAnnotationOutput, draft, groundingSource),
 )
 
 const invalidGroundingOutput = aiReaderPreviewResultSchema.parse({
@@ -188,9 +185,18 @@ const repairPrompt = JSON.parse(
     invalidGroundingOutput,
     'unsupported numeric claims: 5分钟, 15%',
   ),
-) as { task: string; validationError: string }
-assert.equal(repairPrompt.task, 'repair_reader_preview_grounding')
+) as {
+  task: string
+  validationError: string
+  availableAnnotations: Array<{ id: string }>
+  candidateSuggestions: unknown[]
+  candidatePreview?: unknown
+}
+assert.equal(repairPrompt.task, 'repair_reader_preview_suggestions')
 assert.ok(repairPrompt.validationError.includes('15%'))
+assert.equal(repairPrompt.availableAnnotations.length, expectedOutput.annotations.length)
+assert.equal(repairPrompt.candidateSuggestions.length, expectedOutput.suggestions.length)
+assert.equal(repairPrompt.candidatePreview, undefined)
 
 const partiallyInvalidOutput = aiReaderPreviewResultSchema.parse({
   ...expectedOutput,
@@ -210,6 +216,36 @@ assert.doesNotThrow(() =>
 )
 
 const originalFetch = globalThis.fetch
+let invalidAnnotationRequests = 0
+globalThis.fetch = async () => {
+  invalidAnnotationRequests += 1
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(invalidAnnotationOutput) } }],
+      usage: { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 },
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  await assert.rejects(
+    previewDraftForReaderWithDeepSeek(
+      readConfig({
+        APP_ENV: 'local',
+        AI_FEATURE_ENABLED: 'true',
+        AI_PROVIDER_PRIMARY: 'deepseek',
+        DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+      }),
+      input,
+    ),
+    /Annotation quote must be copied exactly/,
+  )
+  assert.equal(invalidAnnotationRequests, 1)
+} finally {
+  globalThis.fetch = originalFetch
+}
+
 const filteringRequests: unknown[] = []
 globalThis.fetch = async (_request, init) => {
   filteringRequests.push(JSON.parse(String(init?.body)))
@@ -239,13 +275,13 @@ try {
 }
 
 const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
-const repairedPreviewEnvelope = JSON.stringify(
-  { repairedOutput: { payload: expectedOutput } },
+const repairedSuggestionsEnvelope = JSON.stringify(
+  { repairedOutput: { payload: { suggestions: expectedOutput.suggestions } } },
   null,
   2,
 )
-const malformedRepairedPreview = repairedPreviewEnvelope.replace(/},(\s*){/, '}$1{')
-assert.notEqual(malformedRepairedPreview, repairedPreviewEnvelope)
+const malformedRepairedSuggestions = repairedSuggestionsEnvelope.replace(/},(\s*){/g, '}$1{')
+assert.notEqual(malformedRepairedSuggestions, repairedSuggestionsEnvelope)
 let responseIndex = 0
 globalThis.fetch = async (_request, init) => {
   mockedRequests.push(JSON.parse(String(init?.body)))
@@ -257,7 +293,7 @@ globalThis.fetch = async (_request, init) => {
         message: {
           content: first
             ? JSON.stringify(invalidGroundingOutput)
-            : malformedRepairedPreview,
+            : malformedRepairedSuggestions,
         },
       }],
       usage: first
@@ -289,6 +325,7 @@ try {
     mockedRequests[1]?.messages[0]?.content,
     readerPreviewRepairSystemPrompt,
   )
+  assert.equal((mockedRequests[1] as { max_tokens?: number }).max_tokens, 1200)
 } finally {
   globalThis.fetch = originalFetch
 }
@@ -376,6 +413,6 @@ console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`grounded annotations: ${expectedOutput.annotations.length}`)
 console.log('real-research claim: forbidden')
-console.log('single grounding repair: simulated and usage-combined')
+console.log('suggestions-only grounding repair: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')

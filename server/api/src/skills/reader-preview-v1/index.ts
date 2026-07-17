@@ -1,10 +1,12 @@
 import {
   aiReaderPreviewResultSchema,
+  aiReaderPreviewSuggestionSchema,
   type AiDraftCopy,
   type AiReaderPreviewResult,
   type PreviewDraftForReaderRequest,
   type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
+import { z, ZodError } from 'zod'
 import type { AiSkillDefinition } from '../runtime.js'
 import {
   findUnsupportedMaterialTerms,
@@ -201,19 +203,31 @@ export function validateReaderPreviewSkillOutput(
     .parse(preview)
 }
 
+export const readerPreviewSuggestionRepairSchema = z.object({
+  suggestions: z.array(aiReaderPreviewSuggestionSchema).min(1).max(4),
+})
+
+export function canRepairReaderPreviewSuggestions(error: unknown) {
+  return (
+    error instanceof ZodError &&
+    error.issues.length > 0 &&
+    error.issues.every((issue) => issue.path[0] === 'suggestions')
+  )
+}
+
 export const readerPreviewRepairSystemPrompt = [
-  '你是 Lumos AI Writer 的目标读者预演结果修复器。',
-  '候选结果已经因为建议包含无证据内容被拒绝。你只能修复违规建议，不得改变已有批注的证据边界。',
+  '你是 Lumos AI Writer 的目标读者建议修复器。',
+  '候选建议已经因为无证据内容被拒绝。你只能重写 suggestions，不得输出或改写 audienceSummary、annotations。',
   'suggestion.instruction 中的具体动作、地点、时间、数字、结果和因果必须能在 originalInput 的 draft 或 analysis 中找到直接证据。',
   'validationError 明确列出了被拒绝的问题。必须逐项删除；不能用另一个虚构示例替换。',
   '如果读者需要原文没有的信息，只能条件式建议用户核实后补充；不得替用户给出示例数字或答案。',
   '不得把通勤方式、天气、消费、休息、饮食等常见生活场景当作可自由补充的合理联想。',
-  '保留 2-6 条逐字引用的 annotations，并让每条 suggestion 继续引用有效 annotationIds。',
-  '只输出原始 JSON contract 的裸 object；禁止包在 preview、result、data 或其他外层字段中，不要 Markdown、解释或思考过程。',
+  '返回 1-4 条 suggestions；每条 suggestion 只能引用 availableAnnotations 中已有的 id。',
+  '只输出紧凑的 {"suggestions":[...]} JSON object；不要 Markdown、外层包装、解释或思考过程。',
 ].join('\n')
 
 export const readerPreviewRepairUserPromptTemplate =
-  'JSON.stringify({ task: "repair_reader_preview_grounding", originalInput, candidatePreview, validationError })'
+  'JSON.stringify({ task: "repair_reader_preview_suggestions", originalInput, availableAnnotations, candidateSuggestions, validationError })'
 
 export function buildReaderPreviewRepairUserPrompt(
   originalUserPrompt: string,
@@ -221,9 +235,16 @@ export function buildReaderPreviewRepairUserPrompt(
   validationError: string,
 ) {
   return JSON.stringify({
-    task: 'repair_reader_preview_grounding',
+    task: 'repair_reader_preview_suggestions',
     originalInput: JSON.parse(originalUserPrompt),
-    candidatePreview,
+    availableAnnotations: candidatePreview.annotations.map((annotation) => ({
+      id: annotation.id,
+      fieldId: annotation.fieldId,
+      quote: annotation.quote,
+      tone: annotation.tone,
+      title: annotation.title,
+    })),
+    candidateSuggestions: candidatePreview.suggestions,
     validationError,
   })
 }
@@ -254,7 +275,7 @@ export const readerPreviewSkillV1: AiSkillDefinition<
   AiReaderPreviewResult
 > = {
   id: 'target-reader-preview',
-  version: '1.0.3',
+  version: '1.0.4',
   taskType: 'reader-preview',
   model: 'deepseek-v4-flash',
   maxTokens: 2200,
