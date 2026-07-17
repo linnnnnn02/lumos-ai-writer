@@ -29,11 +29,7 @@ import {
   validateRewriteSkillOutput,
 } from '../skills/rewrite-v1/index.js'
 import {
-  buildReaderPreviewRepairUserPrompt,
-  canRepairReaderPreviewSuggestions,
   filterGroundedReaderSuggestions,
-  readerPreviewRepairSystemPrompt,
-  readerPreviewSuggestionRepairSchema,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../skills/reader-preview-v1/index.js'
@@ -794,111 +790,23 @@ export async function previewDraftForReaderWithDeepSeek(
       input.draft,
       groundingSource,
     )
-  } catch (validationError) {
+  } catch {
     const filteredPreview = filterGroundedReaderSuggestions(
       candidatePreview,
       groundingSource,
     )
-    if (filteredPreview.suggestions.length >= 1) {
-      try {
-        candidatePreview = validateReaderPreviewSkillOutput(
-          filteredPreview,
-          input.draft,
-          groundingSource,
-        )
-        return {
-          preview: candidatePreview,
-          skill: preparedSkill.metadata,
-          model: preparedSkill.model,
-          usage: initialUsage,
-        }
-      } catch {
-        // A suggestion reference error may remain and can use the bounded repair below.
-      }
-    }
-
-    if (!canRepairReaderPreviewSuggestions(validationError)) {
-      throw new DeepSeekOutputValidationError(
-        validationError,
-        initialUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    let repairData: DeepSeekChatCompletionResponse
     try {
-      repairData = await requestDeepSeekChatCompletion(config, {
-        model: preparedSkill.model,
-        messages: [
-          { role: 'system', content: readerPreviewRepairSystemPrompt },
-          {
-            role: 'user',
-            content: buildReaderPreviewRepairUserPrompt(
-              preparedSkill.userPrompt,
-              candidatePreview,
-              getErrorMessage(validationError),
-            ),
-          },
-        ],
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' },
-        max_tokens: Math.min(preparedSkill.maxTokens, 1200),
-        temperature: 0.1,
-        stream: false,
-      })
-    } catch (error) {
-      throw new DeepSeekOutputValidationError(
-        error,
-        initialUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    const combinedUsage = mergeAiUsage(initialUsage, toUsage(repairData.usage))
-    const repairContent = repairData.choices?.[0]?.message?.content
-    if (repairData.error?.message || !repairContent) {
-      throw new DeepSeekOutputValidationError(
-        new Error(
-          repairData.error?.message || 'DeepSeek returned empty repaired reader suggestions.',
-        ),
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    try {
-      const repairedSuggestions = readerPreviewSuggestionRepairSchema.parse(
-        unwrapDeepSeekObject(
-          parseJsonContent(repairContent),
-          ['suggestions'],
-        ),
-      )
-      const repairedPreview = {
-        ...candidatePreview,
-        suggestions: repairedSuggestions.suggestions,
-      }
-      const filteredRepair = filterGroundedReaderSuggestions(
-        repairedPreview,
-        groundingSource,
-      )
       candidatePreview = validateReaderPreviewSkillOutput(
-        filteredRepair.suggestions.length >= 1 ? filteredRepair : repairedPreview,
+        filteredPreview,
         input.draft,
         groundingSource,
       )
     } catch (error) {
       throw new DeepSeekOutputValidationError(
         error,
-        combinedUsage,
+        initialUsage,
         preparedSkill.metadata.promptHash,
       )
-    }
-
-    return {
-      preview: candidatePreview,
-      skill: preparedSkill.metadata,
-      model: preparedSkill.model,
-      usage: combinedUsage,
     }
   }
 

@@ -1060,13 +1060,16 @@ function buildAiReaderPreviewFeedback(
     annotations,
     blocks: [
       {
-        title: '优先修改建议',
+        title: preview.suggestions.length > 0 ? '优先修改建议' : '暂无安全修改建议',
         label: '建议',
         tone: 'suggestion',
-        lines: preview.suggestions.map(
-          (suggestion) =>
-            `${priorityLabels[suggestion.priority]}：${suggestion.instruction} ${suggestion.rationale}`,
-        ),
+        lines:
+          preview.suggestions.length > 0
+            ? preview.suggestions.map(
+                (suggestion) =>
+                  `${priorityLabels[suggestion.priority]}：${suggestion.instruction} ${suggestion.rationale}`,
+              )
+            : ['本次没有足够的原文依据生成修改建议，请先参考上方批注。'],
       },
     ],
   }
@@ -4091,6 +4094,8 @@ function App() {
   }
 
   function handleSendReaderSuggestionsToRewrite() {
+    if (activeReaderPreview?.suggestions.length === 0) return
+
     const suggestionBlock = readerPreviewFeedback.blocks.find((block) => block.tone === 'suggestion')
     const suggestionLines = suggestionBlock?.lines ?? []
 
@@ -6348,9 +6353,15 @@ function App() {
                   </div>
                   <div className="shrink-0 border-t border-[var(--border)] bg-[rgba(236,239,243,0.62)] px-5 py-4 lg:px-6">
                     <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                      <Button variant="secondary" onClick={handleSendReaderSuggestionsToRewrite}>
+                      <Button
+                        variant="secondary"
+                        disabled={activeReaderPreview?.suggestions.length === 0}
+                        onClick={handleSendReaderSuggestionsToRewrite}
+                      >
                         <PenLine className="h-4 w-4" />
-                        带着建议回到编辑细调
+                        {activeReaderPreview?.suggestions.length === 0
+                          ? '暂无可带回建议'
+                          : '带着建议回到编辑细调'}
                       </Button>
                       <Button onClick={handleFinalizeReaderPreview}>
                         <CheckCircle2 className="h-4 w-4" />
