@@ -164,7 +164,7 @@ export const aiReaderPreviewResultSchema = z
   .object({
     audienceSummary: z.string().trim().min(1).max(800),
     annotations: z.array(aiReaderPreviewAnnotationSchema).min(2).max(6),
-    suggestions: z.array(aiReaderPreviewSuggestionSchema).min(1).max(4),
+    suggestions: z.array(aiReaderPreviewSuggestionSchema).max(4),
   })
   .superRefine((value, context) => {
     const annotationIds = new Set<string>()

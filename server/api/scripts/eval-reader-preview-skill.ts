@@ -15,9 +15,7 @@ import {
 } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
-  buildReaderPreviewRepairUserPrompt,
   filterGroundedReaderSuggestions,
-  readerPreviewRepairSystemPrompt,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../src/skills/reader-preview-v1/index.js'
@@ -93,7 +91,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'target-reader-preview')
-assert.equal(prepared.metadata.version, '1.0.4')
+assert.equal(prepared.metadata.version, '1.0.5')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
@@ -179,24 +177,14 @@ const invalidGroundingOutput = aiReaderPreviewResultSchema.parse({
         : { ...suggestion, instruction: '增加两分钟的行动示例。' },
   ),
 })
-const repairPrompt = JSON.parse(
-  buildReaderPreviewRepairUserPrompt(
-    prepared.userPrompt,
-    invalidGroundingOutput,
-    'unsupported numeric claims: 5分钟, 15%',
-  ),
-) as {
-  task: string
-  validationError: string
-  availableAnnotations: Array<{ id: string }>
-  candidateSuggestions: unknown[]
-  candidatePreview?: unknown
-}
-assert.equal(repairPrompt.task, 'repair_reader_preview_suggestions')
-assert.ok(repairPrompt.validationError.includes('15%'))
-assert.equal(repairPrompt.availableAnnotations.length, expectedOutput.annotations.length)
-assert.equal(repairPrompt.candidateSuggestions.length, expectedOutput.suggestions.length)
-assert.equal(repairPrompt.candidatePreview, undefined)
+const abstainedOutput = filterGroundedReaderSuggestions(
+  invalidGroundingOutput,
+  groundingSource,
+)
+assert.equal(abstainedOutput.suggestions.length, 0)
+assert.doesNotThrow(() =>
+  validateReaderPreviewSkillOutput(abstainedOutput, draft, groundingSource),
+)
 
 const partiallyInvalidOutput = aiReaderPreviewResultSchema.parse({
   ...expectedOutput,
@@ -274,38 +262,20 @@ try {
   globalThis.fetch = originalFetch
 }
 
-const mockedRequests: Array<{ messages: Array<{ content: string }> }> = []
-const repairedSuggestionsEnvelope = JSON.stringify(
-  { repairedOutput: { payload: { suggestions: expectedOutput.suggestions } } },
-  null,
-  2,
-)
-const malformedRepairedSuggestions = repairedSuggestionsEnvelope.replace(/},(\s*){/g, '}$1{')
-assert.notEqual(malformedRepairedSuggestions, repairedSuggestionsEnvelope)
-let responseIndex = 0
+const abstentionRequests: unknown[] = []
 globalThis.fetch = async (_request, init) => {
-  mockedRequests.push(JSON.parse(String(init?.body)))
-  const first = responseIndex === 0
-  responseIndex += 1
+  abstentionRequests.push(JSON.parse(String(init?.body)))
   return new Response(
     JSON.stringify({
-      choices: [{
-        message: {
-          content: first
-            ? JSON.stringify(invalidGroundingOutput)
-            : malformedRepairedSuggestions,
-        },
-      }],
-      usage: first
-        ? { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 }
-        : { prompt_tokens: 300, completion_tokens: 250, total_tokens: 550 },
+      choices: [{ message: { content: JSON.stringify(invalidGroundingOutput) } }],
+      usage: { prompt_tokens: 400, completion_tokens: 200, total_tokens: 600 },
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   )
 }
 
 try {
-  const repaired = await previewDraftForReaderWithDeepSeek(
+  const abstained = await previewDraftForReaderWithDeepSeek(
     readConfig({
       APP_ENV: 'local',
       AI_FEATURE_ENABLED: 'true',
@@ -314,18 +284,13 @@ try {
     }),
     input,
   )
-  assert.deepEqual(repaired.preview, expectedOutput)
-  assert.deepEqual(repaired.usage, {
-    promptTokens: 700,
-    completionTokens: 450,
-    totalTokens: 1150,
+  assert.deepEqual(abstained.preview, abstainedOutput)
+  assert.deepEqual(abstained.usage, {
+    promptTokens: 400,
+    completionTokens: 200,
+    totalTokens: 600,
   })
-  assert.equal(mockedRequests.length, 2)
-  assert.equal(
-    mockedRequests[1]?.messages[0]?.content,
-    readerPreviewRepairSystemPrompt,
-  )
-  assert.equal((mockedRequests[1] as { max_tokens?: number }).max_tokens, 1200)
+  assert.equal(abstentionRequests.length, 1)
 } finally {
   globalThis.fetch = originalFetch
 }
@@ -413,6 +378,6 @@ console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`grounded annotations: ${expectedOutput.annotations.length}`)
 console.log('real-research claim: forbidden')
-console.log('suggestions-only grounding repair: simulated and usage-combined')
+console.log('unsafe suggestions: filtered with safe abstention')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')
