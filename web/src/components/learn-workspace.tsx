@@ -57,6 +57,7 @@ type LearnWorkspaceProps = {
   libraryError?: string
   workflowSteps: WorkflowTitleMenuStep[]
   analysisError?: string
+  analysisPhase?: 'profile' | 'analysis' | null
   analysisWaitSeconds?: number
   isAnalyzing?: boolean
   isStreaming: boolean
@@ -576,8 +577,13 @@ function TypingBlock({
 }: {
   title?: string
   text?: string
-  variant?: 'analysis' | 'dots'
+  variant?: 'analysis' | 'profile' | 'dots'
 }) {
+  const progressLabels =
+    variant === 'profile'
+      ? ['归纳素材共性', '理解喜欢原因', '更新写作画像']
+      : ['读取参考文案', '提炼写作结构', '整理偏好判断']
+
   return (
     <article
       aria-live="polite"
@@ -598,9 +604,9 @@ function TypingBlock({
         {text ? (
           <p className="mb-3 text-[length:var(--ui-text-body)] leading-7 text-[var(--foreground)]">{text}</p>
         ) : null}
-        {variant === 'analysis' ? (
+        {variant !== 'dots' ? (
           <div className="grid gap-3" aria-hidden="true">
-            {['读取参考文案', '提炼写作结构', '整理偏好判断'].map((label, index) => (
+            {progressLabels.map((label, index) => (
               <div key={label} className="grid gap-1.5">
                 <div className="flex items-center gap-2 text-xs font-semibold text-[var(--soft-foreground)]">
                   <span
@@ -647,6 +653,7 @@ export function LearnWorkspace({
   libraryError = '',
   workflowSteps,
   analysisError = '',
+  analysisPhase = null,
   analysisWaitSeconds = 0,
   isAnalyzing = false,
   isStreaming,
@@ -955,6 +962,14 @@ export function LearnWorkspace({
 
     if (isAnalyzing) {
       const isLongWait = analysisWaitSeconds >= 30
+      if (analysisPhase === 'profile') {
+        return {
+          title: isLongWait ? 'AI 正在学习' : '正在学习你的写作方式',
+          text: '正在整理素材共性、标注理由和历史反馈。',
+          variant: 'profile' as const,
+        }
+      }
+
       return {
         title: isLongWait ? 'AI 正在处理' : '正在拆解文案',
         text: '正在整理结构和偏好。',
@@ -988,7 +1003,7 @@ export function LearnWorkspace({
       title: '正在整理回答',
       variant: 'dots' as const,
     }
-  }, [analysisMessages.length, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
+  }, [analysisMessages.length, analysisPhase, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
 
   const filterControl = (
     <div className="relative">
@@ -1477,10 +1492,10 @@ export function LearnWorkspace({
                         {isAnalyzing ? (
                           <>
                             <span className="draft-thinking-dot h-2 w-2 rounded-full bg-current" />
-                            分析中...
+                            {analysisPhase === 'profile' ? '学习中...' : '分析中...'}
                           </>
                         ) : (
-                          analysisError ? '重试分析' : '开始分析'
+                          analysisError ? '重新开始' : '开始分析'
                         )}
                       </Button>
                     </div>
