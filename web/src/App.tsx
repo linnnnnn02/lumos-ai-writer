@@ -18,6 +18,7 @@ import type {
   AiRewriteSuggestion,
   AiReaderPreviewResult,
   AiUsage,
+  BuildWritingProfileResponse,
   CreateFeedbackMemoryRequest,
   ProjectLength,
   SavedFolderRecord,
@@ -750,6 +751,31 @@ function buildAnalysisChat(context: AiAnalysisResult): ChatMessage[] {
   ]
 }
 
+function buildWritingProfileChat(response: BuildWritingProfileResponse): ChatMessage {
+  const { profile, revision, reused } = response
+  const evidenceText = `${profile.evidenceCount} 条素材与反馈`
+  const keepText = profile.mustKeep.slice(0, 2).join('；')
+  const avoidText = profile.mustAvoid.slice(0, 2).join('；')
+  const questionText = profile.openQuestions[0]
+  const lines = [
+    profile.summary,
+    reused
+      ? `${evidenceText}没有变化，这次沿用第 ${revision.version} 版写作画像。`
+      : `已根据${evidenceText}更新为第 ${revision.version} 版写作画像。`,
+    keepText ? `接下来会保留：${keepText}。` : '接下来暂时没有新增必须保留的规则。',
+    avoidText ? `接下来会避开：${avoidText}。` : '暂时没有明确需要避开的写法。',
+    questionText ? `还需要继续确认：${questionText}` : '目前没有待确认的问题。',
+  ]
+
+  return {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    stage: 'analysis',
+    title: reused ? '已读取你的写作画像' : '已更新你的写作画像',
+    lines,
+  }
+}
+
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
@@ -1102,6 +1128,7 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [isChatStreaming, setIsChatStreaming] = useState(false)
   const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
+  const [analysisPhase, setAnalysisPhase] = useState<'profile' | 'analysis' | null>(null)
   const [analysisWaitStartedAt, setAnalysisWaitStartedAt] = useState<number | null>(null)
   const [draftWaitStartedAt, setDraftWaitStartedAt] = useState<number | null>(null)
   const [aiWaitTick, setAiWaitTick] = useState(Date.now())
@@ -2455,8 +2482,11 @@ function App() {
       delete next[conversationId]
       return next
     })
+    let failedPhase: 'profile' | 'analysis' | null = null
+
     try {
       let nextAnalysis = fallbackAnalysis
+      let profileMessage: ChatMessage | null = null
 
       if (isUsingCloudLibrary && cloudLibrary.status === 'ready') {
         const accessToken = await getCurrentAccessToken()
@@ -2464,22 +2494,12 @@ function App() {
           throw new Error('登录状态已过期，请重新登录后再开始分析。')
         }
 
-        const response = await analyzeReferences(accessToken, {
-          projectName: activeProject.name,
-          folderName: selectedFolderName,
-          topic: activeConversation.topic,
-          targetAudience: activeConversation.targetAudience,
-          length: effectiveLength,
-          notes: selectedNotes,
-          snippets: selectedSnippets,
-        })
-        nextAnalysis = response.analysis
-        setAnalysisUsageByConversation((current) => ({
-          ...current,
-          [conversationId]: response.usage,
-        }))
-
-        void buildWritingProfile(accessToken, {
+        failedPhase = 'profile'
+        setAnalysisPhase(failedPhase)
+        const noteIdByUrl = new Map(
+          libraryNotes.map((note) => [normalizeNoteUrl(note.sourceUrl), note.id]),
+        )
+        const profileResponse = await buildWritingProfile(accessToken, {
           scope: 'account',
           libraryEvidence: {
             notes: libraryNotes.slice(0, 60).map((note) => ({
@@ -2489,6 +2509,7 @@ function App() {
             })),
             snippets: librarySnippets.slice(0, 240).map((snippet) => ({
               id: snippet.id,
+              noteId: noteIdByUrl.get(normalizeNoteUrl(snippet.noteUrl)),
               selectedText: snippet.selectedText,
               reasonText: snippet.reasonText,
               colorTagName: snippet.colorTagName,
@@ -2503,12 +2524,31 @@ function App() {
             source: memory.source,
             createdAt: memory.createdAt,
           })),
-        }).catch((profileError) => {
-          console.warn('Writing profile update was skipped.', profileError)
         })
+        profileMessage = buildWritingProfileChat(profileResponse)
+
+        failedPhase = 'analysis'
+        setAnalysisPhase(failedPhase)
+        const response = await analyzeReferences(accessToken, {
+          projectName: activeProject.name,
+          folderName: selectedFolderName,
+          topic: activeConversation.topic,
+          targetAudience: activeConversation.targetAudience,
+          length: effectiveLength,
+          notes: selectedNotes,
+          snippets: selectedSnippets,
+        })
+        nextAnalysis = response.analysis
+        setAnalysisUsageByConversation((current) => ({
+          ...current,
+          [conversationId]: response.usage,
+        }))
       }
 
-      const analysisMessages = buildAnalysisChat(nextAnalysis)
+      const analysisMessages = [
+        ...(profileMessage ? [profileMessage] : []),
+        ...buildAnalysisChat(nextAnalysis),
+      ]
       setAnalysisByConversation((current) => ({
         ...current,
         [conversationId]: nextAnalysis,
@@ -2527,9 +2567,12 @@ function App() {
       }
     } catch (error) {
       const message = getErrorMessage(error)
-      const friendlyMessage = message.includes('DeepSeek API key')
-        ? 'AI 服务暂时不可用，请稍后重试。'
-        : message
+      const isProfileFailure = failedPhase === 'profile'
+      const friendlyMessage = isProfileFailure
+        ? '这次没有完成写作画像学习，请重试。你的素材和已有画像不会丢失。'
+        : message.includes('DeepSeek API key')
+          ? 'AI 服务暂时不可用，请稍后重试。'
+          : message
       setAnalysisErrorByConversation((current) => ({
         ...current,
         [conversationId]: friendlyMessage,
@@ -2543,7 +2586,7 @@ function App() {
             id: crypto.randomUUID(),
             role: 'assistant',
             stage: 'setup',
-            title: 'AI 暂时不可用',
+            title: isProfileFailure ? '写作画像学习未完成' : 'AI 暂时不可用',
             lines: [friendlyMessage],
           },
         ],
@@ -2551,6 +2594,7 @@ function App() {
     } finally {
       setIsChatStreaming(false)
       setAnalysisPendingConversationId((current) => (current === conversationId ? '' : current))
+      setAnalysisPhase(null)
       setAnalysisWaitStartedAt(null)
     }
   }
@@ -5112,6 +5156,7 @@ function App() {
         workflowSteps={workflowSteps}
         analysisError={analysisError}
         analysisWaitSeconds={analysisWaitSeconds}
+        analysisPhase={analysisPhase}
         isAnalyzing={isAnalyzing}
         isStreaming={isChatStreaming}
         projectName={activeProject.name}
