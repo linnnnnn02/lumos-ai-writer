@@ -522,26 +522,27 @@ export function AuthStatus({ className }: AuthStatusProps) {
 
       {dialogOpen ? (
         <div
-          className="ui-dialog-backdrop fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,21,16,0.18)] px-4 py-8 backdrop-blur-md"
+          className="ui-dialog-backdrop fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-[rgba(28,21,16,0.18)] px-4 py-4 backdrop-blur-md sm:py-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="auth-dialog-title"
           onClick={closeDialog}
         >
           <div
-            className="ui-dialog-card w-full max-w-[27rem] rounded-[var(--ui-radius-dialog)] border border-white/78 bg-white/94 p-5 shadow-[var(--shadow-elevated)]"
+            data-testid="auth-dialog-card"
+            className="ui-dialog-card flex h-[min(36rem,calc(100dvh-2rem))] w-full max-w-[29rem] flex-col overflow-hidden rounded-[var(--ui-radius-dialog)] border border-white/78 bg-white/94 p-0 shadow-[var(--shadow-elevated)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-                <h2 id="auth-dialog-title" className="mt-4 text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+            <div className="flex shrink-0 items-start gap-3 border-b border-black/[0.045] px-5 py-5 sm:px-6">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <h2 id="auth-dialog-title" className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                   {getAuthTitle(view)}
                 </h2>
                 {description ? (
-                  <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted-foreground)]">
+                  <p className="mt-1 max-w-sm text-sm leading-5 text-[var(--muted-foreground)]">
                     {description}
                   </p>
                 ) : null}
@@ -550,7 +551,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-[var(--ui-control-height-md)]"
+                  className="size-[var(--ui-control-height-sm)] shrink-0"
                   aria-label="关闭登录窗口"
                   onClick={closeDialog}
                 >
@@ -559,8 +560,9 @@ export function AuthStatus({ className }: AuthStatusProps) {
               ) : null}
             </div>
 
-            {view === 'signin' || view === 'signup' ? (
-              <div className="mt-5 grid grid-cols-2 gap-1 rounded-full bg-[var(--secondary)] p-1">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">
+              {view === 'signin' || view === 'signup' ? (
+              <div className="mt-4 grid shrink-0 grid-cols-2 gap-1 rounded-full bg-[var(--secondary)] p-1">
                 <Button
                   type="button"
                   variant="ghost"
@@ -590,10 +592,10 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   注册
                 </Button>
               </div>
-            ) : null}
+              ) : null}
 
-            {view === 'signup-sent' || view === 'recovery-sent' ? (
-              <div className="mt-5 grid gap-3">
+              {view === 'signup-sent' || view === 'recovery-sent' ? (
+              <div className="mt-4 grid gap-3">
                 <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-4 py-4 text-sm leading-6 text-[#17675b]" role="status">
                   <div className="flex items-center gap-2 font-semibold">
                     <CheckCircle2 className="h-4 w-4" />
@@ -626,8 +628,8 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   返回登录
                 </Button>
               </div>
-            ) : view === 'password-updated' ? (
-              <div className="mt-5 grid gap-3">
+              ) : view === 'password-updated' ? (
+              <div className="mt-4 grid gap-3">
                 <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-4 py-4 text-sm leading-6 text-[#17675b]" role="status">
                   <div className="flex items-center gap-2 font-semibold">
                     <CheckCircle2 className="h-4 w-4" />
@@ -647,8 +649,8 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   退出并返回登录
                 </Button>
               </div>
-            ) : (
-              <form className="mt-5 grid gap-[var(--ui-form-gap)]" onSubmit={handleSubmit}>
+              ) : (
+              <form className="mt-4 grid content-start gap-[var(--ui-form-gap)]" onSubmit={handleSubmit}>
                 {view !== 'password-update' ? (
                   <label className="grid gap-[var(--ui-field-gap)]">
                     <span className="text-sm font-medium text-[var(--muted-foreground)]">邮箱</span>
@@ -740,10 +742,10 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   </Button>
                 ) : null}
               </form>
-            )}
+              )}
 
-            {oauthProviders.length > 0 && (view === 'signin' || view === 'signup') ? (
-              <div className="mt-5 grid gap-3">
+              {oauthProviders.length > 0 && (view === 'signin' || view === 'signup') ? (
+              <div className="mt-auto grid gap-3 pt-5">
                 <div className="flex items-center gap-3">
                   <span className="h-px flex-1 bg-[var(--border)]" />
                   <span className="text-xs font-medium text-[var(--soft-foreground)]">或</span>
@@ -764,7 +766,8 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   ))}
                 </div>
               </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
