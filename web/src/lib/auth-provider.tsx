@@ -26,10 +26,14 @@ type AuthState = {
   error: string
 }
 
+const RECOVERY_SESSION_GRACE_MS = 4_000
+const RECOVERY_SESSION_POLL_MS = 50
+
 function getRecoveryUrlState() {
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const searchParams = new URLSearchParams(window.location.search)
   const type = hashParams.get('type') || searchParams.get('type')
+  const tokenHash = hashParams.get('token_hash') || searchParams.get('token_hash')
   const errorCode = hashParams.get('error_code') || searchParams.get('error_code')
   const errorDescription =
     hashParams.get('error_description') || searchParams.get('error_description') || ''
@@ -39,12 +43,25 @@ function getRecoveryUrlState() {
 
   return {
     isRecovery: type === 'recovery' || hasRecoveryError,
+    tokenHash: type === 'recovery' ? tokenHash : null,
     error: hasRecoveryError
       ? errorCode === 'otp_expired'
         ? '这个重置链接已失效或已过期，请重新发送邮件。'
         : '这个重置链接无法使用，请重新发送邮件。'
       : '',
   }
+}
+
+async function getSessionAfterRecoveryRedirect(client: SupabaseClient) {
+  const deadline = Date.now() + RECOVERY_SESSION_GRACE_MS
+
+  do {
+    const { data, error } = await client.auth.getSession()
+    if (error || data.session) return { session: data.session, error }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, RECOVERY_SESSION_POLL_MS))
+  } while (Date.now() < deadline)
+
+  return { session: null, error: null }
 }
 
 function clearRecoveryUrl() {
@@ -65,8 +82,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const statusRef = useRef<AuthSessionStatus>('initializing')
   const recoveryIntentRef = useRef(false)
-  const recoveryUrlRef = useRef<ReturnType<typeof getRecoveryUrlState> | null>(null)
-  recoveryUrlRef.current ??= getRecoveryUrlState()
+  const [initialRecoveryUrl] = useState(getRecoveryUrlState)
+  const recoveryUrlRef = useRef(initialRecoveryUrl)
+  const recoveryTokenHashRef = useRef(initialRecoveryUrl.tokenHash)
+  const recoveryExchangeStartedRef = useRef(false)
 
   const commitState = useCallback((next: AuthState) => {
     statusRef.current = next.status
@@ -104,11 +123,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const authListener = client.auth.onAuthStateChange((event, session) => {
           if (!mounted) return
 
-          if (event === 'SIGNED_OUT' || !session) {
+          const awaitingManualRecovery =
+            Boolean(recoveryTokenHashRef.current) && !recoveryExchangeStartedRef.current
+          if (recoveryUrlRef.current?.error || awaitingManualRecovery) return
+
+          if (event === 'SIGNED_OUT') {
+            if (recoveryIntentRef.current) return
             recoveryIntentRef.current = false
             commitState({ status: 'guest', client, config, rawSession: null, error: '' })
             return
           }
+
+          if (!session) return
 
           if (event === 'PASSWORD_RECOVERY') {
             recoveryIntentRef.current = true
@@ -142,19 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         unsubscribe = () => authListener.data.subscription.unsubscribe()
 
-        const { data, error } = await client.auth.getSession()
-        if (!mounted) return
-        if (error) {
-          commitState({
-            status: 'error',
-            client,
-            config,
-            rawSession: null,
-            error: error.message,
-          })
-          return
-        }
-
         if (recoveryUrl.error) {
           commitState({
             status: 'recovery-error',
@@ -166,13 +179,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        if (recoveryIntentRef.current) {
+        if (recoveryUrl.tokenHash) {
           commitState({
-            status: data.session ? 'recovery' : 'recovery-error',
+            status: 'recovery-confirmation',
             client,
             config,
-            rawSession: data.session,
-            error: data.session
+            rawSession: null,
+            error: '',
+          })
+          return
+        }
+
+        const sessionResult = recoveryIntentRef.current
+          ? await getSessionAfterRecoveryRedirect(client)
+          : await client.auth.getSession().then(({ data, error }) => ({
+              session: data.session,
+              error,
+            }))
+        if (!mounted) return
+        if (sessionResult.error) {
+          commitState({
+            status: 'error',
+            client,
+            config,
+            rawSession: null,
+            error: sessionResult.error.message,
+          })
+          return
+        }
+
+        if (recoveryIntentRef.current) {
+          commitState({
+            status: sessionResult.session ? 'recovery' : 'recovery-error',
+            client,
+            config,
+            rawSession: sessionResult.session,
+            error: sessionResult.session
               ? ''
               : '这个重置链接已失效或已过期，请重新发送邮件。',
           })
@@ -180,10 +222,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         commitState({
-          status: data.session ? 'authenticated' : 'guest',
+          status: sessionResult.session ? 'authenticated' : 'guest',
           client,
           config,
-          rawSession: data.session,
+          rawSession: sessionResult.session,
           error: '',
         })
       } catch (error) {
@@ -205,6 +247,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribe?.()
     }
   }, [commitState])
+
+  const confirmPasswordRecovery = useCallback(async () => {
+    const tokenHash = recoveryTokenHashRef.current
+    if (!state.client || !tokenHash || statusRef.current !== 'recovery-confirmation') {
+      return '这个重置链接无法使用，请重新发送邮件。'
+    }
+
+    recoveryExchangeStartedRef.current = true
+    recoveryIntentRef.current = true
+    const { data, error } = await state.client.auth.verifyOtp({
+      type: 'recovery',
+      token_hash: tokenHash,
+    })
+
+    if (error || !data.session) {
+      recoveryExchangeStartedRef.current = false
+      commitState({
+        ...state,
+        status: 'recovery-error',
+        rawSession: null,
+        error: '这个重置链接已失效或已过期，请重新发送邮件。',
+      })
+      return error?.message || '这个重置链接无法使用，请重新发送邮件。'
+    }
+
+    recoveryTokenHashRef.current = null
+    clearRecoveryUrl()
+    commitState({
+      ...state,
+      status: 'recovery',
+      rawSession: data.session,
+      error: '',
+    })
+    return null
+  }, [commitState, state])
 
   const completePasswordRecovery = useCallback(
     async (password: string) => {
@@ -254,6 +331,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     recoveryIntentRef.current = false
+    recoveryTokenHashRef.current = null
+    recoveryExchangeStartedRef.current = false
     clearRecoveryUrl()
     commitState({
       ...state,
@@ -266,6 +345,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const cancelPasswordRecovery = useCallback(async () => {
     recoveryIntentRef.current = false
+    recoveryTokenHashRef.current = null
+    recoveryExchangeStartedRef.current = false
     clearRecoveryUrl()
     if (state.client) await state.client.auth.signOut()
     commitState({
@@ -289,6 +370,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       config: state.config,
       session: state.status === 'authenticated' ? state.rawSession : null,
       error: state.error,
+      confirmPasswordRecovery,
       completePasswordRecovery,
       finishPasswordRecovery,
       cancelPasswordRecovery,
@@ -296,6 +378,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       cancelPasswordRecovery,
+      confirmPasswordRecovery,
       completePasswordRecovery,
       finishPasswordRecovery,
       signOut,
