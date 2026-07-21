@@ -8,6 +8,7 @@ type SupabaseBrowserState = {
 }
 
 let cachedClient: Promise<SupabaseBrowserState> | null = null
+let authorizedSession: Session | null = null
 
 function getEnvConfig(): PublicConfigResponse | null {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
@@ -49,13 +50,11 @@ export async function getSupabaseBrowserClient(): Promise<SupabaseBrowserState> 
 }
 
 export async function getCurrentAccessToken() {
-  const { client } = await getSupabaseBrowserClient()
-  if (!client) return null
+  return authorizedSession?.access_token ?? null
+}
 
-  const { data, error } = await client.auth.getSession()
-  if (error) throw new Error(error.message)
-
-  return data.session?.access_token ?? null
+export function setAuthorizedSessionForRuntime(session: Session | null) {
+  authorizedSession = session
 }
 
 export type { OAuthProvider, Session }

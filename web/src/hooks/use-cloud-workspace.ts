@@ -10,10 +10,7 @@ import {
   getWorkspace,
   syncWorkspace,
 } from '@/lib/api-client'
-import {
-  getCurrentAccessToken,
-  getSupabaseBrowserClient,
-} from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
 
 type CloudWorkspaceStatus = 'initializing' | 'guest' | 'loading' | 'ready' | 'error'
 
@@ -35,6 +32,9 @@ function getErrorMessage(error: unknown) {
 }
 
 export function useCloudWorkspace(): CloudWorkspaceState {
+  const { status: authStatus, session } = useAuth()
+  const accessToken = session?.access_token ?? ''
+  const authenticatedUserId = session?.user.id ?? ''
   const [refreshVersion, setRefreshVersion] = useState(0)
   const [status, setStatus] = useState<CloudWorkspaceStatus>('initializing')
   const [userId, setUserId] = useState('')
@@ -50,13 +50,14 @@ export function useCloudWorkspace(): CloudWorkspaceState {
   }, [])
 
   const save = useCallback(async (input: SyncWorkspaceRequest) => {
-    const token = await getCurrentAccessToken()
-    if (!token) throw new Error('登录状态已过期，请重新登录后再保存工作区。')
+    if (authStatus !== 'authenticated' || !accessToken) {
+      throw new Error('登录状态已过期，请重新登录后再保存工作区。')
+    }
 
     setIsSaving(true)
     setError('')
     try {
-      const response = await syncWorkspace(token, input)
+      const response = await syncWorkspace(accessToken, input)
       setSavedAt(response.syncedAt)
     } catch (nextError) {
       setError(getErrorMessage(nextError))
@@ -64,26 +65,26 @@ export function useCloudWorkspace(): CloudWorkspaceState {
     } finally {
       setIsSaving(false)
     }
-  }, [])
+  }, [accessToken, authStatus])
 
   const remember = useCallback(async (input: CreateFeedbackMemoryRequest) => {
-    const token = await getCurrentAccessToken()
-    if (!token) throw new Error('登录状态已过期，请重新登录后再记录偏好。')
+    if (authStatus !== 'authenticated' || !accessToken) {
+      throw new Error('登录状态已过期，请重新登录后再记录偏好。')
+    }
 
     setError('')
     try {
-      const response = await createFeedbackMemory(token, input)
+      const response = await createFeedbackMemory(accessToken, input)
       setFeedbackMemories((current) => [response.memory, ...current])
       return response.memory
     } catch (nextError) {
       setError(getErrorMessage(nextError))
       throw nextError
     }
-  }, [])
+  }, [accessToken, authStatus])
 
   useEffect(() => {
     let isMounted = true
-    let unsubscribe: (() => void) | null = null
 
     function setGuestState() {
       requestIdRef.current += 1
@@ -116,50 +117,16 @@ export function useCloudWorkspace(): CloudWorkspaceState {
       }
     }
 
-    async function initialize() {
-      try {
-        const next = await getSupabaseBrowserClient()
-        if (!isMounted) return
-        if (!next.client) {
-          setGuestState()
-          return
-        }
-
-        const { data, error: sessionError } = await next.client.auth.getSession()
-        if (!isMounted) return
-        if (sessionError) {
-          setStatus('error')
-          setError(sessionError.message)
-          return
-        }
-
-        if (data.session?.access_token) {
-          void load(data.session.access_token, data.session.user.id)
-        } else {
-          setGuestState()
-        }
-
-        const listener = next.client.auth.onAuthStateChange((_event, session) => {
-          if (session?.access_token) {
-            void load(session.access_token, session.user.id)
-          } else {
-            setGuestState()
-          }
-        })
-        unsubscribe = () => listener.data.subscription.unsubscribe()
-      } catch (nextError) {
-        if (!isMounted) return
-        setStatus('error')
-        setError(getErrorMessage(nextError))
-      }
+    if (authStatus === 'authenticated' && accessToken && authenticatedUserId) {
+      void load(accessToken, authenticatedUserId)
+    } else if (authStatus !== 'initializing') {
+      setGuestState()
     }
 
-    void initialize()
     return () => {
       isMounted = false
-      unsubscribe?.()
     }
-  }, [refreshVersion])
+  }, [accessToken, authStatus, authenticatedUserId, refreshVersion])
 
   return {
     status,

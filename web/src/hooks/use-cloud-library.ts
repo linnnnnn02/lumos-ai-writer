@@ -14,7 +14,7 @@ import {
   getSnippets,
   getTrash,
 } from '@/lib/api-client'
-import { getSupabaseBrowserClient } from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
 
 type CloudLibraryStatus = 'initializing' | 'guest' | 'loading' | 'ready' | 'error'
 
@@ -48,6 +48,8 @@ function normalizeCloudNotes(notes: NoteDto[]): SavedNoteRecord[] {
 }
 
 export function useCloudLibrary(): CloudLibraryState {
+  const { status: authStatus, session } = useAuth()
+  const accessToken = session?.access_token ?? ''
   const [refreshVersion, setRefreshVersion] = useState(0)
   const refresh = useCallback(() => {
     setRefreshVersion((current) => current + 1)
@@ -64,7 +66,6 @@ export function useCloudLibrary(): CloudLibraryState {
 
   useEffect(() => {
     let isMounted = true
-    let unsubscribe: (() => void) | null = null
 
     async function loadLibrary(accessToken: string) {
       const requestId = requestIdRef.current + 1
@@ -125,70 +126,24 @@ export function useCloudLibrary(): CloudLibraryState {
       })
     }
 
-    async function initialize() {
-      try {
-        const next = await getSupabaseBrowserClient()
-        if (!isMounted) return
-
-        if (!next.client) {
-          setGuestState()
-          return
-        }
-
-        const { data, error } = await next.client.auth.getSession()
-        if (!isMounted) return
-
-        if (error) {
-          setState({
-            status: 'error',
-            user: null,
-            ...emptyLibrary,
-            error: error.message,
-            refresh,
-          })
-          return
-        }
-
-        if (data.session?.access_token) {
-          void loadLibrary(data.session.access_token)
-        } else {
-          setGuestState()
-        }
-
-        const listener = next.client.auth.onAuthStateChange((_event, session) => {
-          if (session?.access_token) {
-            void loadLibrary(session.access_token)
-          } else {
-            setGuestState()
-          }
-        })
-        unsubscribe = () => listener.data.subscription.unsubscribe()
-      } catch (error) {
-        if (!isMounted) return
-        setState({
-          status: 'error',
-          user: null,
-          ...emptyLibrary,
-          error: getErrorMessage(error),
-          refresh,
-        })
-      }
-    }
-
     function refreshOnFocus() {
       if (!accessTokenRef.current) return
       void loadLibrary(accessTokenRef.current)
     }
 
-    void initialize()
+    if (authStatus === 'authenticated' && accessToken) {
+      void loadLibrary(accessToken)
+    } else if (authStatus !== 'initializing') {
+      setGuestState()
+    }
+
     window.addEventListener('focus', refreshOnFocus)
 
     return () => {
       isMounted = false
-      unsubscribe?.()
       window.removeEventListener('focus', refreshOnFocus)
     }
-  }, [refresh, refreshVersion])
+  }, [accessToken, authStatus, refresh, refreshVersion])
 
   return { ...state, refresh }
 }
