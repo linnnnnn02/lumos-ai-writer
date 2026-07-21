@@ -470,20 +470,12 @@ export function AuthStatus({ className }: AuthStatusProps) {
               ) : null}
               {authMode !== 'recovery-request' ? (
                 <div className="grid gap-[var(--ui-field-gap)]">
-                  <div className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--muted-foreground)]">
-                    <label htmlFor="auth-password">
-                      {authMode === 'password-update' ? '新密码' : '密码'}
-                    </label>
-                    {authMode === 'signin' ? (
-                      <button
-                        type="button"
-                        className="font-semibold text-[var(--accent-strong)] hover:underline"
-                        onClick={() => switchAuthMode('recovery-request')}
-                      >
-                        忘记密码？
-                      </button>
-                    ) : null}
-                  </div>
+                  <label
+                    htmlFor="auth-password"
+                    className="text-sm font-medium text-[var(--muted-foreground)]"
+                  >
+                    {authMode === 'password-update' ? '新密码' : '密码'}
+                  </label>
                   <Input
                     id="auth-password"
                     autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
@@ -493,6 +485,22 @@ export function AuthStatus({ className }: AuthStatusProps) {
                     placeholder="至少 6 位"
                   />
                 </div>
+              ) : null}
+              {authMode === 'signin' ? (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  className="h-auto w-full justify-between whitespace-normal px-3 py-2.5 text-left shadow-none"
+                  onClick={() => switchAuthMode('recovery-request')}
+                >
+                  <span className="grid gap-0.5">
+                    <span>忘记密码？</span>
+                    <span className="text-xs font-normal text-[var(--muted-foreground)]">
+                      发送链接到注册邮箱，重新设置密码
+                    </span>
+                  </span>
+                  <Mail className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+                </Button>
               ) : null}
               {authMode === 'password-update' ? (
                 <label className="grid gap-[var(--ui-field-gap)]">
