@@ -24,6 +24,7 @@ type AuthView =
   | 'signup-sent'
   | 'recovery-request'
   | 'recovery-sent'
+  | 'recovery-confirmation'
   | 'password-update'
   | 'password-updated'
   | 'recovery-error'
@@ -93,6 +94,7 @@ function getAuthTitle(view: AuthView) {
   if (view === 'signup-sent') return '确认邮件已发送'
   if (view === 'recovery-request') return '找回密码'
   if (view === 'recovery-sent') return '重置邮件已发送'
+  if (view === 'recovery-confirmation') return '确认重置密码'
   if (view === 'password-update') return '设置新密码'
   if (view === 'password-updated') return '密码修改成功'
   return '重置链接已失效'
@@ -102,6 +104,7 @@ function getAuthDescription(view: AuthView) {
   if (view === 'signup-sent') return '账号尚未确认。请打开邮件中的链接，再返回 Lumos 登录。'
   if (view === 'recovery-request') return '我们会向注册邮箱发送重置链接，不会立即修改密码。'
   if (view === 'recovery-sent') return '密码尚未修改。请打开邮件中的链接，然后设置新密码。'
+  if (view === 'recovery-confirmation') return '确认是你本人打开了邮件，再进入新密码设置。'
   if (view === 'password-update') return '保存成功前，你仍处于账号恢复状态，不会进入项目。'
   if (view === 'password-updated') return '新密码已经生效。确认进入后才会加载你的项目和文案库。'
   if (view === 'recovery-error') return '重新发送一封邮件，使用最新链接继续。'
@@ -152,6 +155,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
     config,
     session,
     error: authError,
+    confirmPasswordRecovery,
     completePasswordRecovery,
     finishPasswordRecovery,
     cancelPasswordRecovery,
@@ -181,15 +185,18 @@ export function AuthStatus({ className }: AuthStatusProps) {
   const authConfigured = Boolean(config?.authConfigured && client)
   const oauthProviders = config?.oauthProviders ?? []
   const view: AuthView =
-    authStatus === 'recovery'
-      ? 'password-update'
-      : authStatus === 'recovery-success'
-        ? 'password-updated'
-        : authStatus === 'recovery-error'
-          ? 'recovery-error'
-          : localView
+    authStatus === 'recovery-confirmation'
+      ? 'recovery-confirmation'
+      : authStatus === 'recovery'
+        ? 'password-update'
+        : authStatus === 'recovery-success'
+          ? 'password-updated'
+          : authStatus === 'recovery-error'
+            ? 'recovery-error'
+            : localView
   const description = getAuthDescription(view)
   const recoveryLocked =
+    view === 'recovery-confirmation' ||
     view === 'password-update' ||
     view === 'password-updated' ||
     view === 'recovery-error'
@@ -414,6 +421,18 @@ export function AuthStatus({ className }: AuthStatusProps) {
     }
   }
 
+  async function handleConfirmRecovery() {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    setErrorMessage('')
+    try {
+      const error = await confirmPasswordRecovery()
+      if (error) setErrorMessage(getFriendlyAuthError(error))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   async function handleFinishRecovery() {
     if (isSubmitting) return
     setIsSubmitting(true)
@@ -594,7 +613,25 @@ export function AuthStatus({ className }: AuthStatusProps) {
               </div>
               ) : null}
 
-              {view === 'signup-sent' || view === 'recovery-sent' ? (
+              {view === 'recovery-confirmation' ? (
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-[var(--ui-radius-card)] bg-[var(--secondary)] px-4 py-4 text-sm leading-6 text-[var(--muted-foreground)]" role="status">
+                    Lumos 尚未使用邮件中的一次性凭证。点击继续后，才会验证链接并进入新密码设置。
+                  </div>
+                  {displayedErrorMessage ? (
+                    <p className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]" role="alert">
+                      {displayedErrorMessage}
+                    </p>
+                  ) : null}
+                  <Button type="button" disabled={isSubmitting} onClick={handleConfirmRecovery}>
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    继续重置密码
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={isSubmitting} onClick={handleCancelRecovery}>
+                    取消并返回登录
+                  </Button>
+                </div>
+              ) : view === 'signup-sent' || view === 'recovery-sent' ? (
               <div className="mt-4 grid gap-3">
                 <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-4 py-4 text-sm leading-6 text-[#17675b]" role="status">
                   <div className="flex items-center gap-2 font-semibold">

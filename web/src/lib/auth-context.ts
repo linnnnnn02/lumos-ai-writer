@@ -6,6 +6,7 @@ export type AuthSessionStatus =
   | 'initializing'
   | 'guest'
   | 'authenticated'
+  | 'recovery-confirmation'
   | 'recovery'
   | 'recovery-success'
   | 'recovery-error'
@@ -17,6 +18,7 @@ export type AuthContextValue = {
   config: PublicConfigResponse | null
   session: Session | null
   error: string
+  confirmPasswordRecovery: () => Promise<string | null>
   completePasswordRecovery: (password: string) => Promise<string | null>
   finishPasswordRecovery: () => Promise<string | null>
   cancelPasswordRecovery: () => Promise<void>
