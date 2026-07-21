@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { CurrentUser, OAuthProvider, PublicConfigResponse } from '@lumos-ai/shared'
-import type { Session, SupabaseClient } from '@supabase/supabase-js'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import type { CurrentUser, OAuthProvider } from '@lumos-ai/shared'
+import type { Session } from '@supabase/supabase-js'
 import {
   CheckCircle2,
+  Eye,
   Github,
   Loader2,
   LogIn,
@@ -14,15 +15,19 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import {
-  getCurrentUser,
-  getFolders,
-  getNotes,
-  getSnippets,
-} from '@/lib/api-client'
-import { getSupabaseBrowserClient } from '@/lib/supabase-browser'
+import { getCurrentUser, getFolders, getNotes, getSnippets } from '@/lib/api-client'
+import { useAuth } from '@/lib/auth-context'
 
-type AuthMode = 'signin' | 'signup' | 'recovery-request' | 'password-update'
+type AuthView =
+  | 'signin'
+  | 'signup'
+  | 'signup-sent'
+  | 'recovery-request'
+  | 'recovery-sent'
+  | 'password-update'
+  | 'password-updated'
+  | 'recovery-error'
+
 type BackendStatus = 'idle' | 'checking' | 'ready' | 'error'
 
 type CloudCounts = {
@@ -34,6 +39,18 @@ type CloudCounts = {
 type AuthStatusProps = {
   className?: string
 }
+
+type PasswordFieldProps = {
+  id: string
+  label: string
+  value: string
+  visible: boolean
+  autoComplete: 'current-password' | 'new-password'
+  onChange: (value: string) => void
+  onToggleVisibility: () => void
+}
+
+const RECOVERY_COOLDOWN_SECONDS = 60
 
 const providerLabels: Record<OAuthProvider, string> = {
   github: 'GitHub',
@@ -58,87 +75,138 @@ function getSessionAvatarUrl(session: Session | null) {
   return typeof avatarUrl === 'string' ? avatarUrl : null
 }
 
+function getFriendlyAuthError(message: string) {
+  const normalized = message.toLowerCase()
+  if (normalized.includes('invalid login credentials')) return '邮箱或密码不正确，请重新输入。'
+  if (normalized.includes('email not confirmed')) return '请先打开确认邮件，完成账号确认。'
+  if (normalized.includes('rate limit')) return '发送次数过多，请稍后再试。'
+  if (normalized.includes('same password')) return '新密码不能与当前密码相同。'
+  if (normalized.includes('expired') || normalized.includes('otp')) {
+    return '这个重置链接已失效或已过期，请重新发送邮件。'
+  }
+  return message || '登录服务暂时不可用，请稍后再试。'
+}
+
+function getAuthTitle(view: AuthView) {
+  if (view === 'signin') return '登录 Lumos'
+  if (view === 'signup') return '创建账号'
+  if (view === 'signup-sent') return '确认邮件已发送'
+  if (view === 'recovery-request') return '找回密码'
+  if (view === 'recovery-sent') return '重置邮件已发送'
+  if (view === 'password-update') return '设置新密码'
+  if (view === 'password-updated') return '密码修改成功'
+  return '重置链接已失效'
+}
+
+function getAuthDescription(view: AuthView) {
+  if (view === 'signup-sent') return '账号尚未确认。请打开邮件中的链接，再返回 Lumos 登录。'
+  if (view === 'recovery-request') return '我们会向注册邮箱发送重置链接，不会立即修改密码。'
+  if (view === 'recovery-sent') return '密码尚未修改。请打开邮件中的链接，然后设置新密码。'
+  if (view === 'password-update') return '保存成功前，你仍处于账号恢复状态，不会进入项目。'
+  if (view === 'password-updated') return '新密码已经生效。确认进入后才会加载你的项目和文案库。'
+  if (view === 'recovery-error') return '重新发送一封邮件，使用最新链接继续。'
+  return ''
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  visible,
+  autoComplete,
+  onChange,
+  onToggleVisibility,
+}: PasswordFieldProps) {
+  return (
+    <div className="grid gap-[var(--ui-field-gap)]">
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={id} className="text-sm font-medium text-[var(--muted-foreground)]">
+          {label}
+        </label>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold text-[var(--accent-strong)] transition hover:bg-[var(--accent-soft)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+          onClick={onToggleVisibility}
+          aria-label={`${visible ? '隐藏' : '显示'}${label}`}
+        >
+          <Eye className="h-3.5 w-3.5" />
+          {visible ? '隐藏' : '显示'}
+        </button>
+      </div>
+      <Input
+        id={id}
+        autoComplete={autoComplete}
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="至少 6 位"
+      />
+    </div>
+  )
+}
+
 export function AuthStatus({ className }: AuthStatusProps) {
-  const [client, setClient] = useState<SupabaseClient | null>(null)
-  const [config, setConfig] = useState<PublicConfigResponse | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
+  const {
+    status: authStatus,
+    client,
+    config,
+    session,
+    error: authError,
+    completePasswordRecovery,
+    finishPasswordRecovery,
+    cancelPasswordRecovery,
+    signOut,
+  } = useAuth()
   const [backendUser, setBackendUser] = useState<CurrentUser | null>(null)
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('idle')
   const [cloudCounts, setCloudCounts] = useState<CloudCounts | null>(null)
   const [isOpen, setIsOpen] = useState(false)
-  const [authMode, setAuthMode] = useState<AuthMode>('signin')
+  const [localView, setView] = useState<AuthView>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [confirmationVisible, setConfirmationVisible] = useState(false)
   const [message, setMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [cooldownSeconds, setCooldownSeconds] = useState(0)
 
   const displayName = useMemo(
     () => getAuthDisplayName(backendUser, session),
     [backendUser, session],
   )
   const avatarUrl = backendUser?.avatarUrl || getSessionAvatarUrl(session) || '/icon.svg'
+  const authConfigured = Boolean(config?.authConfigured && client)
+  const oauthProviders = config?.oauthProviders ?? []
+  const view: AuthView =
+    authStatus === 'recovery'
+      ? 'password-update'
+      : authStatus === 'recovery-success'
+        ? 'password-updated'
+        : authStatus === 'recovery-error'
+          ? 'recovery-error'
+          : localView
+  const description = getAuthDescription(view)
+  const recoveryLocked =
+    view === 'password-update' ||
+    view === 'password-updated' ||
+    view === 'recovery-error'
+  const dialogOpen = isOpen || recoveryLocked
+  const displayedErrorMessage =
+    errorMessage ||
+    (view === 'recovery-error' || authStatus === 'error'
+      ? getFriendlyAuthError(authError)
+      : '')
 
   useEffect(() => {
-    let mounted = true
-    let unsubscribe: (() => void) | null = null
-
-    async function loadAuth() {
-      try {
-        const next = await getSupabaseBrowserClient()
-        if (!mounted) return
-
-        setClient(next.client)
-        setConfig(next.config)
-
-        if (!next.client) return
-
-        const authListener = next.client.auth.onAuthStateChange((event, nextSession) => {
-          setSession(nextSession)
-          setErrorMessage('')
-
-          if (event === 'PASSWORD_RECOVERY') {
-            setAuthMode('password-update')
-            setPassword('')
-            setPasswordConfirmation('')
-            setMessage('身份已验证，请设置新的登录密码。')
-            setIsOpen(true)
-            return
-          }
-
-          if (!nextSession) {
-            setBackendUser(null)
-            setBackendStatus('idle')
-            setCloudCounts(null)
-          } else if (event !== 'USER_UPDATED') {
-            setIsOpen(false)
-          }
-        })
-        unsubscribe = () => authListener.data.subscription.unsubscribe()
-
-        const { data, error } = await next.client.auth.getSession()
-        if (!mounted) return
-
-        if (error) {
-          setErrorMessage(error.message)
-        } else {
-          setSession(data.session ?? null)
-        }
-      } catch (error) {
-        if (!mounted) return
-        setErrorMessage(error instanceof Error ? error.message : '登录服务暂时不可用')
-      }
-    }
-
-    loadAuth()
-
-    return () => {
-      mounted = false
-      unsubscribe?.()
-    }
-  }, [])
+    if (cooldownSeconds <= 0) return
+    const timer = window.setInterval(() => {
+      setCooldownSeconds((current) => Math.max(0, current - 1))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [cooldownSeconds])
 
   useEffect(() => {
     if (!session?.access_token) return
@@ -167,174 +235,238 @@ export function AuthStatus({ className }: AuthStatusProps) {
       } catch (error) {
         if (cancelled) return
         setBackendStatus('error')
-        setErrorMessage(error instanceof Error ? error.message : '云端连接失败')
+        setErrorMessage(
+          getFriendlyAuthError(error instanceof Error ? error.message : '云端连接失败'),
+        )
       }
     }
 
-    verifyBackend()
-
+    void verifyBackend()
     return () => {
       cancelled = true
     }
   }, [session?.access_token])
 
-  const closeDialog = useCallback(() => {
-    if (isSubmitting || authMode === 'password-update') return
+  function resetFields() {
+    setPassword('')
+    setPasswordConfirmation('')
+    setPasswordVisible(false)
+    setConfirmationVisible(false)
+  }
+
+  function switchView(nextView: AuthView) {
+    setView(nextView)
+    resetFields()
+    setMessage('')
+    setErrorMessage('')
+  }
+
+  function closeDialog() {
+    if (isSubmitting || recoveryLocked) return
     setIsOpen(false)
     setMessage('')
     setErrorMessage('')
-  }, [authMode, isSubmitting])
+  }
 
-  const switchAuthMode = useCallback((nextMode: AuthMode) => {
-    setAuthMode(nextMode)
-    setPassword('')
-    setPasswordConfirmation('')
-    setMessage('')
+  async function sendRecoveryEmail() {
+    if (!client) return false
+    const emailValue = email.trim()
+    if (!emailValue) {
+      setErrorMessage('请输入注册邮箱。')
+      return false
+    }
+
+    const { error } = await client.auth.resetPasswordForEmail(emailValue, {
+      redirectTo: window.location.origin,
+    })
+    if (error) {
+      setErrorMessage(getFriendlyAuthError(error.message))
+      return false
+    }
+
+    if (authStatus === 'recovery-error') {
+      await cancelPasswordRecovery()
+      setIsOpen(true)
+    }
+    setEmail(emailValue)
+    setCooldownSeconds(RECOVERY_COOLDOWN_SECONDS)
+    setView('recovery-sent')
+    setMessage('重置邮件已发送。')
     setErrorMessage('')
-  }, [])
+    return true
+  }
 
-  const handleSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!client) return
-
-      const emailValue = email.trim()
-      if (!emailValue && authMode !== 'password-update') {
-        setErrorMessage('请输入邮箱')
-        return
-      }
-      if (authMode !== 'recovery-request' && password.length < 6) {
-        setErrorMessage(
-          authMode === 'password-update'
-            ? '请输入至少 6 位新密码'
-            : '请输入邮箱和至少 6 位密码',
-        )
-        return
-      }
-      if (authMode === 'password-update' && password !== passwordConfirmation) {
-        setErrorMessage('两次输入的密码不一致')
-        return
-      }
-
-      setIsSubmitting(true)
-      setMessage('')
-      setErrorMessage('')
-
-      try {
-        if (authMode === 'recovery-request') {
-          const { error } = await client.auth.resetPasswordForEmail(emailValue, {
-            redirectTo: window.location.origin,
-          })
-          if (error) {
-            setErrorMessage(error.message)
-            return
-          }
-
-          setMessage('重置邮件已发送。请打开邮件中的链接，返回 Lumos 设置新密码。')
-          return
-        }
-
-        if (authMode === 'password-update') {
-          const { error } = await client.auth.updateUser({ password })
-          if (error) {
-            setErrorMessage(error.message)
-            return
-          }
-
-          setPassword('')
-          setPasswordConfirmation('')
-          setMessage('密码已更新，你已经登录。')
-          window.setTimeout(() => {
-            setIsOpen(false)
-            setMessage('')
-          }, 900)
-          return
-        }
-
-        const result =
-          authMode === 'signin'
-            ? await client.auth.signInWithPassword({
-                email: emailValue,
-                password,
-              })
-            : await client.auth.signUp({
-                email: emailValue,
-                password,
-                options: {
-                  emailRedirectTo: window.location.origin,
-                },
-              })
-
-        if (result.error) {
-          setErrorMessage(result.error.message)
-          return
-        }
-
-        if (result.data.session) {
-          setSession(result.data.session)
-          setIsOpen(false)
-          setPassword('')
-          return
-        }
-
-        setMessage('如果这是新账号，确认邮件已经发送；如果已注册，请直接登录或重置密码。')
-      } finally {
-        setIsSubmitting(false)
-      }
-    },
-    [authMode, client, email, password, passwordConfirmation],
-  )
-
-  const handleOAuthSignIn = useCallback(
-    async (provider: OAuthProvider) => {
-      if (!client) return
-
-      setIsSubmitting(true)
-      setMessage('')
-      setErrorMessage('')
-
-      try {
-        const { error } = await client.auth.signInWithOAuth({
-          provider,
-          options: {
-            redirectTo: window.location.origin,
-            ...(provider === 'google'
-              ? { scopes: 'openid email profile' }
-              : {}),
-          },
-        })
-
-        if (error) setErrorMessage(error.message)
-      } finally {
-        setIsSubmitting(false)
-      }
-    },
-    [client],
-  )
-
-  const handleSignOut = useCallback(async () => {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!client) return
 
-    setIsSigningOut(true)
+    const emailValue = email.trim()
+    if ((view === 'signin' || view === 'signup') && !emailValue) {
+      setErrorMessage('请输入邮箱。')
+      return
+    }
+    if ((view === 'signin' || view === 'signup' || view === 'password-update') && password.length < 6) {
+      setErrorMessage(view === 'password-update' ? '请输入至少 6 位新密码。' : '请输入至少 6 位密码。')
+      return
+    }
+    if ((view === 'signup' || view === 'password-update') && password !== passwordConfirmation) {
+      setErrorMessage('两次输入的密码不一致。')
+      return
+    }
+
+    setIsSubmitting(true)
+    setMessage('')
     setErrorMessage('')
 
     try {
-      const { error } = await client.auth.signOut()
-      if (error) {
-        setErrorMessage(error.message)
+      if (view === 'recovery-request' || view === 'recovery-error') {
+        await sendRecoveryEmail()
         return
       }
-      setSession(null)
-      setBackendUser(null)
-      setCloudCounts(null)
-      setBackendStatus('idle')
+
+      if (view === 'password-update') {
+        const error = await completePasswordRecovery(password)
+        if (error) setErrorMessage(getFriendlyAuthError(error))
+        return
+      }
+
+      if (view === 'signin') {
+        const result = await client.auth.signInWithPassword({
+          email: emailValue,
+          password,
+        })
+        if (result.error) {
+          setErrorMessage(getFriendlyAuthError(result.error.message))
+          return
+        }
+        resetFields()
+        setIsOpen(false)
+        return
+      }
+
+      if (view === 'signup') {
+        const result = await client.auth.signUp({
+          email: emailValue,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        })
+        if (result.error) {
+          setErrorMessage(getFriendlyAuthError(result.error.message))
+          return
+        }
+        if (result.data.session) {
+          resetFields()
+          setIsOpen(false)
+          return
+        }
+        if (result.data.user?.identities?.length === 0) {
+          switchView('signin')
+          setMessage('这个邮箱可能已经注册，请直接登录或重置密码。')
+          return
+        }
+
+        setEmail(emailValue)
+        resetFields()
+        setCooldownSeconds(RECOVERY_COOLDOWN_SECONDS)
+        setView('signup-sent')
+        setMessage('确认邮件已发送。')
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleResendRecovery() {
+    if (cooldownSeconds > 0 || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await sendRecoveryEmail()
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleResendSignup() {
+    if (!client || cooldownSeconds > 0 || isSubmitting) return
+    const emailValue = email.trim()
+    if (!emailValue) {
+      switchView('signup')
+      setErrorMessage('请重新输入注册邮箱。')
+      return
+    }
+
+    setIsSubmitting(true)
+    setErrorMessage('')
+    try {
+      const { error } = await client.auth.resend({
+        type: 'signup',
+        email: emailValue,
+        options: { emailRedirectTo: window.location.origin },
+      })
+      if (error) {
+        setErrorMessage(getFriendlyAuthError(error.message))
+        return
+      }
+      setCooldownSeconds(RECOVERY_COOLDOWN_SECONDS)
+      setMessage('确认邮件已重新发送。')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleFinishRecovery() {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    setErrorMessage('')
+    try {
+      const error = await finishPasswordRecovery()
+      if (error) setErrorMessage(getFriendlyAuthError(error))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleCancelRecovery() {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await cancelPasswordRecovery()
+      switchView('signin')
+      setIsOpen(true)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleOAuthSignIn(provider: OAuthProvider) {
+    if (!client) return
+    setIsSubmitting(true)
+    setMessage('')
+    setErrorMessage('')
+    try {
+      const { error } = await client.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin,
+          ...(provider === 'google' ? { scopes: 'openid email profile' } : {}),
+        },
+      })
+      if (error) setErrorMessage(getFriendlyAuthError(error.message))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleSignOut() {
+    setIsSigningOut(true)
+    setErrorMessage('')
+    try {
+      const error = await signOut()
+      if (error) setErrorMessage(getFriendlyAuthError(error))
     } finally {
       setIsSigningOut(false)
     }
-  }, [client])
-
-  const authConfigured = Boolean(config?.authConfigured && client)
-  const oauthProviders = config?.oauthProviders ?? []
+  }
 
   return (
     <div className={cn('relative flex items-center justify-end', className)}>
@@ -375,13 +507,20 @@ export function AuthStatus({ className }: AuthStatusProps) {
           </Button>
         </div>
       ) : (
-        <Button size="sm" variant="secondary" onClick={() => setIsOpen(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            switchView('signin')
+            setIsOpen(true)
+          }}
+        >
           <LogIn className="h-4 w-4" />
           登录
         </Button>
       )}
 
-      {isOpen ? (
+      {dialogOpen ? (
         <div
           className="ui-dialog-backdrop fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,21,16,0.18)] px-4 py-8 backdrop-blur-md"
           role="dialog"
@@ -390,7 +529,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
           onClick={closeDialog}
         >
           <div
-            className="ui-dialog-card w-full max-w-[26rem] rounded-[var(--ui-radius-dialog)] border border-white/78 bg-white/94 p-5 shadow-[var(--shadow-elevated)]"
+            className="ui-dialog-card w-full max-w-[27rem] rounded-[var(--ui-radius-dialog)] border border-white/78 bg-white/94 p-5 shadow-[var(--shadow-elevated)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
@@ -399,16 +538,15 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <h2 id="auth-dialog-title" className="mt-4 text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                  {authMode === 'signin'
-                    ? '登录 Lumos'
-                    : authMode === 'signup'
-                      ? '创建账号'
-                      : authMode === 'recovery-request'
-                        ? '找回密码'
-                        : '设置新密码'}
+                  {getAuthTitle(view)}
                 </h2>
+                {description ? (
+                  <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted-foreground)]">
+                    {description}
+                  </p>
+                ) : null}
               </div>
-              {authMode !== 'password-update' ? (
+              {!recoveryLocked ? (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -421,7 +559,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
               ) : null}
             </div>
 
-            {authMode === 'signin' || authMode === 'signup' ? (
+            {view === 'signin' || view === 'signup' ? (
               <div className="mt-5 grid grid-cols-2 gap-1 rounded-full bg-[var(--secondary)] p-1">
                 <Button
                   type="button"
@@ -429,11 +567,11 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   size="sm"
                   className={cn(
                     'h-[var(--ui-control-height-sm)] shadow-none',
-                    authMode === 'signin'
+                    view === 'signin'
                       ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                       : 'text-[var(--muted-foreground)] hover:bg-white/58',
                   )}
-                  onClick={() => switchAuthMode('signin')}
+                  onClick={() => switchView('signin')}
                 >
                   登录
                 </Button>
@@ -443,114 +581,168 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   size="sm"
                   className={cn(
                     'h-[var(--ui-control-height-sm)] shadow-none',
-                    authMode === 'signup'
+                    view === 'signup'
                       ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                       : 'text-[var(--muted-foreground)] hover:bg-white/58',
                   )}
-                  onClick={() => switchAuthMode('signup')}
+                  onClick={() => switchView('signup')}
                 >
                   注册
                 </Button>
               </div>
             ) : null}
 
-            <form className="mt-5 grid gap-[var(--ui-form-gap)]" onSubmit={handleSubmit}>
-              {authMode !== 'password-update' ? (
-                <label className="grid gap-[var(--ui-field-gap)]">
-                  <span className="text-sm font-medium text-[var(--muted-foreground)]">邮箱</span>
-                  <Input
-                    autoComplete="email"
-                    inputMode="email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="you@example.com"
-                  />
-                </label>
-              ) : null}
-              {authMode !== 'recovery-request' ? (
-                <div className="grid gap-[var(--ui-field-gap)]">
-                  <label
-                    htmlFor="auth-password"
-                    className="text-sm font-medium text-[var(--muted-foreground)]"
-                  >
-                    {authMode === 'password-update' ? '新密码' : '密码'}
-                  </label>
-                  <Input
-                    id="auth-password"
-                    autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="至少 6 位"
-                  />
+            {view === 'signup-sent' || view === 'recovery-sent' ? (
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-4 py-4 text-sm leading-6 text-[#17675b]" role="status">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-4 w-4" />
+                    {message}
+                  </div>
+                  <p className="mt-2 text-[#2c6f66]">已发送至 {email}</p>
                 </div>
-              ) : null}
-              {authMode === 'signin' ? (
+                {displayedErrorMessage ? (
+                  <p className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]" role="alert">
+                    {displayedErrorMessage}
+                  </p>
+                ) : null}
                 <Button
                   type="button"
-                  variant="subtle"
-                  className="h-auto w-full justify-between whitespace-normal px-3 py-2.5 text-left shadow-none"
-                  onClick={() => switchAuthMode('recovery-request')}
+                  variant="outline"
+                  disabled={isSubmitting || cooldownSeconds > 0}
+                  onClick={view === 'signup-sent' ? handleResendSignup : handleResendRecovery}
                 >
-                  <span className="grid gap-0.5">
-                    <span>忘记密码？</span>
-                    <span className="text-xs font-normal text-[var(--muted-foreground)]">
-                      发送链接到注册邮箱，重新设置密码
-                    </span>
-                  </span>
-                  <Mail className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                  {cooldownSeconds > 0 ? `重新发送（${cooldownSeconds}s）` : '重新发送邮件'}
                 </Button>
-              ) : null}
-              {authMode === 'password-update' ? (
-                <label className="grid gap-[var(--ui-field-gap)]">
-                  <span className="text-sm font-medium text-[var(--muted-foreground)]">再次输入新密码</span>
-                  <Input
-                    autoComplete="new-password"
-                    type="password"
-                    value={passwordConfirmation}
-                    onChange={(event) => setPasswordConfirmation(event.target.value)}
-                    placeholder="再次输入至少 6 位密码"
-                  />
-                </label>
-              ) : null}
-
-              {errorMessage ? (
-                <p
-                  className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]"
-                  role="alert"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => switchView(view === 'signup-sent' ? 'signup' : 'recovery-request')}
                 >
-                  {errorMessage}
-                </p>
-              ) : null}
-              {message ? (
-                <p
-                  className="flex items-center gap-2 rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-3 py-2 text-sm text-[#17675b]"
-                  role="status"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  {message}
-                </p>
-              ) : null}
-
-              <Button type="submit" disabled={!authConfigured || isSubmitting}>
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {authMode === 'signin'
-                  ? '邮箱登录'
-                  : authMode === 'signup'
-                    ? '邮箱注册'
-                    : authMode === 'recovery-request'
-                      ? '发送重置邮件'
-                      : '保存新密码'}
-              </Button>
-              {authMode === 'recovery-request' ? (
-                <Button type="button" variant="ghost" onClick={() => switchAuthMode('signin')}>
+                  修改邮箱
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => switchView('signin')}>
                   返回登录
                 </Button>
-              ) : null}
-            </form>
+              </div>
+            ) : view === 'password-updated' ? (
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-4 py-4 text-sm leading-6 text-[#17675b]" role="status">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-4 w-4" />
+                    新密码已经生效
+                  </div>
+                </div>
+                {displayedErrorMessage ? (
+                  <p className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]" role="alert">
+                    {displayedErrorMessage}
+                  </p>
+                ) : null}
+                <Button type="button" disabled={isSubmitting} onClick={handleFinishRecovery}>
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+                  进入 Lumos
+                </Button>
+                <Button type="button" variant="ghost" disabled={isSubmitting} onClick={handleCancelRecovery}>
+                  退出并返回登录
+                </Button>
+              </div>
+            ) : (
+              <form className="mt-5 grid gap-[var(--ui-form-gap)]" onSubmit={handleSubmit}>
+                {view !== 'password-update' ? (
+                  <label className="grid gap-[var(--ui-field-gap)]">
+                    <span className="text-sm font-medium text-[var(--muted-foreground)]">邮箱</span>
+                    <Input
+                      autoComplete="email"
+                      inputMode="email"
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="you@example.com"
+                    />
+                  </label>
+                ) : null}
 
-            {oauthProviders.length > 0 && (authMode === 'signin' || authMode === 'signup') ? (
+                {view === 'signin' || view === 'signup' || view === 'password-update' ? (
+                  <PasswordField
+                    id="auth-password"
+                    label={view === 'password-update' ? '新密码' : '密码'}
+                    value={password}
+                    visible={passwordVisible}
+                    autoComplete={view === 'signin' ? 'current-password' : 'new-password'}
+                    onChange={setPassword}
+                    onToggleVisibility={() => setPasswordVisible((current) => !current)}
+                  />
+                ) : null}
+
+                {view === 'signup' || view === 'password-update' ? (
+                  <PasswordField
+                    id="auth-password-confirmation"
+                    label={view === 'password-update' ? '再次输入新密码' : '再次输入密码'}
+                    value={passwordConfirmation}
+                    visible={confirmationVisible}
+                    autoComplete="new-password"
+                    onChange={setPasswordConfirmation}
+                    onToggleVisibility={() => setConfirmationVisible((current) => !current)}
+                  />
+                ) : null}
+
+                {view === 'signin' ? (
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    className="h-auto w-full justify-between whitespace-normal px-3 py-2.5 text-left shadow-none"
+                    onClick={() => switchView('recovery-request')}
+                  >
+                    <span className="grid gap-0.5">
+                      <span>忘记密码？</span>
+                      <span className="text-xs font-normal text-[var(--muted-foreground)]">
+                        发送链接到注册邮箱，重新设置密码
+                      </span>
+                    </span>
+                    <Mail className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+                  </Button>
+                ) : null}
+
+                {displayedErrorMessage ? (
+                  <p className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]" role="alert">
+                    {displayedErrorMessage}
+                  </p>
+                ) : null}
+                {message ? (
+                  <p className="flex items-center gap-2 rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-3 py-2 text-sm text-[#17675b]" role="status">
+                    <CheckCircle2 className="h-4 w-4" />
+                    {message}
+                  </p>
+                ) : null}
+
+                <Button type="submit" disabled={!authConfigured || isSubmitting}>
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                  {view === 'signin'
+                    ? '邮箱登录'
+                    : view === 'signup'
+                      ? '创建账号'
+                      : view === 'password-update'
+                        ? '保存新密码'
+                        : view === 'recovery-error'
+                          ? '重新发送重置邮件'
+                          : '发送重置邮件'}
+                </Button>
+
+                {view === 'recovery-request' ? (
+                  <Button type="button" variant="ghost" onClick={() => switchView('signin')}>
+                    返回登录
+                  </Button>
+                ) : null}
+                {view === 'password-update' || view === 'recovery-error' ? (
+                  <Button type="button" variant="ghost" disabled={isSubmitting} onClick={handleCancelRecovery}>
+                    取消并返回登录
+                  </Button>
+                ) : null}
+              </form>
+            )}
+
+            {oauthProviders.length > 0 && (view === 'signin' || view === 'signup') ? (
               <div className="mt-5 grid gap-3">
                 <div className="flex items-center gap-3">
                   <span className="h-px flex-1 bg-[var(--border)]" />
