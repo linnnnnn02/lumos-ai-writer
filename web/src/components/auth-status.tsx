@@ -22,7 +22,7 @@ import {
 } from '@/lib/api-client'
 import { getSupabaseBrowserClient } from '@/lib/supabase-browser'
 
-type AuthMode = 'signin' | 'signup'
+type AuthMode = 'signin' | 'signup' | 'recovery-request' | 'password-update'
 type BackendStatus = 'idle' | 'checking' | 'ready' | 'error'
 
 type CloudCounts = {
@@ -69,6 +69,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [message, setMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -94,6 +95,29 @@ export function AuthStatus({ className }: AuthStatusProps) {
 
         if (!next.client) return
 
+        const authListener = next.client.auth.onAuthStateChange((event, nextSession) => {
+          setSession(nextSession)
+          setErrorMessage('')
+
+          if (event === 'PASSWORD_RECOVERY') {
+            setAuthMode('password-update')
+            setPassword('')
+            setPasswordConfirmation('')
+            setMessage('身份已验证，请设置新的登录密码。')
+            setIsOpen(true)
+            return
+          }
+
+          if (!nextSession) {
+            setBackendUser(null)
+            setBackendStatus('idle')
+            setCloudCounts(null)
+          } else if (event !== 'USER_UPDATED') {
+            setIsOpen(false)
+          }
+        })
+        unsubscribe = () => authListener.data.subscription.unsubscribe()
+
         const { data, error } = await next.client.auth.getSession()
         if (!mounted) return
 
@@ -102,19 +126,6 @@ export function AuthStatus({ className }: AuthStatusProps) {
         } else {
           setSession(data.session ?? null)
         }
-
-        const authListener = next.client.auth.onAuthStateChange((_event, nextSession) => {
-          setSession(nextSession)
-          setErrorMessage('')
-          if (nextSession) {
-            setIsOpen(false)
-          } else {
-            setBackendUser(null)
-            setBackendStatus('idle')
-            setCloudCounts(null)
-          }
-        })
-        unsubscribe = () => authListener.data.subscription.unsubscribe()
       } catch (error) {
         if (!mounted) return
         setErrorMessage(error instanceof Error ? error.message : '登录服务暂时不可用')
@@ -168,11 +179,19 @@ export function AuthStatus({ className }: AuthStatusProps) {
   }, [session?.access_token])
 
   const closeDialog = useCallback(() => {
-    if (isSubmitting) return
+    if (isSubmitting || authMode === 'password-update') return
     setIsOpen(false)
     setMessage('')
     setErrorMessage('')
-  }, [isSubmitting])
+  }, [authMode, isSubmitting])
+
+  const switchAuthMode = useCallback((nextMode: AuthMode) => {
+    setAuthMode(nextMode)
+    setPassword('')
+    setPasswordConfirmation('')
+    setMessage('')
+    setErrorMessage('')
+  }, [])
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -180,8 +199,20 @@ export function AuthStatus({ className }: AuthStatusProps) {
       if (!client) return
 
       const emailValue = email.trim()
-      if (!emailValue || password.length < 6) {
-        setErrorMessage('请输入邮箱和至少 6 位密码')
+      if (!emailValue && authMode !== 'password-update') {
+        setErrorMessage('请输入邮箱')
+        return
+      }
+      if (authMode !== 'recovery-request' && password.length < 6) {
+        setErrorMessage(
+          authMode === 'password-update'
+            ? '请输入至少 6 位新密码'
+            : '请输入邮箱和至少 6 位密码',
+        )
+        return
+      }
+      if (authMode === 'password-update' && password !== passwordConfirmation) {
+        setErrorMessage('两次输入的密码不一致')
         return
       }
 
@@ -190,6 +221,36 @@ export function AuthStatus({ className }: AuthStatusProps) {
       setErrorMessage('')
 
       try {
+        if (authMode === 'recovery-request') {
+          const { error } = await client.auth.resetPasswordForEmail(emailValue, {
+            redirectTo: window.location.origin,
+          })
+          if (error) {
+            setErrorMessage(error.message)
+            return
+          }
+
+          setMessage('重置邮件已发送。请打开邮件中的链接，返回 Lumos 设置新密码。')
+          return
+        }
+
+        if (authMode === 'password-update') {
+          const { error } = await client.auth.updateUser({ password })
+          if (error) {
+            setErrorMessage(error.message)
+            return
+          }
+
+          setPassword('')
+          setPasswordConfirmation('')
+          setMessage('密码已更新，你已经登录。')
+          window.setTimeout(() => {
+            setIsOpen(false)
+            setMessage('')
+          }, 900)
+          return
+        }
+
         const result =
           authMode === 'signin'
             ? await client.auth.signInWithPassword({
@@ -216,12 +277,12 @@ export function AuthStatus({ className }: AuthStatusProps) {
           return
         }
 
-        setMessage('已发送确认邮件，请先在邮箱里确认账号')
+        setMessage('如果这是新账号，确认邮件已经发送；如果已注册，请直接登录或重置密码。')
       } finally {
         setIsSubmitting(false)
       }
     },
-    [authMode, client, email, password],
+    [authMode, client, email, password, passwordConfirmation],
   )
 
   const handleOAuthSignIn = useCallback(
@@ -338,75 +399,135 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <h2 id="auth-dialog-title" className="mt-4 text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                  {authMode === 'signin' ? '登录 Lumos' : '创建账号'}
+                  {authMode === 'signin'
+                    ? '登录 Lumos'
+                    : authMode === 'signup'
+                      ? '创建账号'
+                      : authMode === 'recovery-request'
+                        ? '找回密码'
+                        : '设置新密码'}
                 </h2>
               </div>
-              <Button variant="ghost" size="icon" className="size-[var(--ui-control-height-md)]" onClick={closeDialog}>
-                <X className="h-4 w-4" />
-              </Button>
+              {authMode !== 'password-update' ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-[var(--ui-control-height-md)]"
+                  aria-label="关闭登录窗口"
+                  onClick={closeDialog}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : null}
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-1 rounded-full bg-[var(--secondary)] p-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-[var(--ui-control-height-sm)] shadow-none',
-                  authMode === 'signin'
-                    ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
-                    : 'text-[var(--muted-foreground)] hover:bg-white/58',
-                )}
-                onClick={() => setAuthMode('signin')}
-              >
-                登录
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-[var(--ui-control-height-sm)] shadow-none',
-                  authMode === 'signup'
-                    ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
-                    : 'text-[var(--muted-foreground)] hover:bg-white/58',
-                )}
-                onClick={() => setAuthMode('signup')}
-              >
-                注册
-              </Button>
-            </div>
+            {authMode === 'signin' || authMode === 'signup' ? (
+              <div className="mt-5 grid grid-cols-2 gap-1 rounded-full bg-[var(--secondary)] p-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-[var(--ui-control-height-sm)] shadow-none',
+                    authMode === 'signin'
+                      ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
+                      : 'text-[var(--muted-foreground)] hover:bg-white/58',
+                  )}
+                  onClick={() => switchAuthMode('signin')}
+                >
+                  登录
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-[var(--ui-control-height-sm)] shadow-none',
+                    authMode === 'signup'
+                      ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
+                      : 'text-[var(--muted-foreground)] hover:bg-white/58',
+                  )}
+                  onClick={() => switchAuthMode('signup')}
+                >
+                  注册
+                </Button>
+              </div>
+            ) : null}
 
             <form className="mt-5 grid gap-[var(--ui-form-gap)]" onSubmit={handleSubmit}>
-              <label className="grid gap-[var(--ui-field-gap)]">
-                <span className="text-sm font-medium text-[var(--muted-foreground)]">邮箱</span>
-                <Input
-                  autoComplete="email"
-                  inputMode="email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@example.com"
-                />
-              </label>
-              <label className="grid gap-[var(--ui-field-gap)]">
-                <span className="text-sm font-medium text-[var(--muted-foreground)]">密码</span>
-                <Input
-                  autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="至少 6 位"
-                />
-              </label>
+              {authMode !== 'password-update' ? (
+                <label className="grid gap-[var(--ui-field-gap)]">
+                  <span className="text-sm font-medium text-[var(--muted-foreground)]">邮箱</span>
+                  <Input
+                    autoComplete="email"
+                    inputMode="email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </label>
+              ) : null}
+              {authMode !== 'recovery-request' ? (
+                <div className="grid gap-[var(--ui-field-gap)]">
+                  <label
+                    htmlFor="auth-password"
+                    className="text-sm font-medium text-[var(--muted-foreground)]"
+                  >
+                    {authMode === 'password-update' ? '新密码' : '密码'}
+                  </label>
+                  <Input
+                    id="auth-password"
+                    autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="至少 6 位"
+                  />
+                </div>
+              ) : null}
+              {authMode === 'signin' ? (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  className="h-auto w-full justify-between whitespace-normal px-3 py-2.5 text-left shadow-none"
+                  onClick={() => switchAuthMode('recovery-request')}
+                >
+                  <span className="grid gap-0.5">
+                    <span>忘记密码？</span>
+                    <span className="text-xs font-normal text-[var(--muted-foreground)]">
+                      发送链接到注册邮箱，重新设置密码
+                    </span>
+                  </span>
+                  <Mail className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+                </Button>
+              ) : null}
+              {authMode === 'password-update' ? (
+                <label className="grid gap-[var(--ui-field-gap)]">
+                  <span className="text-sm font-medium text-[var(--muted-foreground)]">再次输入新密码</span>
+                  <Input
+                    autoComplete="new-password"
+                    type="password"
+                    value={passwordConfirmation}
+                    onChange={(event) => setPasswordConfirmation(event.target.value)}
+                    placeholder="再次输入至少 6 位密码"
+                  />
+                </label>
+              ) : null}
 
               {errorMessage ? (
-                <p className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]">
+                <p
+                  className="rounded-[var(--ui-radius-card)] border border-[rgba(214,90,60,0.16)] bg-[rgba(214,90,60,0.06)] px-3 py-2 text-sm text-[var(--destructive)]"
+                  role="alert"
+                >
                   {errorMessage}
                 </p>
               ) : null}
               {message ? (
-                <p className="flex items-center gap-2 rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-3 py-2 text-sm text-[#17675b]">
+                <p
+                  className="flex items-center gap-2 rounded-[var(--ui-radius-card)] border border-[rgba(42,157,143,0.16)] bg-[rgba(232,248,245,0.7)] px-3 py-2 text-sm text-[#17675b]"
+                  role="status"
+                >
                   <CheckCircle2 className="h-4 w-4" />
                   {message}
                 </p>
@@ -414,11 +535,22 @@ export function AuthStatus({ className }: AuthStatusProps) {
 
               <Button type="submit" disabled={!authConfigured || isSubmitting}>
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-                {authMode === 'signin' ? '邮箱登录' : '邮箱注册'}
+                {authMode === 'signin'
+                  ? '邮箱登录'
+                  : authMode === 'signup'
+                    ? '邮箱注册'
+                    : authMode === 'recovery-request'
+                      ? '发送重置邮件'
+                      : '保存新密码'}
               </Button>
+              {authMode === 'recovery-request' ? (
+                <Button type="button" variant="ghost" onClick={() => switchAuthMode('signin')}>
+                  返回登录
+                </Button>
+              ) : null}
             </form>
 
-            {oauthProviders.length > 0 ? (
+            {oauthProviders.length > 0 && (authMode === 'signin' || authMode === 'signup') ? (
               <div className="mt-5 grid gap-3">
                 <div className="flex items-center gap-3">
                   <span className="h-px flex-1 bg-[var(--border)]" />
