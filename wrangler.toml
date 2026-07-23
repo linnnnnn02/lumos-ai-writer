@@ -9,6 +9,7 @@ PUBLIC_APP_URL = "https://lumos-ai-writer.pages.dev"
 CORS_ALLOWED_ORIGINS = "https://lumos-ai-writer.pages.dev"
 AUTH_OAUTH_PROVIDERS = "none"
 AI_FEATURE_ENABLED = "false"
+AI_PILOT_USER_IDS = "aff9e3f4-9ed2-4eb2-9374-fb81926de6af"
 AI_PROVIDER_PRIMARY = "deepseek"
 AI_DAILY_BUDGET_CNY = "5"
 # Conservative CNY estimates for deepseek-v4-flash cache-miss pricing.

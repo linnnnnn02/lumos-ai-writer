@@ -10,6 +10,7 @@ import { createApiApp } from '../src/app.js'
 import {
   DeepSeekOutputValidationError,
   generateDraftWithDeepSeek,
+  parseJsonContent,
 } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
@@ -139,6 +140,18 @@ assert.throws(() =>
     },
     input.length,
   ),
+)
+
+assert.deepEqual(
+  parseJsonContent(`{
+    "title": "控制字符修复",
+    "body": ["第一行
+仍然属于同一个 JSON 字符串", "第二段", "第三段"]
+  }`),
+  {
+    title: '控制字符修复',
+    body: ['第一行\n仍然属于同一个 JSON 字符串', '第二段', '第三段'],
+  },
 )
 
 const lengthPolicy = draftLengthPolicies[userPayload.input.length]
@@ -290,11 +303,11 @@ try {
 }
 assert.ok(failedRepairError instanceof DeepSeekOutputValidationError)
 assert.deepEqual(failedRepairError.usage, {
-  promptTokens: 600,
-  completionTokens: 200,
-  totalTokens: 800,
+  promptTokens: 900,
+  completionTokens: 300,
+  totalTokens: 1200,
 })
-assert.equal(failedRepairRequests.length, 2)
+assert.equal(failedRepairRequests.length, 3)
 
 const api = createApiApp()
 const disabledAiEnv = {
@@ -322,6 +335,6 @@ console.log('draft-v1 offline evaluation passed')
 console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`fixture length: ${expectedOutput.body.length} paragraphs, ${bodyCharacterCount} characters`)
-console.log('single repair attempt: simulated and usage-combined')
+console.log('up to two repair attempts: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')

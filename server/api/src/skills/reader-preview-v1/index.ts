@@ -1,5 +1,7 @@
 import {
+  aiReaderPreviewAnnotationSchema,
   aiReaderPreviewResultSchema,
+  aiReaderPreviewSuggestionSchema,
   type AiDraftCopy,
   type AiReaderPreviewResult,
   type PreviewDraftForReaderRequest,
@@ -124,6 +126,63 @@ export function filterGroundedReaderSuggestions(
     suggestions: preview.suggestions.filter((suggestion) =>
       isGroundedReaderSuggestion(suggestion.instruction, groundingSource),
     ),
+  }
+}
+
+export function normalizeReaderPreviewConfidence(
+  preview: AiReaderPreviewResult,
+) {
+  return {
+    ...preview,
+    annotations: preview.annotations.map((annotation) => ({
+      ...annotation,
+      confidence: Math.min(Math.max(annotation.confidence, 0), 0.9),
+    })),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeReaderPreviewOutput(value: unknown) {
+  if (!isRecord(value)) return value
+
+  const annotations = (Array.isArray(value.annotations) ? value.annotations : []).flatMap(
+    (annotation) => {
+      if (!isRecord(annotation)) return []
+      const candidate = {
+        ...annotation,
+        confidence:
+          typeof annotation.confidence === 'number'
+            ? Math.min(Math.max(annotation.confidence, 0), 0.9)
+            : annotation.confidence,
+      }
+      const parsed = aiReaderPreviewAnnotationSchema.safeParse(candidate)
+      return parsed.success ? [parsed.data] : []
+    },
+  )
+  const annotationIds = new Set(annotations.map((annotation) => annotation.id))
+  const suggestions = (Array.isArray(value.suggestions) ? value.suggestions : []).flatMap(
+    (suggestion) => {
+      if (!isRecord(suggestion)) return []
+      const candidate = {
+        ...suggestion,
+        annotationIds: Array.isArray(suggestion.annotationIds)
+          ? suggestion.annotationIds.filter(
+              (id): id is string => typeof id === 'string' && annotationIds.has(id),
+            )
+          : [],
+      }
+      const parsed = aiReaderPreviewSuggestionSchema.safeParse(candidate)
+      return parsed.success ? [parsed.data] : []
+    },
+  )
+
+  return {
+    ...value,
+    annotations,
+    suggestions,
   }
 }
 

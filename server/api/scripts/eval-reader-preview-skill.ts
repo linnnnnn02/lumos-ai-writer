@@ -16,6 +16,8 @@ import {
 import { readConfig } from '../src/env.js'
 import {
   filterGroundedReaderSuggestions,
+  normalizeReaderPreviewConfidence,
+  normalizeReaderPreviewOutput,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../src/skills/reader-preview-v1/index.js'
@@ -137,6 +139,57 @@ assert.ok(expectedOutput.annotations.some((item) => item.tone === 'interest'))
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'risk'))
 assert.ok(expectedOutput.annotations.some((item) => item.tone === 'question'))
 assert.ok(expectedOutput.annotations.every((item) => item.confidence <= 0.9))
+const normalizedConfidenceOutput = normalizeReaderPreviewConfidence(
+  aiReaderPreviewResultSchema.parse({
+    ...expectedOutput,
+    annotations: expectedOutput.annotations.map((annotation, index) =>
+      index === 0 ? { ...annotation, confidence: 0.99 } : annotation,
+    ),
+  }),
+)
+assert.equal(normalizedConfidenceOutput.annotations[0]?.confidence, 0.9)
+assert.doesNotThrow(() =>
+  validateReaderPreviewSkillOutput(
+    normalizedConfidenceOutput,
+    draft,
+    groundingSource,
+  ),
+)
+const annotationWithoutReaction = {
+  ...expectedOutput.annotations[0],
+} as Record<string, unknown>
+delete annotationWithoutReaction.reaction
+const normalizedPartialOutput = aiReaderPreviewResultSchema.parse(
+  normalizeReaderPreviewOutput({
+    ...expectedOutput,
+    annotations: [annotationWithoutReaction, ...expectedOutput.annotations.slice(1)],
+    suggestions: expectedOutput.suggestions.map((suggestion, index) =>
+      index === 0
+        ? {
+            ...suggestion,
+            annotationIds: [
+              expectedOutput.annotations[0]?.id,
+              expectedOutput.annotations[1]?.id,
+            ],
+          }
+        : suggestion,
+    ),
+  }),
+)
+assert.equal(
+  normalizedPartialOutput.annotations.length,
+  expectedOutput.annotations.length - 1,
+)
+assert.deepEqual(normalizedPartialOutput.suggestions[0]?.annotationIds, [
+  expectedOutput.annotations[1]?.id,
+])
+assert.doesNotThrow(() =>
+  validateReaderPreviewSkillOutput(
+    normalizedPartialOutput,
+    draft,
+    groundingSource,
+  ),
+)
 for (const annotation of expectedOutput.annotations) {
   const bodyMatch = annotation.fieldId.match(/^body-(\d+)$/)
   const field = annotation.fieldId === 'title'
