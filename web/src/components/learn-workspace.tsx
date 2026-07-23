@@ -1,7 +1,17 @@
 import * as React from 'react'
 import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, CheckCircle2, Funnel, MessageCircle, MoreHorizontal, Pin, SendHorizontal, X } from '@/components/ui/icon'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Funnel,
+  MessageCircle,
+  MoreHorizontal,
+  Pin,
+  SendHorizontal,
+  Sparkles,
+  X,
+} from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -57,7 +67,6 @@ type LearnWorkspaceProps = {
   libraryError?: string
   workflowSteps: WorkflowTitleMenuStep[]
   analysisError?: string
-  analysisPhase?: 'profile' | 'analysis' | null
   analysisWaitSeconds?: number
   isAnalyzing?: boolean
   isStreaming: boolean
@@ -358,6 +367,17 @@ function NoteDetailDialog({
   )
 }
 
+function AssistantAvatar() {
+  return (
+    <div
+      className="flex size-9 shrink-0 items-center justify-center rounded-[0.8rem] border border-white/80 bg-[linear-gradient(145deg,rgba(228,244,252,0.96),rgba(238,241,245,0.94))] text-[#586777] shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+      aria-hidden="true"
+    >
+      <Sparkles className="h-4 w-4" />
+    </div>
+  )
+}
+
 function AnalysisBlock({
   message,
   notes,
@@ -383,9 +403,7 @@ function AnalysisBlock({
   return (
     <>
       <article className="ui-chat-row mx-auto flex max-w-7xl gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.2),rgba(226,232,240,0.86))] text-xs font-semibold text-[var(--accent-strong)]">
-          AI
-        </div>
+        <AssistantAvatar />
         <div className="min-w-0 flex-1 rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-5 py-4 shadow-none">
           <p className="max-w-5xl text-[length:var(--ui-text-body)] leading-7 text-[var(--foreground)]">
             {commonConclusion}
@@ -478,49 +496,47 @@ function AssistantBlock({
   const hasHighlights = Boolean(message.highlights?.length)
   const leadLine = hasHighlights ? message.lines[0] : null
   const trailingLines = hasHighlights ? message.lines.slice(1) : message.lines
+  const displayTitle = message.title === '继续分析' ? '方向已记录' : message.title
 
   if (isAnalysis && hasHighlights) {
     return <AnalysisBlock message={message} notes={notes} snippets={snippets} />
   }
 
   return (
-    <article className="ui-chat-row mx-auto flex max-w-5xl gap-4">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-[length:var(--ui-text-meta)] font-semibold text-[var(--accent-strong)]">
-        AI
-      </div>
+    <article className="ui-chat-row mx-auto flex max-w-5xl items-start gap-3">
+      <AssistantAvatar />
       <div
         className={cn(
-          'min-w-0 flex-1',
+          'min-w-0',
           isAnalysis
-            ? 'rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-6 py-5 shadow-none'
-            : 'flex flex-col gap-4',
+            ? 'flex-1'
+            : 'w-full max-w-[46rem]',
         )}
       >
-        {message.title ? (
-          <div
-            className={cn(
-              'inline-flex rounded-full px-4 py-2 text-sm font-semibold text-[var(--foreground)]',
-              isAnalysis
-                ? 'border border-[var(--border)] bg-[rgba(238,241,245,0.94)] text-[var(--foreground)] shadow-none'
-                : 'border border-[var(--border)] bg-[var(--surface-raised)] shadow-none',
-            )}
-          >
-            {message.title}
-          </div>
-        ) : null}
+        <div className="mb-2 flex min-h-5 items-center gap-2 px-1 text-xs">
+          <span className="font-semibold text-[var(--foreground)]">Lumos</span>
+          {displayTitle ? (
+            <span className="text-[var(--soft-foreground)]">{displayTitle}</span>
+          ) : null}
+        </div>
+        <div
+          className={cn(
+            'rounded-[var(--ui-radius-panel)] rounded-tl-[0.4rem] border px-5 py-4',
+            isAnalysis
+              ? 'border-[var(--border)] bg-[var(--surface-muted)] shadow-none'
+              : 'border-white/90 bg-white/76 shadow-[0_12px_30px_rgba(15,23,42,0.045)]',
+          )}
+        >
         {leadLine ? (
-          <div className="mt-4">
-            <p className="text-[length:var(--ui-text-body)] leading-8 text-[var(--foreground)]">{leadLine}</p>
-          </div>
+          <p className="text-[length:var(--ui-text-body)] leading-8 text-[var(--foreground)]">
+            {leadLine}
+          </p>
         ) : (
-          <div className={cn(isAnalysis ? 'mt-4 flex flex-col gap-5' : 'flex flex-col gap-4')}>
-            {trailingLines.map((line) => (
+          <div className="flex flex-col gap-2.5">
+            {trailingLines.map((line, index) => (
               <p
-                key={line}
-                className={cn(
-                  'text-[length:var(--ui-text-body)] text-[var(--foreground)]',
-                  isAnalysis ? 'leading-8' : 'leading-8',
-                )}
+                key={`${message.id}-${index}`}
+                className="text-[length:var(--ui-text-body)] leading-8 text-[var(--foreground)]"
               >
                 {line}
               </p>
@@ -542,15 +558,16 @@ function AssistantBlock({
             ))}
           </div>
         ) : null}
-        {hasHighlights && trailingLines.length > 0 ? (
+          {hasHighlights && trailingLines.length > 0 ? (
           <div className="mt-4 rounded-[var(--ui-radius-card)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3">
-            {trailingLines.map((line) => (
-              <p key={line} className="text-sm leading-7 text-[var(--muted-foreground)]">
+            {trailingLines.map((line, index) => (
+              <p key={`${message.id}-trailing-${index}`} className="text-sm leading-7 text-[var(--muted-foreground)]">
                 {line}
               </p>
             ))}
           </div>
         ) : null}
+        </div>
       </div>
     </article>
   )
@@ -558,13 +575,16 @@ function AssistantBlock({
 
 function UserBlock({ message }: { message: ChatMessage }) {
   return (
-    <article className="ui-chat-row mx-auto flex max-w-5xl justify-end">
-      <div className="max-w-2xl rounded-[var(--ui-radius-panel)] rounded-br-[0.45rem] bg-[var(--foreground)] px-5 py-4 text-white shadow-[0_18px_36px_rgba(15,23,42,0.16)]">
-        {message.lines.map((line) => (
-          <p key={line} className="text-[length:var(--ui-text-body)] leading-7">
-            {line}
-          </p>
-        ))}
+    <article className="ui-chat-row mx-auto flex max-w-5xl justify-end pl-12">
+      <div className="flex w-fit max-w-[86%] flex-col items-end md:max-w-[44rem]">
+        <span className="mb-2 px-1 text-xs font-semibold text-[var(--soft-foreground)]">你</span>
+        <div className="rounded-[var(--ui-radius-panel)] rounded-br-[0.4rem] bg-[#202428] px-5 py-3.5 text-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]">
+          {message.lines.map((line, index) => (
+            <p key={`${message.id}-${index}`} className="text-[length:var(--ui-text-body)] leading-7">
+              {line}
+            </p>
+          ))}
+        </div>
       </div>
     </article>
   )
@@ -577,29 +597,25 @@ function TypingBlock({
 }: {
   title?: string
   text?: string
-  variant?: 'analysis' | 'profile' | 'dots'
+  variant?: 'analysis' | 'dots'
 }) {
-  const progressLabels =
-    variant === 'profile'
-      ? ['归纳素材共性', '理解喜欢原因', '更新写作画像']
-      : ['读取参考文案', '提炼写作结构', '整理偏好判断']
+  const progressLabels = ['读取参考文案', '提炼写作结构', '整理偏好判断']
 
   return (
     <article
       aria-live="polite"
-      className="ui-chat-row mx-auto flex max-w-5xl gap-4"
+      className="ui-chat-row mx-auto flex max-w-5xl items-start gap-3"
       role="status"
     >
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[linear-gradient(135deg,rgba(103,199,255,0.22),rgba(226,232,240,0.88))] text-[length:var(--ui-text-meta)] font-semibold text-[var(--accent-strong)]">
-        AI
-      </div>
-      <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 shadow-none">
+      <AssistantAvatar />
+      <div className="w-full max-w-[46rem]">
+        <div className="mb-2 flex min-h-5 items-center gap-2 px-1 text-xs">
+          <span className="font-semibold text-[var(--foreground)]">Lumos</span>
+          <span className="text-[var(--soft-foreground)]">正在回复</span>
+        </div>
+        <div className="rounded-[var(--ui-radius-panel)] rounded-tl-[0.4rem] border border-white/90 bg-white/76 px-5 py-4 shadow-[0_12px_30px_rgba(15,23,42,0.045)]">
         {title ? (
-          <div className="mb-2 inline-flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[var(--border)] bg-[rgba(238,241,245,0.94)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
-              {title}
-            </span>
-          </div>
+          <p className="mb-2 text-sm font-semibold text-[var(--foreground)]">{title}</p>
         ) : null}
         {text ? (
           <p className="mb-3 text-[length:var(--ui-text-body)] leading-7 text-[var(--foreground)]">{text}</p>
@@ -625,7 +641,7 @@ function TypingBlock({
             ))}
           </div>
         ) : (
-          <div className="flex items-center gap-2" aria-hidden="true">
+          <div className="flex items-center gap-2 py-1" aria-hidden="true">
             {Array.from({ length: 3 }).map((_, index) => (
               <span
                 key={index}
@@ -635,6 +651,7 @@ function TypingBlock({
             ))}
           </div>
         )}
+        </div>
       </div>
     </article>
   )
@@ -653,7 +670,6 @@ export function LearnWorkspace({
   libraryError = '',
   workflowSteps,
   analysisError = '',
-  analysisPhase = null,
   analysisWaitSeconds = 0,
   isAnalyzing = false,
   isStreaming,
@@ -688,6 +704,7 @@ export function LearnWorkspace({
   const conversationMenuButtonRefs = React.useRef(new Map<string, HTMLButtonElement>())
   const scrollViewportRef = React.useRef<HTMLDivElement | null>(null)
   const scrollAnchorRef = React.useRef<HTMLDivElement | null>(null)
+  const chatInputRef = React.useRef<HTMLTextAreaElement | null>(null)
 
   const updateConversationMenuPosition = React.useCallback((conversationId: string) => {
     const button = conversationMenuButtonRefs.current.get(conversationId)
@@ -733,6 +750,14 @@ export function LearnWorkspace({
       behavior: 'auto',
     })
   }, [activeConversationId, analysisReady, chatMessages.length])
+
+  React.useEffect(() => {
+    const input = chatInputRef.current
+    if (!input) return
+
+    input.style.height = 'auto'
+    input.style.height = `${Math.min(Math.max(input.scrollHeight, 52), 144)}px`
+  }, [chatInput])
 
   React.useEffect(() => {
     if (!openConversationMenuId) return
@@ -943,7 +968,13 @@ export function LearnWorkspace({
   }, [activeFolder?.name, activeTag, isFiltered])
 
   const setupMessages = React.useMemo(
-    () => chatMessages.filter((message) => message.stage === 'setup'),
+    () =>
+      chatMessages.filter(
+        (message) =>
+          message.stage === 'setup' &&
+          message.title !== '写作画像学习未完成' &&
+          message.title !== 'AI 暂时不可用',
+      ),
     [chatMessages],
   )
   const analysisMessages = React.useMemo(
@@ -962,14 +993,6 @@ export function LearnWorkspace({
 
     if (isAnalyzing) {
       const isLongWait = analysisWaitSeconds >= 30
-      if (analysisPhase === 'profile') {
-        return {
-          title: isLongWait ? 'AI 正在学习' : '正在学习你的写作方式',
-          text: '正在整理素材共性、标注理由和历史反馈。',
-          variant: 'profile' as const,
-        }
-      }
-
       return {
         title: isLongWait ? 'AI 正在处理' : '正在拆解文案',
         text: '正在整理结构和偏好。',
@@ -1003,7 +1026,7 @@ export function LearnWorkspace({
       title: '正在整理回答',
       variant: 'dots' as const,
     }
-  }, [analysisMessages.length, analysisPhase, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
+  }, [analysisMessages.length, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
 
   const filterControl = (
     <div className="relative">
@@ -1135,7 +1158,7 @@ export function LearnWorkspace({
   )
 
   return (
-    <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+    <div className="grid h-[100dvh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
       <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(15,23,42,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(15,23,42,0.06)]">
         <div className="shrink-0 px-6 pb-3 pt-6">
           <div className="flex items-center gap-3 px-1">
@@ -1173,6 +1196,13 @@ export function LearnWorkspace({
             {conversations.map((conversation) => {
               const isActive = conversation.id === activeConversationId
               const isRenaming = renamingConversationId === conversation.id
+              const sameTitleConversations = conversations.filter(
+                (item) => item.title === conversation.title,
+              )
+              const accessibleTitleSuffix =
+                sameTitleConversations.length > 1
+                  ? `，第 ${sameTitleConversations.findIndex((item) => item.id === conversation.id) + 1} 个`
+                  : ''
               const switchToConversation = () => {
                 setOpenConversationMenuId(null)
                 onSwitchConversation(conversation.id)
@@ -1181,20 +1211,8 @@ export function LearnWorkspace({
               return (
                 <div
                   key={conversation.id}
-                  role={isRenaming ? undefined : 'button'}
-                  tabIndex={isRenaming ? undefined : 0}
-                  aria-current={isActive ? 'true' : undefined}
-                  onClick={isRenaming ? undefined : switchToConversation}
-                  onKeyDown={(event) => {
-                    if (isRenaming) return
-
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      switchToConversation()
-                    }
-                  }}
                   className={cn(
-                    'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent px-3 py-2 text-sm leading-6 outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]',
+                    'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent px-3 py-2 text-sm leading-6 transition',
                     conversation.pinned
                       ? 'bg-[rgba(241,243,246,0.72)] text-[var(--accent-strong)]'
                       : 'bg-transparent',
@@ -1208,9 +1226,18 @@ export function LearnWorkspace({
                       : 'text-[var(--foreground)] hover:bg-white/42',
                   )}
                 >
+                  {!isRenaming ? (
+                    <button
+                      type="button"
+                      aria-current={isActive ? 'true' : undefined}
+                      aria-label={`打开对话 ${conversation.title}${accessibleTitleSuffix}`}
+                      onClick={switchToConversation}
+                      className="absolute inset-0 z-0 rounded-[var(--ui-radius-card)] bg-transparent outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--ring)]"
+                    />
+                  ) : null}
                   <MessageCircle
                     className={cn(
-                      'h-4 w-4 shrink-0',
+                      'pointer-events-none relative z-10 h-4 w-4 shrink-0',
                       conversation.pinned ? 'text-[var(--accent-strong)]' : 'text-[var(--soft-foreground)]',
                     )}
                   />
@@ -1232,11 +1259,11 @@ export function LearnWorkspace({
                           cancelConversationRename()
                         }
                       }}
-                      className="h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
+                      className="relative z-20 h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
                       aria-label="重命名对话"
                     />
                   ) : (
-                    <div className="min-w-0 flex-1 py-1 text-left">
+                    <div className="pointer-events-none relative z-10 min-w-0 flex-1 py-1 text-left">
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="block min-w-0 truncate">{conversation.title}</span>
                         {conversation.finalizedAt ? (
@@ -1250,7 +1277,7 @@ export function LearnWorkspace({
                   )}
 
                   {!isRenaming ? (
-                    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+                    <div className="relative z-20 flex h-8 w-8 shrink-0 items-center justify-center">
                       {conversation.pinned ? (
                         <Pin className="h-3.5 w-3.5 text-[var(--accent-strong)] transition group-hover:opacity-0 group-focus-within:opacity-0" />
                       ) : null}
@@ -1335,29 +1362,38 @@ export function LearnWorkspace({
       </aside>
 
       <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-        {analysisReady ? (
+        {analysisReady || isAnalyzing ? (
           <header className="grid grid-cols-1 items-center gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-6">
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
                   文案分析
                 </h1>
-                <WorkflowTitleMenu
-                  activeStep={activeWorkflowStep}
-                  steps={workflowSteps}
-                  onStepChange={onWorkflowStepChange}
-                />
+                {!isAnalyzing ? (
+                  <WorkflowTitleMenu
+                    activeStep={activeWorkflowStep}
+                    steps={workflowSteps}
+                    onStepChange={onWorkflowStepChange}
+                  />
+                ) : null}
               </div>
+              {analysisReady && !isAnalyzing ? (
+                <p className="mt-1.5 text-xs text-[var(--soft-foreground)]">
+                  继续补充偏好，或进入下一步
+                </p>
+              ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-              <Button variant="secondary" size="sm" onClick={onBackToSelection}>
-                上一步
-              </Button>
-              <Button size="sm" onClick={onNext}>
-                下一步
-              </Button>
-            </div>
+            {analysisReady && !isAnalyzing ? (
+              <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
+                <Button variant="secondary" size="sm" onClick={onBackToSelection}>
+                  上一步
+                </Button>
+                <Button size="sm" onClick={onNext} disabled={isStreaming}>
+                  下一步
+                </Button>
+              </div>
+            ) : null}
           </header>
         ) : null}
 
@@ -1365,11 +1401,21 @@ export function LearnWorkspace({
           ref={scrollViewportRef}
           className={cn(
             'min-h-0 flex-1 bg-transparent px-4 lg:px-8',
-            analysisReady ? 'overflow-y-auto py-5' : 'overflow-hidden py-2',
+            analysisReady || isAnalyzing ? 'overflow-y-auto py-5' : 'overflow-hidden py-2',
           )}
         >
-          {!analysisReady ? (
-	                <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
+          {isAnalyzing ? (
+            <div className="mx-auto flex h-full max-w-5xl items-center justify-center pb-[12vh]">
+              {typingState ? (
+                <TypingBlock
+                  title={typingState.title}
+                  text={typingState.text}
+                  variant={typingState.variant}
+                />
+              ) : null}
+            </div>
+          ) : !analysisReady ? (
+	          <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
               {setupMessages.length > 0 || typingState ? (
                 <div className="flex max-h-[32%] shrink-0 flex-col gap-4 overflow-y-auto pr-1">
                   {setupMessages.map((message) =>
@@ -1492,16 +1538,19 @@ export function LearnWorkspace({
                         {isAnalyzing ? (
                           <>
                             <span className="draft-thinking-dot h-2 w-2 rounded-full bg-current" />
-                            {analysisPhase === 'profile' ? '学习中...' : '分析中...'}
+                            分析中...
                           </>
                         ) : (
-                          analysisError ? '重新开始' : '开始分析'
+                          analysisError ? '重试本次分析' : '开始分析'
                         )}
                       </Button>
                     </div>
                   </div>
                   {analysisError ? (
-                    <p className="mt-2 text-right text-xs leading-5 text-[rgb(185,28,28)]">
+                    <p
+                      className="mt-2 text-right text-xs leading-5 text-[rgb(185,28,28)]"
+                      role="alert"
+                    >
                       {analysisError}
                     </p>
                   ) : null}
@@ -1575,7 +1624,7 @@ export function LearnWorkspace({
               </section>
             </div>
           ) : (
-            <div className="mx-auto flex max-w-5xl flex-col gap-5 pb-8">
+            <div className="mx-auto flex min-h-full max-w-5xl flex-col justify-end gap-6 pb-4">
               {setupMessages.map((message) =>
                 message.role === 'user' ? (
                   <UserBlock key={message.id} message={message} />
@@ -1606,12 +1655,14 @@ export function LearnWorkspace({
           )}
         </div>
 
-        {analysisReady ? (
-          <div className="bg-transparent px-4 py-4 lg:px-6">
-            <div className="mx-auto max-w-7xl">
-              <div className="relative">
+        {analysisReady && !isAnalyzing ? (
+          <div className="shrink-0 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.72)_28%)] px-4 pb-4 pt-2 lg:px-8 lg:pb-5">
+            <div className="mx-auto max-w-5xl">
+              <div className="rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.09)] bg-white/76 p-2 shadow-[0_14px_34px_rgba(15,23,42,0.055)] transition focus-within:border-[rgba(15,23,42,0.16)] focus-within:bg-white/92 focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
                 <Textarea
-                  className="min-h-[var(--ui-chat-input-min)] w-full resize-none rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[var(--ui-chat-input-pb)] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] outline-none shadow-[0_10px_24px_rgba(15,23,42,0.035)] focus:!border-[rgba(15,23,42,0.08)] focus:!ring-0 focus:!ring-offset-0 focus:!shadow-[0_18px_42px_rgba(15,23,42,0.08)] focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0"
+                  ref={chatInputRef}
+                  rows={1}
+                  className="min-h-[3.25rem] max-h-36 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 py-2.5 text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:!border-0 focus:!ring-0 focus:!ring-offset-0 focus:!shadow-none focus-visible:!outline-none focus-visible:!ring-0"
                   value={chatInput}
                   onChange={(event) => onChatInputChange(event.target.value)}
                   onKeyDown={(event) => {
@@ -1620,16 +1671,24 @@ export function LearnWorkspace({
                       onSendChat()
                     }
                   }}
-                  placeholder="发消息..."
+                  placeholder="继续提问，或补充你的偏好..."
+                  aria-label="继续提问或补充偏好"
                 />
-                <Button
-                  className="absolute bottom-8 right-8"
-                  onClick={onSendChat}
-                  disabled={isStreaming || !chatInput.trim()}
-                >
-                  <SendHorizontal className="h-4 w-4" />
-                  发送
-                </Button>
+                <div className="flex items-center justify-between gap-3 px-2 pb-1 pt-1.5">
+                  <span className="hidden text-xs text-[var(--soft-foreground)] sm:inline">
+                    Enter 发送 · Shift + Enter 换行
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="ml-auto min-w-[5.5rem]"
+                    onClick={onSendChat}
+                    disabled={isStreaming || !chatInput.trim()}
+                  >
+                    <SendHorizontal className="h-4 w-4" />
+                    发送
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

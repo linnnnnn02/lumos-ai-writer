@@ -18,7 +18,6 @@ import type {
   AiRewriteSuggestion,
   AiReaderPreviewResult,
   AiUsage,
-  BuildWritingProfileResponse,
   CreateFeedbackMemoryRequest,
   ProjectLength,
   SavedFolderRecord,
@@ -35,7 +34,6 @@ import {
   CheckCircle2,
   Clock3,
   Eye,
-  FileText,
   FolderOpen,
   GripVertical,
   Highlighter,
@@ -109,6 +107,7 @@ import {
   upsertNote,
 } from '@/lib/api-client'
 import { getCurrentAccessToken } from '@/lib/supabase-browser'
+import { loadLocalWorkspace, saveLocalWorkspace } from '@/lib/local-workspace'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
 import { buildFallbackSelectionRewrite } from './lib/rewrite'
@@ -137,6 +136,14 @@ type ChatMessage = {
   preferenceQuestion?: string
 }
 
+function isLegacyAnalysisErrorMessage(message: ChatMessage) {
+  return (
+    message.role === 'assistant' &&
+    message.stage === 'setup' &&
+    (message.title === '写作画像学习未完成' || message.title === 'AI 暂时不可用')
+  )
+}
+
 type RewriteChatMessage = {
   id: string
   role: 'assistant' | 'user'
@@ -153,10 +160,33 @@ type RewriteChatMessage = {
   recommendedIndex?: number
 }
 
+function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
+  const seen = new Set<string>()
+
+  return messages.filter((message) => {
+    const isReaderSuggestionMessage =
+      message.lines[0] === '带着读者预演建议回到编辑细调：' ||
+      message.lines[0] === '已带回读者预演建议。'
+    if (!isReaderSuggestionMessage) return true
+
+    const signature = `${message.role}:${message.lines.join('\n')}`
+    if (seen.has(signature)) return false
+    seen.add(signature)
+    return true
+  })
+}
+
 type PlanAttachment = {
   id: string
   name: string
   kind: 'image' | 'document'
+}
+
+type WritingBrief = {
+  objective: string
+  requiredFacts: string
+  boundaries: string
+  instructions: string
 }
 
 type ConversationRecord = {
@@ -174,6 +204,7 @@ type ConversationRecord = {
   length: ProjectLength | null
   topic: string
   targetAudience: string
+  writingBrief: WritingBrief
   updatedAt: string
 }
 
@@ -186,53 +217,31 @@ type ProjectRecord = {
   updatedAt: string
 }
 
-const lengthPreviewCards: Array<{
+const lengthOptions: Array<{
   value: ProjectLength
   title: string
   lines: string[]
 }> = [
   {
     value: 'short',
-    title: '短篇幅｜快速判断，约0-200字',
-    lines: [
-      '📒适配快速种草场景',
-      '上班族轻松吃上健康晚餐！\n十分钟上桌，百吃不厌！',
-      '🍅番茄炒鸡蛋做法：\n1️⃣鸡蛋大火滑熟先盛出\n2️⃣番茄炒出红汁+少许糖盐\n3️⃣倒回鸡蛋翻匀就好',
-      '🥚我拥护番茄炒蛋为快手菜的神！\n鸡蛋香嫩，番茄汁浓，拌米饭真的很香～\n快来复刻家里的味道！',
-    ],
+    title: '短篇幅',
+    lines: ['约 0-200 字', '适合快速表达一个判断或重点。'],
   },
   {
     value: 'medium',
-    title: '中篇幅｜完整说明，约201-600字',
-    lines: [
-      '📒适配完整说明场景',
-      '想吃一道稳定下饭、不会出错的家常菜，\n番茄炒鸡蛋真的可以闭眼做🍅\n酸甜开胃，鸡蛋嫩滑，十几分钟就能端上桌',
-      '🥣食材准备：\n番茄2个｜鸡蛋3个｜葱花\n盐｜少许糖｜一点清水',
-      '🍅番茄炒鸡蛋做法：\n1️⃣鸡蛋加一点清水打散，热锅多油，大火滑熟后先盛出\n2️⃣番茄切块下锅，中火炒到变软出红汁\n3️⃣加盐和少许糖调味，喜欢汤汁多可以加一小勺热水\n4️⃣倒回鸡蛋轻轻翻匀，让蛋块裹满番茄汁\n5️⃣出锅前撒葱花，香味会更明显',
-      '✅关键小技巧：\n鸡蛋刚定型就盛出，口感会更嫩\n番茄一定要炒出汁，拌饭才够香\n糖不用多，只是用来平衡番茄的酸味',
-      '这盘就是家里最安心的味道\n不知道吃什么的时候，照着做一盘准没错🍚',
-    ],
+    title: '中篇幅',
+    lines: ['约 201-600 字', '适合把背景、事实和个人判断说完整。'],
   },
   {
     value: 'long',
-    title: '长篇幅｜深度展开，约601-1000字',
-    lines: [
-      '📒适配深度展开场景',
-      '番茄炒鸡蛋看起来简单，\n但想做出“鸡蛋嫩、番茄汁浓、拌饭香”的效果，\n火候、番茄状态和调味顺序都很关键🍅🥚',
-      '这篇适合收藏起来反复做，尤其是刚开始学做家常菜的人。照着步骤来，基本不容易翻车',
-      '🥣食材准备：\n番茄2个｜鸡蛋3个｜葱花\n盐｜少许糖｜一点清水｜食用油',
-      '🍅食材处理：\n番茄可以一半切小块，一半切大块。小块更容易炒出红汁，大块吃起来还有番茄口感\n鸡蛋里加一点盐和一小勺清水，搅打到蛋液均匀，炒出来会更嫩',
-      '🍳详细做法：\n1️⃣热锅多放一点油，倒入鸡蛋液后用大火快速滑熟，看到蛋液刚刚凝固就盛出\n2️⃣锅里留一点底油，放葱花炒香，再倒入切好的番茄。先用中火慢慢炒，边炒边用锅铲压一压，让番茄出汁\n3️⃣番茄炒到变软、有红汁以后，加入盐和少许糖。糖不是为了做成甜口，而是用来平衡番茄的酸味\n4️⃣如果喜欢汤汁多一点，可以加一小勺热水；想要更浓郁的拌饭口感，就继续把汤汁稍微收一收\n5️⃣最后把鸡蛋倒回锅里，轻轻翻匀，让每一块鸡蛋都裹上番茄汁。鸡蛋回锅以后别翻太久，裹上汁就可以关火',
-      '✅不翻车小技巧：\n鸡蛋要大火快炒，刚凝固就盛出\n番茄要炒出汁再调味，不然味道会浮在表面\n鸡蛋回锅以后别翻太久，裹上汁就可以关火',
-      '🍚这样做出来的番茄炒鸡蛋，是酸甜浓汁包着嫩鸡蛋，配米饭真的很舒服。家常、简单、不挑人，想不到吃什么的时候，做它永远不会错～',
-    ],
+    title: '长篇幅',
+    lines: ['约 601-1000 字', '适合需要展开过程、对比或复杂信息的内容。'],
   },
 ]
 
 const workflowSteps: WorkflowTitleMenuStep[] = [
   { id: 'selection', title: '选择文案', caption: '挑选本轮参考内容', icon: MousePointer2 },
   { id: 'learn', title: '学习拆解', caption: '选文案并生成偏好分析', icon: Sparkles },
-  { id: 'length', title: '篇幅设置', caption: '确定内容长度与节奏', icon: FileText },
   { id: 'plan', title: '文案创作', caption: '核验信息并生成初版', icon: Layers3 },
   { id: 'rewrite', title: '编辑细调', caption: '逐句打磨与局部改写', icon: PenLine },
   { id: 'reader', title: '读者预演', caption: '模拟阅读反馈与划走风险', icon: Eye },
@@ -241,7 +250,6 @@ const workflowSteps: WorkflowTitleMenuStep[] = [
 const shellSteps: Array<{ id: PageStep; title: string }> = [
   { id: 'workspace', title: '项目' },
   { id: 'learn', title: '学习拆解' },
-  { id: 'length', title: '篇幅设置' },
   { id: 'plan', title: '文案创作' },
   { id: 'rewrite', title: '编辑细调' },
   { id: 'reader', title: '读者预演' },
@@ -265,6 +273,12 @@ const initialProjects: ProjectRecord[] = [
         length: null,
         topic: '我想写一篇关于深圳市区骑行路线的种草笔记',
         targetAudience: '想找周末路线、又怕路线太难的新手骑行用户',
+        writingBrief: {
+          objective: '让第一次骑行的人判断这条路线是否适合自己，并愿意收藏路线',
+          requiredFacts: '路线距离、难度、沿途补给、最适合停留的一段',
+          boundaries: '避免攻略站口吻，体验表达不夸满',
+          instructions: '',
+        },
         createdAt: '2026-04-30T21:30:00.000Z',
         lastOpenedAt: '2026-04-30T21:30:00.000Z',
         updatedAt: '2026-04-30T21:30:00.000Z',
@@ -288,6 +302,12 @@ const initialProjects: ProjectRecord[] = [
         length: null,
         topic: '我想写一篇数码产品选购和开箱结合的种草内容',
         targetAudience: '会刷小红书找真实体验、不喜欢太广告腔的用户',
+        writingBrief: {
+          objective: '帮助读者判断产品是否适合自己的真实使用场景',
+          requiredFacts: '真实使用场景、开箱体验、上手质感、购买判断',
+          boundaries: '避免参数堆砌、过度承诺和广告腔',
+          instructions: '',
+        },
         createdAt: '2026-04-30T19:10:00.000Z',
         lastOpenedAt: '2026-04-30T19:10:00.000Z',
         updatedAt: '2026-04-30T19:10:00.000Z',
@@ -437,6 +457,8 @@ type HydratedCloudWorkspace = {
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
   readerPreviewByConversation: Record<string, ReaderPreviewRecord>
+  chatInputByConversation: Record<string, string>
+  rewriteInputByConversation: Record<string, string>
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -449,6 +471,43 @@ function isInitialDraftCopy(value: unknown): value is InitialDraftCopy {
     typeof value.title === 'string' &&
     Array.isArray(value.body) &&
     value.body.every((item) => typeof item === 'string')
+  )
+}
+
+function getDefaultWritingBrief(topic: string): WritingBrief {
+  if (topic.includes('骑行')) {
+    return {
+      objective: '帮助目标读者判断这条路线是否适合自己',
+      requiredFacts: '路线距离、难度、沿途补给、最适合停留的一段',
+      boundaries: '避免攻略站口吻，体验表达不夸满',
+      instructions: '',
+    }
+  }
+
+  if (topic.includes('数码')) {
+    return {
+      objective: '帮助目标读者判断产品是否适合自己的使用场景',
+      requiredFacts: '真实使用场景、开箱体验、上手质感、购买判断',
+      boundaries: '避免参数堆砌、过度承诺和广告腔',
+      instructions: '',
+    }
+  }
+
+  return {
+    objective: '',
+    requiredFacts: '',
+    boundaries: '',
+    instructions: '',
+  }
+}
+
+function isWritingBrief(value: unknown): value is WritingBrief {
+  return (
+    isObject(value) &&
+    typeof value.objective === 'string' &&
+    typeof value.requiredFacts === 'string' &&
+    typeof value.boundaries === 'string' &&
+    typeof value.instructions === 'string'
   )
 }
 
@@ -477,6 +536,8 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
   const planAttachmentsByConversation: Record<string, PlanAttachment[]> = {}
   const readerAudienceByConversation: Record<string, string> = {}
   const readerPreviewByConversation: Record<string, ReaderPreviewRecord> = {}
+  const chatInputByConversation: Record<string, string> = {}
+  const rewriteInputByConversation: Record<string, string> = {}
 
   const projects = cloudProjects.map((project): ProjectRecord => {
     const conversations = project.conversations.map((conversation): ConversationRecord => {
@@ -497,6 +558,12 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       }
       if (isReaderPreviewRecord(state.readerPreview)) {
         readerPreviewByConversation[conversation.id] = state.readerPreview
+      }
+      if (typeof state.chatInput === 'string') {
+        chatInputByConversation[conversation.id] = state.chatInput
+      }
+      if (typeof state.rewriteInput === 'string') {
+        rewriteInputByConversation[conversation.id] = state.rewriteInput
       }
 
       const draft = conversation.draft
@@ -523,8 +590,12 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
             Array.isArray(message.lines) &&
             ['setup', 'analysis', 'followup'].includes(message.stage),
         )
+        .filter((message) => !isLegacyAnalysisErrorMessage(message))
 
       const finalDraft = isInitialDraftCopy(state.finalDraft) ? state.finalDraft : undefined
+      const writingBrief = isWritingBrief(state.writingBrief)
+        ? state.writingBrief
+        : getDefaultWritingBrief(conversation.topic)
 
       return {
         id: conversation.id,
@@ -541,6 +612,7 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
         length: conversation.length,
         topic: conversation.topic,
         targetAudience: conversation.targetAudience,
+        writingBrief,
         updatedAt: conversation.updatedAt,
       }
     })
@@ -564,6 +636,8 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
     planAttachmentsByConversation,
     readerAudienceByConversation,
     readerPreviewByConversation,
+    chatInputByConversation,
+    rewriteInputByConversation,
   }
 }
 
@@ -581,6 +655,8 @@ function buildWorkspaceSyncPayload(input: {
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
   readerPreviewByConversation: Record<string, ReaderPreviewRecord>
+  chatInputByConversation: Record<string, string>
+  rewriteInputByConversation: Record<string, string>
 }): SyncWorkspaceRequest {
   return {
     projects: input.projects.map((project) => ({
@@ -614,17 +690,22 @@ function buildWorkspaceSyncPayload(input: {
             ? { readerPreview: input.readerPreviewByConversation[conversation.id] }
             : {}),
           ...(conversation.finalDraft ? { finalDraft: conversation.finalDraft } : {}),
+          writingBrief: conversation.writingBrief,
+          chatInput: input.chatInputByConversation[conversation.id] ?? '',
+          rewriteInput: input.rewriteInputByConversation[conversation.id] ?? '',
         },
-        messages: conversation.chatMessages.map((message, index) => {
-          const { id, role, ...content } = message
-          return {
-            id,
-            channel: 'analysis',
-            role,
-            content,
-            createdAt: getMessageCreatedAt(conversation, index),
-          }
-        }),
+        messages: conversation.chatMessages
+          .filter((message) => !isLegacyAnalysisErrorMessage(message))
+          .map((message, index) => {
+            const { id, role, ...content } = message
+            return {
+              id,
+              channel: 'analysis',
+              role,
+              content,
+              createdAt: getMessageCreatedAt(conversation, index),
+            }
+          }),
         draft:
           input.draftReadyByConversation[conversation.id] &&
           input.draftCopyByConversation[conversation.id]
@@ -635,6 +716,104 @@ function buildWorkspaceSyncPayload(input: {
             : null,
       })),
     })),
+  }
+}
+
+type LocalWorkspaceSnapshot = HydratedCloudWorkspace & {
+  activeProjectId: string
+}
+
+type WorkspaceSaveStatus =
+  | 'saved-local'
+  | 'saving-local'
+  | 'syncing-cloud'
+  | 'synced-cloud'
+  | 'save-error'
+
+function normalizeLocalConversation(value: unknown): ConversationRecord | null {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.step !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.lastOpenedAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    typeof value.topic !== 'string' ||
+    typeof value.targetAudience !== 'string' ||
+    !Array.isArray(value.selectedItemIds) ||
+    !Array.isArray(value.chatMessages)
+  ) {
+    return null
+  }
+
+  return {
+    ...(value as unknown as ConversationRecord),
+    selectedItemIds: value.selectedItemIds.filter((item): item is string => typeof item === 'string'),
+    writingBrief: isWritingBrief(value.writingBrief)
+      ? value.writingBrief
+      : getDefaultWritingBrief(value.topic),
+  }
+}
+
+function loadGuestWorkspaceSnapshot(): LocalWorkspaceSnapshot | null {
+  const value = loadLocalWorkspace()
+  if (!isObject(value) || !Array.isArray(value.projects)) return null
+
+  const projects = value.projects
+    .map((project): ProjectRecord | null => {
+      if (
+        !isObject(project) ||
+        typeof project.id !== 'string' ||
+        typeof project.name !== 'string' ||
+        typeof project.folderId !== 'string' ||
+        typeof project.activeConversationId !== 'string' ||
+        typeof project.updatedAt !== 'string' ||
+        !Array.isArray(project.conversations)
+      ) {
+        return null
+      }
+
+      const conversations = project.conversations
+        .map(normalizeLocalConversation)
+        .filter((conversation): conversation is ConversationRecord => Boolean(conversation))
+
+      return {
+        id: project.id,
+        name: project.name,
+        folderId: project.folderId,
+        activeConversationId: conversations.some(
+          (conversation) => conversation.id === project.activeConversationId,
+        )
+          ? project.activeConversationId
+          : conversations[0]?.id ?? '',
+        updatedAt: project.updatedAt,
+        conversations,
+      }
+    })
+    .filter((project): project is ProjectRecord => Boolean(project))
+
+  if (projects.length === 0 && value.projects.length > 0) return null
+
+  const record = <T,>(candidate: unknown) =>
+    (isObject(candidate) ? candidate : {}) as Record<string, T>
+
+  return {
+    projects,
+    activeProjectId:
+      typeof value.activeProjectId === 'string' &&
+      projects.some((project) => project.id === value.activeProjectId)
+        ? value.activeProjectId
+        : projects[0]?.id ?? '',
+    analysisByConversation: record<AiAnalysisResult>(value.analysisByConversation),
+    draftCopyByConversation: record<InitialDraftCopy>(value.draftCopyByConversation),
+    draftReadyByConversation: record<boolean>(value.draftReadyByConversation),
+    rewriteMessagesByConversation: record<RewriteChatMessage[]>(value.rewriteMessagesByConversation),
+    planAttachmentsByConversation: record<PlanAttachment[]>(value.planAttachmentsByConversation),
+    readerAudienceByConversation: record<string>(value.readerAudienceByConversation),
+    readerPreviewByConversation: record<ReaderPreviewRecord>(value.readerPreviewByConversation),
+    chatInputByConversation: record<string>(value.chatInputByConversation),
+    rewriteInputByConversation: record<string>(value.rewriteInputByConversation),
   }
 }
 
@@ -685,10 +864,14 @@ function buildAssistantReply(question: string, context: AiAnalysisResult) {
     }
   }
 
+  const normalizedQuestion = question.replace(/[。！？!?]+$/, '')
+
   return {
     stage: 'followup' as const,
-    title: '继续分析',
-    lines: [`已记录这个方向。${context.preference[0]} ${context.preference[1]}`],
+    title: '方向已记录',
+    lines: [
+      `明白，这次会以你刚才补充的方向为准：“${normalizedQuestion}”。后续分析会据此校准信息重点、语气和结构。`,
+    ],
   }
 }
 
@@ -751,31 +934,6 @@ function buildAnalysisChat(context: AiAnalysisResult): ChatMessage[] {
   ]
 }
 
-function buildWritingProfileChat(response: BuildWritingProfileResponse): ChatMessage {
-  const { profile, revision, reused } = response
-  const evidenceText = `${profile.evidenceCount} 条素材与反馈`
-  const keepText = profile.mustKeep.slice(0, 2).join('；')
-  const avoidText = profile.mustAvoid.slice(0, 2).join('；')
-  const questionText = profile.openQuestions[0]
-  const lines = [
-    profile.summary,
-    reused
-      ? `${evidenceText}没有变化，这次沿用第 ${revision.version} 版写作画像。`
-      : `已根据${evidenceText}更新为第 ${revision.version} 版写作画像。`,
-    keepText ? `接下来会保留：${keepText}。` : '接下来暂时没有新增必须保留的规则。',
-    avoidText ? `接下来会避开：${avoidText}。` : '暂时没有明确需要避开的写法。',
-    questionText ? `还需要继续确认：${questionText}` : '目前没有待确认的问题。',
-  ]
-
-  return {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    stage: 'analysis',
-    title: reused ? '已读取你的写作画像' : '已更新你的写作画像',
-    lines,
-  }
-}
-
 function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
@@ -784,51 +942,59 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : '请求失败'
 }
 
+function normalizeDraftSentence(value: string) {
+  const trimmed = value.trim().replace(/[。！？.!?]+$/, '')
+  return trimmed ? `${trimmed}。` : ''
+}
+
+function getRequiredFactSummary(value: string) {
+  return value
+    .split(/[\n；;]+/)
+    .map((item) => item.trim().replace(/[。！？.!?]+$/, ''))
+    .filter(Boolean)
+    .join('；')
+}
+
 function buildInitialDraftCopy(input: {
   topic: string
   targetAudience: string
   length: ProjectLength
+  writingBrief: WritingBrief
 }): InitialDraftCopy {
-  const isLong = input.length === 'long'
+  const topic =
+    input.topic.replace(/^我想写一篇/, '').replace(/的?小红书文案$/, '').trim() ||
+    '这次的真实体验'
+  const audience = input.targetAudience.trim()
+  const factSummary = getRequiredFactSummary(input.writingBrief.requiredFacts)
+  const objective = input.writingBrief.objective
+    .trim()
+    .replace(/^让(?:目标)?读者/, '希望你')
+    .replace(/^希望读者/, '希望你')
+  const body = [
+    normalizeDraftSentence(`如果你是${audience}，这篇先聊聊${topic}`),
+    normalizeDraftSentence(`目前可以确认的是：${factSummary}`),
+    normalizeDraftSentence(objective),
+  ]
 
-  if (input.topic.includes('骑行')) {
-    return {
-      title: '深圳新手骑行路线，第一次出发也不慌',
-      body: [
-        '周末想骑车放松一下，又怕路线太难、补给不方便，可以先从市区友好路线开始🚴‍♀️',
-        '我更推荐新手先选路面平、休息点多、能随时折返的路线。不要一上来就追求长距离，先把节奏骑舒服，比打卡更重要',
-        '📍路线可以安排成：公园绿道出发，沿着河边或海边慢慢骑，中途找便利店/咖啡店补水，最后在视野开阔的位置停下来休息',
-        '新手最容易忽略的是返程体力。出发前看好距离和坡度，骑到一半还有余力的时候就可以回头，不要硬撑到累崩',
-        isLong
-          ? '如果是第一次骑，建议把总时长控制在 1-2 小时内，带好水、手套和充好电的手机。路线不用排太满，留一点时间看风景、拍照、休息，体验会轻松很多'
-          : '这类路线最适合想轻松出门的人，风景够看，强度不吓人，也更容易坚持下去',
-        '你们周末会更想骑城市绿道，还是海边路线？',
-      ],
-    }
+  if (input.length !== 'short') {
+    body.splice(
+      2,
+      0,
+      '真正需要判断的，不是一个笼统的“值不值得”，而是这些已确认的条件是否和你的需求对得上。',
+    )
   }
 
-  if (input.topic.includes('数码')) {
-    return {
-      title: '这类数码产品，开箱前我会先看这几点',
-      body: [
-        '想买数码产品但又怕踩坑，真的不要只看参数表。真实体验里的细节，往往比一句“性能很强”更有参考价值📱',
-        '我会先看三个地方：上手质感、日常使用频率、以及它到底有没有解决真实问题。如果只是包装好看、功能听起来很满，但拿到手以后不常用，就很容易闲置',
-        '开箱时可以重点记录外观、重量、操作顺不顺、和旧设备相比有没有明显提升。这些细节写出来，会比单纯夸“好用”更让人相信',
-        isLong
-          ? '如果预算有限，也可以把缺点写清楚。比如适合谁、不适合谁、哪些场景体验最好。真实的边界感反而会让推荐更有可信度'
-          : '最后再给一句明确判断：适合谁买，谁可以再等等。这样读者看完会更容易做决定',
-      ],
-    }
+  if (input.length === 'long') {
+    body.splice(
+      -1,
+      0,
+      '如果你的情况和上面不同，先不要照搬结论。把差异问清楚，再做选择会更稳妥。',
+    )
   }
 
   return {
-    title: input.topic.replace(/^我想写一篇/, '').replace(/的?小红书文案$/, '') || '先生成一版可继续细调的初版方案',
-    body: [
-      `这篇先面向${input.targetAudience}，把最核心的使用场景、真实感受和推荐理由讲清楚`,
-      '开头不要急着下结论，先把读者带进一个具体场景，让 TA 觉得“这就是我会遇到的问题”',
-      '正文里保留真实细节，少用空泛形容。可以写选择理由、使用过程、对比感受，或者一个让人记住的小瞬间',
-      '最后用一句自然的个人判断收住，再留一个轻互动，让读者愿意评论或收藏',
-    ],
+    title: topic,
+    body: body.filter(Boolean),
   }
 }
 
@@ -1121,14 +1287,21 @@ function ShellStepPills({ step }: { step: PageStep }) {
 }
 
 function App() {
+  const [restoredGuestWorkspace] = useState(loadGuestWorkspaceSnapshot)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(true)
   const [isLibraryOpen, setIsLibraryOpen] = useState(false)
-  const [projects, setProjects] = useState<ProjectRecord[]>(initialProjects)
-  const [activeProjectId, setActiveProjectId] = useState(initialProjects[0].id)
-  const [chatInput, setChatInput] = useState('')
+  const [isReferenceSelectionOpen, setIsReferenceSelectionOpen] = useState(false)
+  const [projects, setProjects] = useState<ProjectRecord[]>(
+    restoredGuestWorkspace?.projects ?? initialProjects,
+  )
+  const [activeProjectId, setActiveProjectId] = useState(
+    restoredGuestWorkspace?.activeProjectId ?? initialProjects[0].id,
+  )
+  const [chatInputByConversation, setChatInputByConversation] = useState<Record<string, string>>(
+    restoredGuestWorkspace?.chatInputByConversation ?? {},
+  )
   const [isChatStreaming, setIsChatStreaming] = useState(false)
   const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
-  const [analysisPhase, setAnalysisPhase] = useState<'profile' | 'analysis' | null>(null)
   const [analysisWaitStartedAt, setAnalysisWaitStartedAt] = useState<number | null>(null)
   const [draftWaitStartedAt, setDraftWaitStartedAt] = useState<number | null>(null)
   const [aiWaitTick, setAiWaitTick] = useState(Date.now())
@@ -1138,7 +1311,7 @@ function App() {
   const [, setAnalysisUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
-  const [newProjectName, setNewProjectName] = useState('深圳周末路线项目')
+  const [newProjectName, setNewProjectName] = useState('')
   const [newProjectFolderId, setNewProjectFolderId] = useState(demoFolders[0].id)
   const [showCreateProjectCard, setShowCreateProjectCard] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
@@ -1149,21 +1322,23 @@ function App() {
   const [selectedRewriteFieldId, setSelectedRewriteFieldId] = useState('')
   const [rewriteSelectionCandidate, setRewriteSelectionCandidate] =
     useState<RewriteSelectionCandidate | null>(null)
-  const [rewriteChatInput, setRewriteChatInput] = useState('')
+  const [rewriteInputByConversation, setRewriteInputByConversation] = useState<
+    Record<string, string>
+  >(restoredGuestWorkspace?.rewriteInputByConversation ?? {})
   const [rewriteMessagesByConversation, setRewriteMessagesByConversation] = useState<
     Record<string, RewriteChatMessage[]>
-  >({})
+  >(restoredGuestWorkspace?.rewriteMessagesByConversation ?? {})
   const [rewritePendingConversationId, setRewritePendingConversationId] = useState('')
   const [, setRewriteUsageByConversation] = useState<Record<string, AiUsage | null>>({})
   const [planAttachmentsByConversation, setPlanAttachmentsByConversation] = useState<
     Record<string, PlanAttachment[]>
-  >({})
+  >(restoredGuestWorkspace?.planAttachmentsByConversation ?? {})
   const [readerAudienceByConversation, setReaderAudienceByConversation] = useState<
     Record<string, string>
-  >({})
+  >(restoredGuestWorkspace?.readerAudienceByConversation ?? {})
   const [readerPreviewByConversation, setReaderPreviewByConversation] = useState<
     Record<string, ReaderPreviewRecord>
-  >({})
+  >(restoredGuestWorkspace?.readerPreviewByConversation ?? {})
   const [readerPreviewPendingConversationId, setReaderPreviewPendingConversationId] = useState('')
   const [readerPreviewErrorByConversation, setReaderPreviewErrorByConversation] = useState<
     Record<string, string>
@@ -1174,8 +1349,12 @@ function App() {
   const [isReaderAudienceOpen, setIsReaderAudienceOpen] = useState(false)
   const [activeReaderAnnotationId, setActiveReaderAnnotationId] = useState('')
   const [finalCopyToast, setFinalCopyToast] = useState('')
-  const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>({})
-  const [draftCopyByConversation, setDraftCopyByConversation] = useState<Record<string, InitialDraftCopy>>({})
+  const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>(
+    restoredGuestWorkspace?.draftReadyByConversation ?? {},
+  )
+  const [draftCopyByConversation, setDraftCopyByConversation] = useState<
+    Record<string, InitialDraftCopy>
+  >(restoredGuestWorkspace?.draftCopyByConversation ?? {})
   const [, setDraftUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
@@ -1200,7 +1379,11 @@ function App() {
   } = useCloudWorkspace()
   const [analysisByConversation, setAnalysisByConversation] = useState<
     Record<string, AiAnalysisResult>
-  >({})
+  >(restoredGuestWorkspace?.analysisByConversation ?? {})
+  const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<WorkspaceSaveStatus>(
+    cloudWorkspaceStatus === 'guest' ? 'saved-local' : 'synced-cloud',
+  )
+  const [workspaceSavedAt, setWorkspaceSavedAt] = useState('')
   const [draftMoveHistoryByConversation, setDraftMoveHistoryByConversation] = useState<
     Record<string, DraftMoveHistory>
   >({})
@@ -1226,6 +1409,8 @@ function App() {
   const draftDropLandingTimerRef = useRef<number | null>(null)
   const draftBridgeGenerationTimerRef = useRef<number | null>(null)
   const workspaceSyncTimerRef = useRef<number | null>(null)
+  const localWorkspaceSaveTimerRef = useRef<number | null>(null)
+  const localWorkspaceCommitTimerRef = useRef<number | null>(null)
   const workspaceSyncBaselineRef = useRef('')
   const cloudWorkspaceHydratedUserIdRef = useRef('')
   const skipNextWorkspaceAutosaveRef = useRef(false)
@@ -1255,6 +1440,22 @@ function App() {
       ) ?? activeProject.conversations[0],
     [activeProject],
   )
+  const chatInput = chatInputByConversation[activeConversation.id] ?? ''
+  const rewriteChatInput = rewriteInputByConversation[activeConversation.id] ?? ''
+
+  function setChatInput(value: string) {
+    setChatInputByConversation((current) => ({
+      ...current,
+      [activeConversation.id]: value,
+    }))
+  }
+
+  function setRewriteChatInput(value: string) {
+    setRewriteInputByConversation((current) => ({
+      ...current,
+      [activeConversation.id]: value,
+    }))
+  }
 
   const workspaceSyncPayload = useMemo(
     () =>
@@ -1267,6 +1468,8 @@ function App() {
         planAttachmentsByConversation,
         readerAudienceByConversation,
         readerPreviewByConversation,
+        chatInputByConversation,
+        rewriteInputByConversation,
       }),
     [
       analysisByConversation,
@@ -1276,6 +1479,8 @@ function App() {
       projects,
       readerAudienceByConversation,
       readerPreviewByConversation,
+      chatInputByConversation,
+      rewriteInputByConversation,
       rewriteMessagesByConversation,
     ],
   )
@@ -1290,8 +1495,10 @@ function App() {
       ? 'workspace'
       : getConversationStep(activeConversation)
   const activeWorkflowStep: WorkflowStepId =
-    step === 'workspace' || step === 'library'
+    isReferenceSelectionOpen || step === 'workspace' || step === 'library'
       ? 'selection'
+      : step === 'length'
+        ? 'plan'
       : step === 'learn' && !activeConversation.analysisReady
         ? 'selection'
         : step
@@ -1325,18 +1532,22 @@ function App() {
     if (cloudWorkspaceStatus === 'guest') {
       if (!cloudWorkspaceHydratedUserIdRef.current) return
 
+      const restored = loadGuestWorkspaceSnapshot()
       cloudWorkspaceHydratedUserIdRef.current = ''
       workspaceSyncBaselineRef.current = ''
-      setProjects(initialProjects)
-      setActiveProjectId(initialProjects[0].id)
-      setAnalysisByConversation({})
-      setDraftCopyByConversation({})
-      setDraftReadyByConversation({})
-      setRewriteMessagesByConversation({})
-      setPlanAttachmentsByConversation({})
-      setReaderAudienceByConversation({})
-      setReaderPreviewByConversation({})
+      setProjects(restored?.projects ?? initialProjects)
+      setActiveProjectId(restored?.activeProjectId ?? initialProjects[0].id)
+      setAnalysisByConversation(restored?.analysisByConversation ?? {})
+      setDraftCopyByConversation(restored?.draftCopyByConversation ?? {})
+      setDraftReadyByConversation(restored?.draftReadyByConversation ?? {})
+      setRewriteMessagesByConversation(restored?.rewriteMessagesByConversation ?? {})
+      setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
+      setReaderAudienceByConversation(restored?.readerAudienceByConversation ?? {})
+      setReaderPreviewByConversation(restored?.readerPreviewByConversation ?? {})
+      setChatInputByConversation(restored?.chatInputByConversation ?? {})
+      setRewriteInputByConversation(restored?.rewriteInputByConversation ?? {})
       setReaderPreviewErrorByConversation({})
+      setWorkspaceSaveStatus('saved-local')
       setIsWorkspaceOpen(true)
       setIsLibraryOpen(false)
       return
@@ -1365,10 +1576,77 @@ function App() {
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
     setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
     setReaderPreviewByConversation(hydrated.readerPreviewByConversation)
+    setChatInputByConversation(hydrated.chatInputByConversation)
+    setRewriteInputByConversation(hydrated.rewriteInputByConversation)
     setReaderPreviewErrorByConversation({})
+    setWorkspaceSaveStatus('synced-cloud')
     setIsWorkspaceOpen(true)
     setIsLibraryOpen(false)
   }, [cloudWorkspaceProjects, cloudWorkspaceStatus, cloudWorkspaceUserId])
+
+  useEffect(() => {
+    if (cloudWorkspaceStatus !== 'guest') return
+
+    if (localWorkspaceSaveTimerRef.current) {
+      window.clearTimeout(localWorkspaceSaveTimerRef.current)
+    }
+    if (localWorkspaceCommitTimerRef.current) {
+      window.clearTimeout(localWorkspaceCommitTimerRef.current)
+    }
+
+    const snapshot: LocalWorkspaceSnapshot = {
+      projects,
+      activeProjectId,
+      analysisByConversation,
+      draftCopyByConversation,
+      draftReadyByConversation,
+      rewriteMessagesByConversation,
+      planAttachmentsByConversation,
+      readerAudienceByConversation,
+      readerPreviewByConversation,
+      chatInputByConversation,
+      rewriteInputByConversation,
+    }
+
+    localWorkspaceSaveTimerRef.current = window.setTimeout(() => {
+      setWorkspaceSaveStatus('saving-local')
+      localWorkspaceSaveTimerRef.current = null
+      localWorkspaceCommitTimerRef.current = window.setTimeout(() => {
+        try {
+          const savedAt = saveLocalWorkspace(snapshot)
+          setWorkspaceSavedAt(savedAt)
+          setWorkspaceSaveStatus('saved-local')
+        } catch {
+          setWorkspaceSaveStatus('save-error')
+        }
+        localWorkspaceCommitTimerRef.current = null
+      }, 350)
+    }, 0)
+
+    return () => {
+      if (localWorkspaceSaveTimerRef.current) {
+        window.clearTimeout(localWorkspaceSaveTimerRef.current)
+        localWorkspaceSaveTimerRef.current = null
+      }
+      if (localWorkspaceCommitTimerRef.current) {
+        window.clearTimeout(localWorkspaceCommitTimerRef.current)
+        localWorkspaceCommitTimerRef.current = null
+      }
+    }
+  }, [
+    activeProjectId,
+    analysisByConversation,
+    chatInputByConversation,
+    cloudWorkspaceStatus,
+    draftCopyByConversation,
+    draftReadyByConversation,
+    planAttachmentsByConversation,
+    projects,
+    readerAudienceByConversation,
+    readerPreviewByConversation,
+    rewriteInputByConversation,
+    rewriteMessagesByConversation,
+  ])
 
   useEffect(() => {
     if (skipNextWorkspaceAutosaveRef.current) {
@@ -1390,12 +1668,18 @@ function App() {
 
     const payload = workspaceSyncPayload
     const serializedPayload = workspaceSyncSerialized
+    setWorkspaceSaveStatus('syncing-cloud')
     workspaceSyncTimerRef.current = window.setTimeout(() => {
       workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
         .catch(() => undefined)
         .then(async () => {
           await saveCloudWorkspace(payload)
           workspaceSyncBaselineRef.current = serializedPayload
+          setWorkspaceSavedAt(new Date().toISOString())
+          setWorkspaceSaveStatus('synced-cloud')
+        })
+        .catch(() => {
+          setWorkspaceSaveStatus('save-error')
         })
       workspaceSyncTimerRef.current = null
     }, 900)
@@ -1430,6 +1714,12 @@ function App() {
       }
       if (workspaceSyncTimerRef.current) {
         window.clearTimeout(workspaceSyncTimerRef.current)
+      }
+      if (localWorkspaceSaveTimerRef.current) {
+        window.clearTimeout(localWorkspaceSaveTimerRef.current)
+      }
+      if (localWorkspaceCommitTimerRef.current) {
+        window.clearTimeout(localWorkspaceCommitTimerRef.current)
       }
     },
     [],
@@ -1675,8 +1965,18 @@ function App() {
   const hasSelectedReferences = selectedItemIds.length > 0
   const hasLearningResult = hasSelectedReferences && activeConversation.analysisReady
   const hasLengthSelected = Boolean(activeConversation.length)
-  const hasPlanReady = hasLearningResult && hasLengthSelected
-  const hasDraftReady = hasPlanReady && Boolean(draftReadyByConversation[activeConversation.id])
+  const hasPlanReady = hasLearningResult
+  const missingBriefFields = [
+    activeConversation.topic.trim().length < 4 ? '内容主题' : '',
+    activeConversation.targetAudience.trim().length < 4 ? '目标读者' : '',
+    activeConversation.writingBrief.requiredFacts.trim().length < 4 ? '必含事实' : '',
+    !hasLengthSelected ? '篇幅' : '',
+  ].filter(Boolean)
+  const isWritingBriefValid = missingBriefFields.length === 0
+  const canGenerateDraft = hasPlanReady && isWritingBriefValid
+  const hasDraftReady =
+    canGenerateDraft && Boolean(draftReadyByConversation[activeConversation.id])
+  const hasStoredDraft = Boolean(draftCopyByConversation[activeConversation.id])
   const isAnalyzing = analysisPendingConversationId === activeConversation.id
   const isDraftGenerating = draftGeneratingConversationId === activeConversation.id
   const analysisWaitSeconds =
@@ -1765,38 +2065,43 @@ function App() {
         topic: activeConversation.topic,
         targetAudience: activeConversation.targetAudience,
         length: effectiveLength,
+        writingBrief: activeConversation.writingBrief,
       }),
     [
       effectiveLength,
       activeConversation.targetAudience,
       activeConversation.topic,
+      activeConversation.writingBrief,
     ],
   )
   const initialDraftCopy =
     draftCopyByConversation[activeConversation.id] ?? generatedInitialDraftCopy
 
-  const creationBrief = useMemo(() => {
-    if (activeConversation.topic.includes('骑行')) {
-      return {
-        mustInclude: '路线距离、难度、沿途补给、最适合停留的一段',
-        avoidTone: '避免攻略站口吻，体验表达不夸满',
-      }
-    }
+  const creationBrief = useMemo(
+    () => ({
+      mustInclude: [
+        activeConversation.writingBrief.requiredFacts.trim(),
+        activeConversation.writingBrief.objective.trim()
+          ? `写作目标：${activeConversation.writingBrief.objective.trim()}`
+          : '',
+        activeConversation.writingBrief.instructions.trim()
+          ? `补充要求：${activeConversation.writingBrief.instructions.trim()}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      avoidTone: activeConversation.writingBrief.boundaries.trim(),
+    }),
+    [activeConversation.writingBrief],
+  )
 
-    if (activeConversation.topic.includes('数码')) {
-      return {
-        mustInclude: '真实使用场景、开箱体验、上手质感、购买判断',
-        avoidTone: '避免参数堆砌、过度承诺和广告腔',
-      }
-    }
-
-    return {
-      mustInclude: '核心卖点、使用场景、真实细节、推荐理由',
-      avoidTone: '避免空泛夸张、硬广表达和过度承诺',
-    }
-  }, [activeConversation.topic])
-
-  const rewriteMessages = rewriteMessagesByConversation[activeConversation.id] ?? []
+  const rewriteMessages = useMemo(
+    () =>
+      dedupeReaderSuggestionMessages(
+        rewriteMessagesByConversation[activeConversation.id] ?? [],
+      ),
+    [activeConversation.id, rewriteMessagesByConversation],
+  )
   const planAttachments = planAttachmentsByConversation[activeConversation.id] ?? []
   const readerAudienceDraft = readerAudienceByConversation[activeConversation.id] ?? ''
   const effectiveReaderAudience = readerAudienceDraft.trim() || activeConversation.targetAudience
@@ -1849,6 +2154,10 @@ function App() {
     () => projects.find((project) => project.id === projectPendingDeleteId),
     [projectPendingDeleteId, projects],
   )
+  const isNewProjectNameDuplicate = projects.some(
+    (project) =>
+      Boolean(newProjectName.trim()) && project.name.trim() === newProjectName.trim(),
+  )
 
   function updateProject(projectId: string, updater: (project: ProjectRecord) => ProjectRecord) {
     setProjects((current) =>
@@ -1874,6 +2183,128 @@ function App() {
             }
           : conversation,
       ),
+    }))
+  }
+
+  function invalidateDraftOutputs(conversationId: string) {
+    setDraftReadyByConversation((current) => ({
+      ...current,
+      [conversationId]: false,
+    }))
+    setDraftGenerationErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setReaderPreviewByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setReaderPreviewErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+  }
+
+  function invalidateAnalysisAndDraft(conversationId: string) {
+    setAnalysisByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    invalidateDraftOutputs(conversationId)
+  }
+
+  function markDraftEdited() {
+    const conversationId = activeConversation.id
+    setReaderPreviewByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setReaderPreviewErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    updateConversation(activeProject.id, conversationId, (conversation) => ({
+      ...conversation,
+      finalizedAt: undefined,
+    }))
+  }
+
+  function handleWritingBriefChange(
+    field: 'topic' | 'targetAudience' | keyof WritingBrief,
+    value: string,
+  ) {
+    invalidateDraftOutputs(activeConversation.id)
+    updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
+      ...conversation,
+      finalizedAt: undefined,
+      ...(field === 'topic' || field === 'targetAudience'
+        ? { [field]: value }
+        : {
+            writingBrief: {
+              ...conversation.writingBrief,
+              [field]: value,
+            },
+          }),
+    }))
+  }
+
+  function handleLengthChange(length: ProjectLength) {
+    if (activeConversation.length === length) return
+
+    invalidateDraftOutputs(activeConversation.id)
+    setDraftUsageByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
+    setDraftBridgeMessagesByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
+    setDraftMoveHistoryByConversation((current) => {
+      const next = { ...current }
+      delete next[activeConversation.id]
+      return next
+    })
+    setDraftDragSelection(null)
+    setDraftPointerDrag(null)
+    setDraftDropTarget(null)
+    setDraftDropLanding(null)
+    setDraftMovePrompt(null)
+
+    updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
+      ...conversation,
+      finalizedAt: undefined,
+      length,
+    }))
+  }
+
+  function handleReaderAudienceChange(value: string) {
+    const conversationId = activeConversation.id
+    setReaderAudienceByConversation((current) => ({
+      ...current,
+      [conversationId]: value,
+    }))
+    setReaderPreviewByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setReaderPreviewErrorByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    updateConversation(activeProject.id, conversationId, (conversation) => ({
+      ...conversation,
+      finalizedAt: undefined,
     }))
   }
 
@@ -1911,11 +2342,10 @@ function App() {
       draftDropLandingTimerRef.current = null
     }
 
-    setChatInput('')
     setSelectedRewriteText('')
     setSelectedRewriteFieldId('')
     setRewriteSelectionCandidate(null)
-    setRewriteChatInput('')
+    setIsReferenceSelectionOpen(false)
     setOpenSidebarConversationMenuId('')
     setRenamingSidebarConversationId('')
     setDraftSidebarConversationTitle('')
@@ -1948,21 +2378,27 @@ function App() {
 
     setIsWorkspaceOpen(false)
     setIsLibraryOpen(false)
-    updateConversationStep(activeProject.id, activeConversation.id, nextStep)
+    updateConversationStep(
+      activeProject.id,
+      activeConversation.id,
+      nextStep === 'length' ? 'plan' : nextStep,
+    )
   }
 
   function handleWorkflowStepChange(nextStep: WorkflowStepId) {
     if (nextStep === 'selection') {
       setIsWorkspaceOpen(false)
       setIsLibraryOpen(false)
-      handleBackToSelection()
+      setIsReferenceSelectionOpen(true)
       updateConversationStep(activeProject.id, activeConversation.id, 'learn')
       return
     }
 
+    setIsReferenceSelectionOpen(false)
+
     if (nextStep === 'reader') {
       goToStep('reader')
-      void handleGenerateReaderPreview()
+      if (!activeReaderPreview) void handleGenerateReaderPreview()
       return
     }
 
@@ -2060,7 +2496,7 @@ function App() {
 
   function handleCreateProject() {
     const name = newProjectName.trim()
-    if (!name) return
+    if (!name || projects.some((project) => project.name.trim() === name)) return
 
     const now = new Date().toISOString()
     const conversationId = crypto.randomUUID()
@@ -2079,8 +2515,9 @@ function App() {
           chatMessages: [],
           analysisReady: false,
           length: null,
-          topic: `我想围绕「${name}」写一篇新的小红书文案`,
-          targetAudience: '还没细分，后面会继续补充',
+          topic: '',
+          targetAudience: '',
+          writingBrief: getDefaultWritingBrief(''),
           createdAt: now,
           lastOpenedAt: now,
           updatedAt: now,
@@ -2108,8 +2545,9 @@ function App() {
       chatMessages: [],
       analysisReady: false,
       length: null,
-      topic: `我想继续围绕「${activeProject.name}」写一篇新的小红书文案`,
-      targetAudience: '还没细分，后面会继续补充',
+      topic: '',
+      targetAudience: '',
+      writingBrief: getDefaultWritingBrief(''),
       createdAt: now,
       lastOpenedAt: now,
       updatedAt: now,
@@ -2379,6 +2817,7 @@ function App() {
   }
 
   function handleToggleItems(itemIds: string[]) {
+    invalidateAnalysisAndDraft(activeConversation.id)
     updateConversation(activeProject.id, activeConversation.id, (conversation) => {
       const currentIds = new Set(conversation.selectedItemIds)
       const allSelected = itemIds.every((itemId) => currentIds.has(itemId))
@@ -2393,11 +2832,13 @@ function App() {
         ...conversation,
         selectedItemIds: Array.from(currentIds),
         analysisReady: false,
+        finalizedAt: undefined,
       }
     })
   }
 
   function handleSelectItems(itemIds: string[]) {
+    invalidateAnalysisAndDraft(activeConversation.id)
     setAnalysisErrorByConversation((current) => {
       const next = { ...current }
       delete next[activeConversation.id]
@@ -2416,11 +2857,13 @@ function App() {
         ...conversation,
         selectedItemIds: Array.from(currentIds),
         analysisReady: false,
+        finalizedAt: undefined,
       }
     })
   }
 
   function handleDeselectItems(itemIds: string[]) {
+    invalidateAnalysisAndDraft(activeConversation.id)
     setAnalysisErrorByConversation((current) => {
       const next = { ...current }
       delete next[activeConversation.id]
@@ -2439,6 +2882,7 @@ function App() {
         ...conversation,
         selectedItemIds: Array.from(currentIds),
         analysisReady: false,
+        finalizedAt: undefined,
       }
     })
   }
@@ -2449,6 +2893,7 @@ function App() {
     const projectId = activeProject.id
     const conversationId = activeConversation.id
 
+    setIsReferenceSelectionOpen(false)
     setIsChatStreaming(true)
     setAnalysisPendingConversationId(conversationId)
     setAnalysisWaitStartedAt(Date.now())
@@ -2467,11 +2912,6 @@ function App() {
       ...current,
       [conversationId]: false,
     }))
-    setDraftCopyByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
     setDraftGenerationErrorByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
@@ -2482,11 +2922,12 @@ function App() {
       delete next[conversationId]
       return next
     })
-    let failedPhase: 'profile' | 'analysis' | null = null
-
+    updateConversation(projectId, conversationId, (conversation) => ({
+      ...conversation,
+      finalizedAt: undefined,
+    }))
     try {
       let nextAnalysis = fallbackAnalysis
-      let profileMessage: ChatMessage | null = null
 
       if (isUsingCloudLibrary && cloudLibrary.status === 'ready') {
         const accessToken = await getCurrentAccessToken()
@@ -2494,12 +2935,25 @@ function App() {
           throw new Error('登录状态已过期，请重新登录后再开始分析。')
         }
 
-        failedPhase = 'profile'
-        setAnalysisPhase(failedPhase)
+        const response = await analyzeReferences(accessToken, {
+          projectName: activeProject.name,
+          folderName: selectedFolderName,
+          topic: activeConversation.topic,
+          targetAudience: activeConversation.targetAudience,
+          length: effectiveLength,
+          notes: selectedNotes,
+          snippets: selectedSnippets,
+        })
+        nextAnalysis = response.analysis
+        setAnalysisUsageByConversation((current) => ({
+          ...current,
+          [conversationId]: response.usage,
+        }))
+
         const noteIdByUrl = new Map(
           libraryNotes.map((note) => [normalizeNoteUrl(note.sourceUrl), note.id]),
         )
-        const profileResponse = await buildWritingProfile(accessToken, {
+        void buildWritingProfile(accessToken, {
           scope: 'account',
           libraryEvidence: {
             notes: libraryNotes.slice(0, 60).map((note) => ({
@@ -2524,31 +2978,12 @@ function App() {
             source: memory.source,
             createdAt: memory.createdAt,
           })),
+        }).catch((profileError) => {
+          console.warn('Writing profile update was skipped.', profileError)
         })
-        profileMessage = buildWritingProfileChat(profileResponse)
-
-        failedPhase = 'analysis'
-        setAnalysisPhase(failedPhase)
-        const response = await analyzeReferences(accessToken, {
-          projectName: activeProject.name,
-          folderName: selectedFolderName,
-          topic: activeConversation.topic,
-          targetAudience: activeConversation.targetAudience,
-          length: effectiveLength,
-          notes: selectedNotes,
-          snippets: selectedSnippets,
-        })
-        nextAnalysis = response.analysis
-        setAnalysisUsageByConversation((current) => ({
-          ...current,
-          [conversationId]: response.usage,
-        }))
       }
 
-      const analysisMessages = [
-        ...(profileMessage ? [profileMessage] : []),
-        ...buildAnalysisChat(nextAnalysis),
-      ]
+      const analysisMessages = buildAnalysisChat(nextAnalysis)
       setAnalysisByConversation((current) => ({
         ...current,
         [conversationId]: nextAnalysis,
@@ -2567,12 +3002,9 @@ function App() {
       }
     } catch (error) {
       const message = getErrorMessage(error)
-      const isProfileFailure = failedPhase === 'profile'
-      const friendlyMessage = isProfileFailure
-        ? '这次没有完成写作画像学习，请重试。你的素材和已有画像不会丢失。'
-        : message.includes('DeepSeek API key')
-          ? 'AI 服务暂时不可用，请稍后重试。'
-          : message
+      const friendlyMessage = message.includes('DeepSeek API key')
+        ? 'AI 服务暂时不可用，稍后可直接重试本次分析。'
+        : message
       setAnalysisErrorByConversation((current) => ({
         ...current,
         [conversationId]: friendlyMessage,
@@ -2580,30 +3012,20 @@ function App() {
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
         analysisReady: false,
-        chatMessages: [
-          ...conversation.chatMessages,
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            stage: 'setup',
-            title: isProfileFailure ? '写作画像学习未完成' : 'AI 暂时不可用',
-            lines: [friendlyMessage],
-          },
-        ],
       }))
     } finally {
       setIsChatStreaming(false)
       setAnalysisPendingConversationId((current) => (current === conversationId ? '' : current))
-      setAnalysisPhase(null)
       setAnalysisWaitStartedAt(null)
     }
   }
 
   async function handleGenerateDraft() {
-    if (!hasPlanReady || draftGeneratingConversationId) return
+    if (!canGenerateDraft || draftGeneratingConversationId) return
 
     const projectId = activeProject.id
     const conversationId = activeConversation.id
+    const previousDraftWasReady = Boolean(draftReadyByConversation[conversationId])
 
     setDraftGeneratingConversationId(conversationId)
     setDraftWaitStartedAt(Date.now())
@@ -2684,6 +3106,7 @@ function App() {
 
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
+        finalizedAt: undefined,
         step: 'plan',
       }))
     } catch (error) {
@@ -2694,6 +3117,12 @@ function App() {
           ? 'AI 服务暂时不可用，请稍后重试。'
           : message,
       }))
+      if (previousDraftWasReady) {
+        setDraftReadyByConversation((current) => ({
+          ...current,
+          [conversationId]: true,
+        }))
+      }
     } finally {
       setDraftGeneratingConversationId((current) => (current === conversationId ? '' : current))
       setDraftWaitStartedAt(null)
@@ -2702,12 +3131,7 @@ function App() {
 
   function handleBackToSelection() {
     setIsChatStreaming(false)
-    setChatInput('')
-    updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
-      ...conversation,
-      analysisReady: false,
-      chatMessages: conversation.chatMessages.filter((message) => message.stage === 'setup'),
-    }))
+    setIsReferenceSelectionOpen(true)
   }
 
   async function handleSendChat() {
@@ -2718,6 +3142,7 @@ function App() {
 
     const projectId = activeProject.id
     const conversationId = activeConversation.id
+    const isPlanInstruction = getConversationStep(activeConversation) === 'plan'
     const shouldGenerateTitle =
       activeConversation.chatMessages.length === 0 &&
       isDefaultConversationTitle(activeConversation.title)
@@ -2728,16 +3153,32 @@ function App() {
       lines: [question],
     }
 
+    if (isPlanInstruction) invalidateDraftOutputs(conversationId)
     updateConversation(projectId, conversationId, (conversation) => ({
       ...conversation,
       title: shouldGenerateTitle ? buildConversationTitleFromPrompt(question) : conversation.title,
+      finalizedAt: isPlanInstruction ? undefined : conversation.finalizedAt,
+      writingBrief: isPlanInstruction
+        ? {
+            ...conversation.writingBrief,
+            instructions: [conversation.writingBrief.instructions.trim(), question]
+              .filter(Boolean)
+              .join('\n'),
+          }
+        : conversation.writingBrief,
       chatMessages: [...conversation.chatMessages, userMessage],
     }))
     setChatInput('')
 
-    const reply = activeConversation.analysisReady
-      ? buildAssistantReply(question, analysis)
-      : buildSetupReply(question)
+    const reply = isPlanInstruction
+      ? {
+          stage: 'followup' as const,
+          title: '已加入创作简报',
+          lines: ['这条要求会参与下一次生成。简报已变化，当前初稿需要重新生成。'],
+        }
+      : activeConversation.analysisReady
+        ? buildAssistantReply(question, analysis)
+        : buildSetupReply(question)
 
     setIsChatStreaming(true)
     await sleep(220)
@@ -2879,6 +3320,7 @@ function App() {
         [activeConversation.id]: setDraftFieldValue(currentDraft, fieldId, normalizedValue),
       }
     })
+    markDraftEdited()
 
     rememberExplicitFeedback({
       projectId: activeProject.id,
@@ -2908,6 +3350,10 @@ function App() {
     event: ReactFormEvent<HTMLElement>,
   ) {
     const normalizedValue = normalizeEditableDraftText(event.currentTarget.innerText)
+
+    if (activeConversation.finalizedAt) {
+      markDraftEdited()
+    }
 
     if (
       selectedRewriteFieldId === fieldId &&
@@ -3704,6 +4150,7 @@ function App() {
       ...current,
       [activeConversation.id]: nextDraft,
     }))
+    markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
     setDraftDropTarget(null)
@@ -3758,6 +4205,7 @@ function App() {
       ...current,
       [conversationId]: previousDraft,
     }))
+    markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
     setDraftDropTarget(null)
@@ -3787,6 +4235,7 @@ function App() {
       ...current,
       [conversationId]: nextDraft,
     }))
+    markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
     setDraftDropTarget(null)
@@ -4058,6 +4507,7 @@ function App() {
         [activeConversation.id]: setDraftFieldValue(currentDraft, message.fieldId!, nextValue),
       }
     })
+    markDraftEdited()
     setRewriteMessagesByConversation((current) => ({
       ...current,
       [activeConversation.id]: (current[activeConversation.id] ?? []).map((item) =>
@@ -4142,18 +4592,26 @@ function App() {
 
     const suggestionBlock = readerPreviewFeedback.blocks.find((block) => block.tone === 'suggestion')
     const suggestionLines = suggestionBlock?.lines ?? []
+    const suggestionQuestionLines = [
+      '带着读者预演建议回到编辑细调：',
+      ...suggestionLines.map((line, index) => `${index + 1}. ${line}`),
+    ]
+    const hasSentCurrentSuggestions = (
+      rewriteMessagesByConversation[activeConversation.id] ?? []
+    ).some(
+      (message) =>
+        message.role === 'user' &&
+        message.lines.join('\n') === suggestionQuestionLines.join('\n'),
+    )
 
-    if (suggestionLines.length > 0) {
+    if (suggestionLines.length > 0 && !hasSentCurrentSuggestions) {
       appendRewriteChatMessage({
-        question: [
-          '带着读者预演建议回到编辑细调：',
-          ...suggestionLines.map((line, index) => `${index + 1}. ${line}`),
-        ].join('\n'),
-	        assistantLines: [
-	          '已带回读者预演建议。',
-	          '优先改开头、概括句和结尾互动。',
-	        ],
-	      })
+        question: suggestionQuestionLines.join('\n'),
+        assistantLines: [
+          '已带回读者预演建议。',
+          '优先改开头、概括句和结尾互动。',
+        ],
+      })
     }
 
     clearRewriteSelection()
@@ -4302,6 +4760,15 @@ function App() {
     setPlanAttachmentsByConversation((current) => ({
       ...current,
       [activeConversation.id]: [...(current[activeConversation.id] ?? []), ...nextAttachments],
+    }))
+  }
+
+  function handleRemovePlanAttachment(attachmentId: string) {
+    setPlanAttachmentsByConversation((current) => ({
+      ...current,
+      [activeConversation.id]: (current[activeConversation.id] ?? []).filter(
+        (attachment) => attachment.id !== attachmentId,
+      ),
     }))
   }
 
@@ -4852,6 +5319,29 @@ function App() {
   }
 
   function renderWorkspace() {
+    const isCloudConnecting =
+      cloudWorkspaceStatus !== 'guest' && cloudWorkspaceStatus !== 'ready'
+    const saveLabel =
+      isCloudConnecting
+        ? '正在连接云端'
+        : workspaceSaveStatus === 'saving-local'
+        ? '正在保存到本机'
+        : workspaceSaveStatus === 'saved-local'
+          ? '已保存在本机'
+          : workspaceSaveStatus === 'syncing-cloud'
+            ? '正在同步'
+            : workspaceSaveStatus === 'save-error'
+              ? '保存失败，将自动重试'
+              : '已同步'
+    const SaveIcon =
+      isCloudConnecting ||
+      workspaceSaveStatus === 'saving-local' ||
+      workspaceSaveStatus === 'syncing-cloud'
+        ? Loader2
+        : workspaceSaveStatus === 'save-error'
+          ? AlertTriangle
+          : CheckCircle2
+
     return (
       <main className="relative flex h-screen min-h-0 flex-col overflow-hidden px-4 pb-4 pt-5 md:px-8 md:pb-8">
         <section className="relative z-10 mx-auto w-full max-w-6xl shrink-0 pb-4">
@@ -4863,7 +5353,29 @@ function App() {
                   Lumos AI Writer
                 </h1>
               </div>
-              <AuthStatus />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <span
+                  className={
+                    workspaceSaveStatus === 'save-error'
+                      ? 'inline-flex items-center gap-1.5 text-xs font-medium text-[var(--destructive)]'
+                      : 'inline-flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)]'
+                  }
+                  title={workspaceSavedAt ? `最近保存：${workspaceSavedAt}` : saveLabel}
+                  role="status"
+                >
+                  <SaveIcon
+                    className={
+                      isCloudConnecting ||
+                      workspaceSaveStatus === 'saving-local' ||
+                      workspaceSaveStatus === 'syncing-cloud'
+                        ? 'h-3.5 w-3.5 animate-spin'
+                        : 'h-3.5 w-3.5'
+                    }
+                  />
+                  {saveLabel}
+                </span>
+                <AuthStatus />
+              </div>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto_auto]">
@@ -4912,25 +5424,24 @@ function App() {
                   project.conversations.find(
                     (conversation) => conversation.id === project.activeConversationId,
                   ) ?? project.conversations[0]
-                const selectedCount =
-                  projectConversation.selectedItemIds.length
+                const conversationStep = getConversationStep(projectConversation)
+                const recentStep = shellSteps.find(
+                  (item) => item.id === (conversationStep === 'length' ? 'plan' : conversationStep),
+                )?.title
 
                 return (
                   <article
                     key={project.id}
-                    role="button"
-                    tabIndex={0}
                     style={{ animationDelay: `${index * 35}ms` }}
-                    aria-label={`进入项目 ${project.name}`}
-                    onClick={() => handleOpenProject(project.id)}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return
-                      event.preventDefault()
-                      handleOpenProject(project.id)
-                    }}
-                    className="ui-list-item-motion ui-hover-surface grid cursor-pointer gap-4 bg-transparent px-5 py-4 outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
+                    className="group ui-list-item-motion relative grid cursor-pointer gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)_6.75rem] lg:items-center lg:gap-6 lg:px-6"
                   >
-                    <div className="min-w-0">
+                    <button
+                      type="button"
+                      aria-label={`进入项目 ${project.name}`}
+                      onClick={() => handleOpenProject(project.id)}
+                      className="absolute inset-0 z-0 rounded-[var(--ui-radius-item)] bg-transparent outline-none transition hover:bg-white/34 focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--ring)]"
+                    />
+                    <div className="pointer-events-none relative z-10 min-w-0">
                       <div className="flex items-center gap-3">
                         <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
                           <FolderOpen className="h-5 w-5" />
@@ -4939,7 +5450,7 @@ function App() {
                           {renamingProjectId === project.id ? (
                             <Input
                               autoFocus
-                              className="h-[var(--ui-control-height-md)] max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-md)] font-semibold"
+                              className="pointer-events-auto h-[var(--ui-control-height-md)] max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-md)] font-semibold"
                               value={renamingProjectName}
                               aria-label={`重命名 ${project.name}`}
                               onBlur={() => handleSaveRenameProject(project.id)}
@@ -4963,7 +5474,7 @@ function App() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="size-7 shrink-0 text-[var(--soft-foreground)] hover:bg-transparent hover:text-[var(--muted-foreground)]"
+                                className="pointer-events-auto size-7 shrink-0 text-[var(--soft-foreground)] hover:bg-transparent hover:text-[var(--muted-foreground)]"
                                 aria-label={`重命名 ${project.name}`}
                                 onClick={(event) => {
                                   event.stopPropagation()
@@ -4975,19 +5486,20 @@ function App() {
                             </div>
                           )}
                           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                            已选 {selectedCount} 项参考内容
+                            {project.conversations.length} 个对话
+                            {recentStep ? ` · 最近：${recentStep}` : ''}
                           </p>
                         </div>
                       </div>
                     </div>
-                    <div className="flex min-w-0 items-center">
+                    <div className="pointer-events-none relative z-10 flex min-w-0 items-center">
                       <Badge variant="outline">{folder?.name || '未设置'}</Badge>
                     </div>
-                    <div className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted-foreground)]">
+                    <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-2 text-sm text-[var(--muted-foreground)]">
                       <Clock3 className="h-4 w-4 text-[var(--soft-foreground)]" />
                       <span className="whitespace-nowrap">{formatProjectUpdatedAt(project.updatedAt)}</span>
                     </div>
-                    <div className="flex items-center gap-2 lg:justify-end">
+                    <div className="relative z-10 flex items-center gap-2 lg:justify-end">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -5019,13 +5531,27 @@ function App() {
         </section>
 
         {showCreateProjectCard ? (
-          <div className="ui-dialog-backdrop fixed inset-0 z-20 flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-4 py-10 backdrop-blur-md">
-            <Card className="ui-dialog-card w-full max-w-xl rounded-[var(--ui-radius-dialog)] bg-white/90 shadow-[var(--shadow-elevated)]">
+          <div
+            className="ui-dialog-backdrop fixed inset-0 z-20 flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-4 py-10 backdrop-blur-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-project-title"
+            onClick={() => setShowCreateProjectCard(false)}
+          >
+            <Card
+              className="ui-dialog-card w-full max-w-xl rounded-[var(--ui-radius-dialog)] bg-white/90 shadow-[var(--shadow-elevated)]"
+              onClick={(event) => event.stopPropagation()}
+            >
               <CardHeader className="flex-row items-start justify-between gap-4">
                 <div>
-                  <CardTitle className="text-3xl">新建项目</CardTitle>
+                  <CardTitle id="create-project-title" className="text-3xl">新建项目</CardTitle>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setShowCreateProjectCard(false)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="关闭新建项目窗口"
+                  onClick={() => setShowCreateProjectCard(false)}
+                >
                   <X className="h-4 w-4" />
                 </Button>
               </CardHeader>
@@ -5033,7 +5559,18 @@ function App() {
               <CardContent className="grid gap-5">
                 <label className="grid gap-2">
                   <span className="text-sm font-medium text-[var(--muted-foreground)]">项目名称</span>
-                  <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} />
+                  <Input
+                    autoFocus
+                    value={newProjectName}
+                    onChange={(event) => setNewProjectName(event.target.value)}
+                    placeholder="例如：深圳周末骑行内容"
+                    aria-invalid={isNewProjectNameDuplicate}
+                  />
+                  {isNewProjectNameDuplicate ? (
+                    <span className="text-xs font-medium text-[var(--destructive)]">
+                      已有同名项目，换一个更容易区分的名称。
+                    </span>
+                  ) : null}
                 </label>
 
                 <label className="grid gap-2">
@@ -5058,7 +5595,11 @@ function App() {
                   </Button>
                   <Button
                     onClick={handleCreateProject}
-                    disabled={!newProjectName.trim() || !effectiveNewProjectFolderId}
+                    disabled={
+                      !newProjectName.trim() ||
+                      !effectiveNewProjectFolderId ||
+                      Boolean(isNewProjectNameDuplicate)
+                    }
                   >
                     新建并进入项目
                   </Button>
@@ -5144,7 +5685,7 @@ function App() {
       <LearnWorkspace
         key={activeConversation.id}
         activeConversationId={activeConversation.id}
-        analysisReady={activeConversation.analysisReady}
+        analysisReady={activeConversation.analysisReady && !isReferenceSelectionOpen}
         chatInput={chatInput}
         chatMessages={activeConversation.chatMessages}
         activeWorkflowStep={activeWorkflowStep}
@@ -5156,7 +5697,6 @@ function App() {
         workflowSteps={workflowSteps}
         analysisError={analysisError}
         analysisWaitSeconds={analysisWaitSeconds}
-        analysisPhase={analysisPhase}
         isAnalyzing={isAnalyzing}
         isStreaming={isChatStreaming}
         projectName={activeProject.name}
@@ -5174,7 +5714,7 @@ function App() {
         onSwitchConversation={handleSwitchConversation}
         onStartAnalysis={handleStartAnalysis}
         onBackToSelection={handleBackToSelection}
-        onNext={() => goToStep('length')}
+        onNext={() => goToStep('plan')}
         onToggleItems={handleToggleItems}
         onSelectItems={handleSelectItems}
         onDeselectItems={handleDeselectItems}
@@ -5188,6 +5728,13 @@ function App() {
   function renderSidebarConversationRow(conversation: ConversationRecord) {
     const isActive = conversation.id === activeProject.activeConversationId
     const isRenaming = renamingSidebarConversationId === conversation.id
+    const sameTitleConversations = sidebarConversations.filter(
+      (item) => item.title === conversation.title,
+    )
+    const accessibleTitleSuffix =
+      sameTitleConversations.length > 1
+        ? `，第 ${sameTitleConversations.findIndex((item) => item.id === conversation.id) + 1} 个`
+        : ''
     const switchToConversation = () => {
       setOpenSidebarConversationMenuId('')
       handleSwitchConversation(conversation.id)
@@ -5196,31 +5743,28 @@ function App() {
     return (
       <div
         key={conversation.id}
-        role={isRenaming ? undefined : 'button'}
-        tabIndex={isRenaming ? undefined : 0}
-        aria-current={isActive ? 'true' : undefined}
-        onClick={isRenaming ? undefined : switchToConversation}
-        onKeyDown={(event) => {
-          if (isRenaming) return
-
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            switchToConversation()
-          }
-        }}
         className={
           isActive
-            ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-white/58 px-3 py-2 text-sm font-semibold leading-6 text-[var(--foreground)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+            ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-white/58 px-3 py-2 text-sm font-semibold leading-6 text-[var(--foreground)] transition'
             : conversation.pinned
-              ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-[rgba(241,243,246,0.72)] px-3 py-2 text-sm leading-6 text-[var(--accent-strong)] outline-none transition hover:bg-[rgba(226,232,240,0.86)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-              : 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-transparent px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none transition hover:bg-white/42 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
+              ? 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-[rgba(241,243,246,0.72)] px-3 py-2 text-sm leading-6 text-[var(--accent-strong)] transition hover:bg-[rgba(226,232,240,0.86)]'
+              : 'group relative flex min-h-[3.25rem] w-full cursor-pointer items-center gap-3 rounded-[var(--ui-radius-card)] border border-transparent bg-transparent px-3 py-2 text-sm leading-6 text-[var(--foreground)] transition hover:bg-white/42'
         }
       >
+        {!isRenaming ? (
+          <button
+            type="button"
+            aria-current={isActive ? 'true' : undefined}
+            aria-label={`打开对话 ${conversation.title}${accessibleTitleSuffix}`}
+            onClick={switchToConversation}
+            className="absolute inset-0 z-0 rounded-[var(--ui-radius-card)] bg-transparent outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--ring)]"
+          />
+        ) : null}
         <MessageCircle
           className={
             conversation.pinned
-              ? 'h-4 w-4 shrink-0 text-[var(--accent-strong)]'
-              : 'h-4 w-4 shrink-0 text-[var(--soft-foreground)]'
+              ? 'pointer-events-none relative z-10 h-4 w-4 shrink-0 text-[var(--accent-strong)]'
+              : 'pointer-events-none relative z-10 h-4 w-4 shrink-0 text-[var(--soft-foreground)]'
           }
         />
 
@@ -5241,11 +5785,11 @@ function App() {
                 cancelSidebarConversationRename()
               }
             }}
-            className="h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
+            className="relative z-20 h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
             aria-label="重命名对话"
           />
         ) : (
-          <div className="min-w-0 flex-1 py-1 text-left">
+          <div className="pointer-events-none relative z-10 min-w-0 flex-1 py-1 text-left">
             <span className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 truncate">{conversation.title}</span>
               {conversation.finalizedAt ? (
@@ -5258,7 +5802,7 @@ function App() {
         )}
 
         {!isRenaming ? (
-          <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+          <div className="relative z-20 flex h-8 w-8 shrink-0 items-center justify-center">
             {conversation.pinned ? (
               <Pin className="h-3.5 w-3.5 text-[var(--accent-strong)] transition group-hover:opacity-0 group-focus-within:opacity-0" />
             ) : null}
@@ -5383,13 +5927,11 @@ function App() {
     )
   }
 
-  function getWorkflowEmptyCopy(targetStep: Exclude<ConversationStep, 'learn'>) {
+  function getWorkflowEmptyCopy(targetStep: Exclude<ConversationStep, 'learn' | 'length'>) {
     if (!hasSelectedReferences) {
       return {
         title:
-          targetStep === 'length'
-            ? '还没有可设置篇幅的内容'
-            : targetStep === 'plan'
+          targetStep === 'plan'
               ? '还不能开始文案创作'
               : targetStep === 'rewrite'
                 ? '还没有可调整的初版文案'
@@ -5402,30 +5944,13 @@ function App() {
     if (!hasLearningResult) {
       return {
         title:
-          targetStep === 'length'
-            ? '先完成学习拆解'
-            : targetStep === 'plan'
+          targetStep === 'plan'
               ? '先生成学习总结'
               : targetStep === 'rewrite'
                 ? '还没有可调整的初版文案'
                 : '还没有可预演的文案',
         description: '先完成学习拆解，再继续生成文案。',
         actionLabel: '去学习拆解',
-      }
-    }
-
-    if (!hasLengthSelected) {
-      return {
-        title:
-          targetStep === 'plan'
-            ? '先选择篇幅'
-            : targetStep === 'rewrite'
-              ? '还没有可调整的初版文案'
-              : targetStep === 'reader'
-                ? '还没有可预演的文案'
-                : '请选择这篇内容的篇幅',
-        description: '先选择篇幅，再开始文案创作。',
-        actionLabel: '去篇幅设置',
       }
     }
 
@@ -5447,14 +5972,12 @@ function App() {
     }
   }
 
-  function renderWorkflowEmptyState(targetStep: Exclude<ConversationStep, 'learn'>) {
+  function renderWorkflowEmptyState(targetStep: Exclude<ConversationStep, 'learn' | 'length'>) {
     const copy = getWorkflowEmptyCopy(targetStep)
     const nextStep: ConversationStep =
-      hasLearningResult && !hasLengthSelected
-        ? 'length'
-        : (targetStep === 'rewrite' || targetStep === 'reader') && hasPlanReady
-          ? 'plan'
-          : 'learn'
+      (targetStep === 'rewrite' || targetStep === 'reader') && hasPlanReady
+        ? 'plan'
+        : 'learn'
 
     return (
       <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
@@ -5472,190 +5995,6 @@ function App() {
             <Button onClick={() => goToStep(nextStep)}>
               {copy.actionLabel}
             </Button>
-            {(targetStep === 'rewrite' || targetStep === 'reader') && hasLengthSelected ? (
-              <Button variant="secondary" onClick={() => goToStep('length')}>
-                回到篇幅设置
-              </Button>
-            ) : null}
-          </div>
-        </section>
-      </div>
-    )
-  }
-
-  function renderLength() {
-    return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
-        {renderWorkflowSidebar()}
-
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
-                篇幅设置
-              </h1>
-              <WorkflowTitleMenu
-                activeStep={activeWorkflowStep}
-                steps={workflowSteps}
-                onStepChange={handleWorkflowStepChange}
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-              <Button variant="secondary" size="sm" onClick={() => goToStep('learn')}>
-                上一步
-              </Button>
-              <Button size="sm" onClick={() => goToStep('plan')} disabled={!hasPlanReady}>
-                下一步
-              </Button>
-            </div>
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-8">
-            {hasLearningResult ? (
-              <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4">
-                <section
-                  aria-label="篇幅设置"
-                  className="grid min-h-0 flex-1 snap-x snap-mandatory auto-cols-[minmax(19rem,calc(100vw-2rem))] grid-flow-col grid-rows-1 gap-4 overflow-x-auto overflow-y-hidden pb-2 xl:auto-cols-auto xl:grid-flow-row xl:grid-cols-3 xl:overflow-hidden xl:pb-0"
-                  role="radiogroup"
-                >
-                  {lengthPreviewCards.map((card) => {
-                    const isSelected = activeConversation.length === card.value
-                    const [scenarioLine, ...contentLines] = card.lines
-                    const selectLength = () => {
-                      setDraftReadyByConversation((current) => ({
-                        ...current,
-                        [activeConversation.id]: false,
-                      }))
-                      setDraftCopyByConversation((current) => {
-                        const next = { ...current }
-                        delete next[activeConversation.id]
-                        return next
-                      })
-                      setDraftGenerationErrorByConversation((current) => {
-                        const next = { ...current }
-                        delete next[activeConversation.id]
-                        return next
-                      })
-                      setDraftUsageByConversation((current) => {
-                        const next = { ...current }
-                        delete next[activeConversation.id]
-                        return next
-                      })
-                      setDraftBridgeMessagesByConversation((current) => {
-                        const next = { ...current }
-                        delete next[activeConversation.id]
-                        return next
-                      })
-                      setDraftMoveHistoryByConversation((current) => {
-                        const next = { ...current }
-                        delete next[activeConversation.id]
-                        return next
-                      })
-                      setDraftDragSelection(null)
-                      setDraftPointerDrag(null)
-                      setDraftDropTarget(null)
-                      setDraftDropLanding(null)
-                      setDraftMovePrompt(null)
-
-                      updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
-                        ...conversation,
-                        length: card.value,
-                      }))
-                    }
-
-                    return (
-                      <article
-                        key={card.value}
-                        aria-checked={isSelected}
-                        aria-label={card.title}
-                        className={
-                          isSelected
-                            ? 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.18)] bg-[linear-gradient(180deg,rgba(248,250,252,0.98),rgba(255,255,255,0.92))] shadow-[0_20px_44px_rgba(15,23,42,0.1)] outline-none transition focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                            : 'ui-choice-card relative isolate flex h-full min-h-0 snap-start cursor-pointer flex-col overflow-hidden rounded-[var(--ui-radius-card)] border border-[rgba(15,23,42,0.075)] bg-white/68 shadow-[0_10px_24px_rgba(15,23,42,0.03)] outline-none transition hover:bg-white/86 focus-visible:ring-4 focus-visible:ring-[var(--ring)]'
-                        }
-                        onClick={selectLength}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            selectLength()
-                          }
-                        }}
-                        role="radio"
-                        tabIndex={0}
-                      >
-                        {isSelected ? (
-                          <CheckCircle2 className="absolute right-6 top-6 z-20 h-5 w-5 shrink-0 text-[var(--accent-strong)]" />
-                        ) : null}
-
-                        <div
-                          className={
-                            isSelected
-                              ? 'relative z-10 shrink-0 bg-[linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))] px-6 pb-4 pt-6 text-left'
-                              : 'relative z-10 shrink-0 bg-[rgba(255,254,252,1)] px-6 pb-4 pt-6 text-left'
-                          }
-                        >
-                          <p className="whitespace-nowrap pr-8 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body)] font-semibold leading-[1.45] tracking-normal text-[#333333] sm:text-[length:var(--ui-text-section)]">
-                            {card.title}
-                          </p>
-                          {scenarioLine ? (
-                            <p className="mt-3 whitespace-pre-line font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body-lg)] font-normal leading-[1.68] tracking-normal text-[#333333]">
-                              {scenarioLine}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <div className="relative min-h-0 flex-1 overflow-hidden px-4">
-                          <div
-                            className={
-                            isSelected
-                                ? 'pointer-events-none absolute inset-x-4 top-0 z-10 h-7 bg-[rgba(255,255,255,1)]'
-                                : 'pointer-events-none absolute inset-x-4 top-0 z-10 h-7 bg-[rgba(255,254,252,1)]'
-                            }
-                          />
-                          <div
-                            className={
-                            isSelected
-                                ? 'pointer-events-none absolute inset-x-4 bottom-0 z-10 h-7 bg-[rgba(255,255,255,1)]'
-                                : 'pointer-events-none absolute inset-x-4 bottom-0 z-10 h-7 bg-[rgba(255,254,252,1)]'
-                            }
-                          />
-                          <div className="h-full overflow-y-auto px-2 pb-7 pr-4 pt-7 text-left overscroll-contain [scrollbar-gutter:stable]">
-                            <div className="space-y-3 font-['PingFang_SC','Microsoft_YaHei',Arial,sans-serif] text-[length:var(--ui-text-body-lg)] font-normal leading-[1.68] tracking-normal text-[#333333]">
-                              {contentLines.map((line, index) => (
-                                <p className="whitespace-pre-line" key={`${card.value}-${index}`}>{line}</p>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div
-                          className={
-                            isSelected
-                              ? 'relative z-10 shrink-0 bg-[rgba(255,255,255,1)] px-4 pb-4 pt-3'
-                              : 'relative z-10 shrink-0 bg-[rgba(255,254,252,1)] px-4 pb-4 pt-3'
-                          }
-                        >
-                          <Button
-                            type="button"
-                            variant={isSelected ? 'default' : 'secondary'}
-                            className="w-full"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              selectLength()
-                            }}
-                          >
-                            {isSelected ? '已选择' : '选择'}
-                          </Button>
-                        </div>
-                      </article>
-                    )
-                  })}
-                </section>
-              </div>
-            ) : (
-              renderWorkflowEmptyState('length')
-            )}
           </div>
         </section>
       </div>
@@ -5664,7 +6003,7 @@ function App() {
 
   function renderPlan() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
         <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
@@ -5681,7 +6020,7 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-              <Button variant="secondary" size="sm" onClick={() => goToStep('length')}>
+              <Button variant="secondary" size="sm" onClick={() => goToStep('learn')}>
                 上一步
               </Button>
               <Button size="sm" onClick={() => goToStep('rewrite')} disabled={!hasDraftReady}>
@@ -5695,49 +6034,172 @@ function App() {
               <section className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col overflow-hidden">
                 <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 pt-5 md:px-4 [scrollbar-gutter:stable]">
                   <div className="grid gap-5">
-                    <div className="rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] px-5 py-4 shadow-none">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="accent">创作信息</Badge>
-                        <span className="text-sm font-medium text-[var(--muted-foreground)]">
-                          已提交
+                    <section className="border-b border-[var(--border)] px-1 pb-6 md:px-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h2 className="text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">
+                            创作简报
+                          </h2>
+                          <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
+                            这些信息会直接约束下一次生成，修改后旧稿会标记为需要重新生成。
+                          </p>
+                        </div>
+                        <span
+                          className={
+                            isWritingBriefValid
+                              ? 'inline-flex items-center gap-1.5 text-xs font-semibold text-[#17675b]'
+                              : 'inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--destructive)]'
+                          }
+                          role="status"
+                        >
+                          {isWritingBriefValid ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                          )}
+                          {isWritingBriefValid
+                            ? '生成信息已完整'
+                            : `还缺：${missingBriefFields.join('、')}`}
                         </span>
                       </div>
-                      <div className="mt-3 space-y-2 text-sm leading-6 text-[var(--foreground)]">
-                        <p>
-                          <span className="font-semibold">内容主题：</span>
-                          {activeConversation.topic}
-                        </p>
-                        <p>
-                          <span className="font-semibold">目标读者：</span>
-                          {activeConversation.targetAudience}
-                        </p>
-                        <p>
-                          <span className="font-semibold">必含要点：</span>
-                          {creationBrief.mustInclude}
-                        </p>
-                        <p>
-                          <span className="font-semibold">表达边界：</span>
-                          {creationBrief.avoidTone}
-                        </p>
-                        {planAttachments.length > 0 ? (
-                          <div className="flex flex-wrap gap-2 pt-1">
+
+                      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-[var(--foreground)]">
+                            内容主题 <span className="text-[var(--destructive)]">必填</span>
+                          </span>
+                          <Input
+                            value={activeConversation.topic}
+                            onChange={(event) => handleWritingBriefChange('topic', event.target.value)}
+                            placeholder="例如：第一次骑深圳湾 15 公里的真实体验"
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-[var(--foreground)]">
+                            目标读者 <span className="text-[var(--destructive)]">必填</span>
+                          </span>
+                          <Input
+                            value={activeConversation.targetAudience}
+                            onChange={(event) =>
+                              handleWritingBriefChange('targetAudience', event.target.value)
+                            }
+                            placeholder="例如：怕晒、担心路线太难的骑行新手"
+                          />
+                        </label>
+                        <fieldset className="grid gap-2 lg:col-span-2">
+                          <legend className="text-sm font-semibold text-[var(--foreground)]">
+                            篇幅 <span className="text-[var(--destructive)]">必选</span>
+                          </legend>
+                          <div
+                            className="grid gap-1 rounded-[var(--ui-radius-control)] bg-[var(--surface-muted)] p-1 sm:grid-cols-3"
+                            role="radiogroup"
+                            aria-label="篇幅"
+                          >
+                            {lengthOptions.map((option) => {
+                              const isSelected = activeConversation.length === option.value
+                              return (
+                                <Button
+                                  key={option.value}
+                                  type="button"
+                                  variant="ghost"
+                                  role="radio"
+                                  aria-checked={isSelected}
+                                  onClick={() => handleLengthChange(option.value)}
+                                  className={
+                                    isSelected
+                                      ? 'h-auto justify-start gap-2 rounded-[calc(var(--ui-radius-control)-0.25rem)] bg-white px-3 py-2.5 text-left text-[var(--foreground)] shadow-[0_4px_14px_rgba(48,34,22,0.06)] hover:bg-white sm:justify-center'
+                                      : 'h-auto justify-start rounded-[calc(var(--ui-radius-control)-0.25rem)] px-3 py-2.5 text-left text-[var(--muted-foreground)] hover:bg-white/60 hover:text-[var(--foreground)] sm:justify-center'
+                                  }
+                                >
+                                  {isSelected ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-strong)]" /> : null}
+                                  <span>
+                                    <span className="block text-sm font-semibold">{option.title}</span>
+                                    <span className="block text-xs font-normal text-[var(--soft-foreground)]">
+                                      {option.lines[0]}
+                                    </span>
+                                  </span>
+                                </Button>
+                              )
+                            })}
+                          </div>
+                        </fieldset>
+                        <label className="grid gap-2 lg:col-span-2">
+                          <span className="text-sm font-semibold text-[var(--foreground)]">写作目标</span>
+                          <Input
+                            value={activeConversation.writingBrief.objective}
+                            onChange={(event) => handleWritingBriefChange('objective', event.target.value)}
+                            placeholder="希望读者看完理解、相信或采取什么行动"
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-[var(--foreground)]">
+                            必含事实 <span className="text-[var(--destructive)]">必填</span>
+                          </span>
+                          <Textarea
+                            value={activeConversation.writingBrief.requiredFacts}
+                            onChange={(event) =>
+                              handleWritingBriefChange('requiredFacts', event.target.value)
+                            }
+                            className="min-h-[6rem] resize-y"
+                            placeholder="只填写可以确认的事实，例如：全程约 15 公里、傍晚出发更避晒"
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-[var(--foreground)]">表达边界</span>
+                          <Textarea
+                            value={activeConversation.writingBrief.boundaries}
+                            onChange={(event) =>
+                              handleWritingBriefChange('boundaries', event.target.value)
+                            }
+                            className="min-h-[6rem] resize-y"
+                            placeholder="例如：不要夸大难度，不用攻略站口吻"
+                          />
+                        </label>
+                        {activeConversation.writingBrief.instructions ? (
+                          <label className="grid gap-2 lg:col-span-2">
+                            <span className="text-sm font-semibold text-[var(--foreground)]">补充要求</span>
+                            <Textarea
+                              value={activeConversation.writingBrief.instructions}
+                              onChange={(event) =>
+                                handleWritingBriefChange('instructions', event.target.value)
+                              }
+                              className="min-h-[5rem] resize-y"
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+
+                      {planAttachments.length > 0 ? (
+                        <div className="mt-4">
+                          <div className="flex flex-wrap gap-2">
                             {planAttachments.map((attachment) => (
                               <span
                                 key={attachment.id}
-                                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/78 px-3 py-1 text-xs font-semibold text-[var(--muted-foreground)]"
+                                className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-muted)] py-1 pl-3 pr-1.5 text-xs font-semibold text-[var(--muted-foreground)]"
                               >
                                 {attachment.kind === 'image' ? (
-                                  <Image className="h-3.5 w-3.5 shrink-0 text-[var(--accent-strong)]" />
+                                  <Image className="h-3.5 w-3.5 shrink-0" />
                                 ) : (
-                                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-[var(--accent-strong)]" />
+                                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
                                 )}
-                                <span className="truncate">{attachment.name}</span>
+                                <span className="max-w-[16rem] truncate">{attachment.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePlanAttachment(attachment.id)}
+                                  className="flex size-6 items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-white/70 hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                                  aria-label={`移除附件 ${attachment.name}`}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
                               </span>
                             ))}
                           </div>
-                        ) : null}
-                      </div>
-                    </div>
+                          <p className="mt-2 text-xs leading-5 text-[var(--soft-foreground)]">
+                            当前版本会保存附件名称，但尚未解析文件内容，不会把附件作为生成依据。
+                          </p>
+                        </div>
+                      ) : null}
+                    </section>
 
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
@@ -5748,9 +6210,19 @@ function App() {
                         className="max-w-[50rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="accent">初版方案</Badge>
+                          <Badge variant={isUsingCloudLibrary ? 'accent' : 'outline'}>
+                            {isUsingCloudLibrary ? 'AI 初版' : '本地演示稿'}
+                          </Badge>
                           <Badge variant="outline">标题 + 正文</Badge>
                         </div>
+                        {!isUsingCloudLibrary ? (
+                          <p
+                            className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--surface-muted)] px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]"
+                            role="status"
+                          >
+                            当前未登录，这版只用于体验流程，不会调用 AI，也不代表真实生成质量或篇幅交付。
+                          </p>
+                        ) : null}
                         {hasDraftReady ? (
                           <>
                             <div className="mt-4">
@@ -5789,24 +6261,44 @@ function App() {
                           <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="text-sm leading-6 text-[var(--foreground)]">
-                                <p className="font-semibold">已准备好生成</p>
-                                <p className="mt-1 text-[var(--muted-foreground)]">
-                                  {effectiveLength === 'short'
-                                    ? '短篇幅'
-                                    : effectiveLength === 'medium'
-                                      ? '中篇幅'
-                                      : '长篇幅'}
-                                  ｜{selectedNotes.length} 篇参考，{selectedSnippets.length} 条标注
+                                <p className="font-semibold">
+                                  {isWritingBriefValid
+                                    ? isUsingCloudLibrary
+                                      ? '可以生成初稿'
+                                      : '可以生成流程演示稿'
+                                    : '先补全创作简报'}
                                 </p>
+                                <p className="mt-1 text-[var(--muted-foreground)]">
+                                  {isWritingBriefValid
+                                    ? `${
+                                        effectiveLength === 'short'
+                                          ? '短篇幅'
+                                          : effectiveLength === 'medium'
+                                            ? '中篇幅'
+                                            : '长篇幅'
+                                      }｜${selectedNotes.length} 篇参考，${selectedSnippets.length} 条标注`
+                                    : `还缺：${missingBriefFields.join('、')}`}
+                                </p>
+                                {hasStoredDraft && !hasDraftReady ? (
+                                  <p className="mt-1 text-xs text-[var(--soft-foreground)]">
+                                    上一版仍已保留，重新生成成功后才会替换当前工作稿。
+                                  </p>
+                                ) : null}
                               </div>
                               <Button
                                 type="button"
                                 size="sm"
                                 onClick={handleGenerateDraft}
-                                disabled={isDraftGenerating}
+                                disabled={isDraftGenerating || !canGenerateDraft}
                               >
                                 <WandSparkles className="h-4 w-4" />
-                                {draftGenerationError ? '重新生成初版' : '生成初版文案'}
+                                {draftGenerationError
+                                  ? isUsingCloudLibrary
+                                    ? '重新生成初版'
+                                    : '重新生成演示稿'
+                                  : isUsingCloudLibrary
+                                    ? '生成初版文案'
+                                    : '生成演示稿'}
                               </Button>
                             </div>
                             {draftGenerationError ? (
@@ -5899,7 +6391,7 @@ function App() {
 
   function renderRewrite() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
         <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
@@ -6242,7 +6734,7 @@ function App() {
 
   function renderReaderPreview() {
     return (
-      <div className="grid h-[100vh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-[100dvh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
         {renderWorkflowSidebar()}
 
         <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
@@ -6258,16 +6750,16 @@ function App() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-              <div ref={readerAudiencePopoverRef} className="relative">
+            <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:justify-self-end">
+              <div ref={readerAudiencePopoverRef} className="relative w-full sm:w-auto">
                 <button
                   type="button"
                   data-reader-audience-trigger
                   onClick={() => setIsReaderAudienceOpen((current) => !current)}
                   aria-expanded={isReaderAudienceOpen}
                   aria-label="目标用户群体"
-                  title={readerAudienceDraft || '设置目标用户'}
-                  className="flex h-[var(--ui-control-height-lg)] w-[min(31rem,46vw)] min-w-[22rem] items-center gap-[var(--ui-control-gap-lg)] rounded-[var(--ui-radius-control)] border border-[rgba(31,22,17,0.12)] bg-white/92 px-[var(--ui-control-inset-x-lg)] text-left text-[length:var(--ui-control-font-lg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(15,23,42,0.18)] focus-visible:border-[rgba(15,23,42,0.24)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                  title={effectiveReaderAudience || '设置目标用户'}
+                  className="flex h-[var(--ui-control-height-lg)] w-full min-w-0 items-center gap-[var(--ui-control-gap-lg)] rounded-[var(--ui-radius-control)] border border-[rgba(31,22,17,0.12)] bg-white/92 px-[var(--ui-control-inset-x-lg)] text-left text-[length:var(--ui-control-font-lg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_12px_28px_rgba(48,34,22,0.055)] outline-none transition hover:border-[rgba(15,23,42,0.18)] focus-visible:border-[rgba(15,23,42,0.24)] focus-visible:ring-4 focus-visible:ring-[var(--ring)] sm:w-[min(31rem,46vw)] sm:min-w-[22rem]"
                 >
                   <span className="flex shrink-0 items-center gap-1.5 font-semibold text-[var(--foreground)]">
                     <Users className="h-4 w-4 text-[var(--accent-strong)]" />
@@ -6275,12 +6767,12 @@ function App() {
                   </span>
                   <span
                     className={
-                      readerAudienceDraft
+                      effectiveReaderAudience
                         ? 'min-w-0 flex-1 truncate font-medium text-[var(--foreground)]'
                         : 'min-w-0 flex-1 truncate font-medium text-[var(--soft-foreground)]'
                     }
                   >
-                    {readerAudienceDraft || '设置目标用户'}
+                    {effectiveReaderAudience || '设置目标用户'}
                   </span>
                 </button>
                 {isReaderAudienceOpen ? (
@@ -6296,18 +6788,8 @@ function App() {
                         用于模拟阅读反馈。
                       </span>
                       <Textarea
-                        value={readerAudienceDraft}
-                        onChange={(event) => {
-                          setReaderAudienceByConversation((current) => ({
-                            ...current,
-                            [activeConversation.id]: event.target.value,
-                          }))
-                          setReaderPreviewErrorByConversation((current) => {
-                            const next = { ...current }
-                            delete next[activeConversation.id]
-                            return next
-                          })
-                        }}
+                        value={effectiveReaderAudience}
+                        onChange={(event) => handleReaderAudienceChange(event.target.value)}
                         className="min-h-[104px] resize-none rounded-[var(--ui-field-radius)] bg-white/84 text-sm leading-6 shadow-none"
                         placeholder="例如：刚开始骑行、怕路线太难、想找周末轻松路线的新手"
                       />
@@ -6334,10 +6816,10 @@ function App() {
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-4 pb-5 pt-1 lg:px-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-1 xl:overflow-hidden lg:px-6">
             {hasDraftReady ? (
-              <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,0.88fr)_minmax(24rem,1fr)]">
-                <section className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none">
+              <div className="grid min-h-0 gap-4 xl:h-full xl:grid-cols-[minmax(0,0.88fr)_minmax(24rem,1fr)]">
+                <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none xl:min-h-0">
                   <div className="shrink-0 border-b border-[var(--border)] px-6 py-4 lg:px-7">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="accent">最终文案</Badge>
@@ -6350,7 +6832,7 @@ function App() {
                   </div>
                 </section>
 
-                <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none">
+                <aside className="flex min-h-[26rem] flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none xl:min-h-0">
                   <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:p-6">
                     <div className="grid gap-4">
                       <section className="rounded-[var(--ui-radius-card)] border border-white/76 bg-white/68 px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.035)]">
@@ -6433,7 +6915,7 @@ function App() {
       : step === 'learn'
         ? '网页文案拆解'
           : step === 'length'
-            ? '篇幅设置'
+            ? '文案创作'
             : step === 'plan'
               ? '文案创作'
               : step === 'rewrite'
@@ -6557,7 +7039,7 @@ function App() {
           : step === 'learn'
             ? renderLearn()
             : step === 'length'
-              ? renderLength()
+              ? renderPlan()
               : step === 'plan'
                 ? renderPlan()
                 : step === 'rewrite'

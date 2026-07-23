@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from '../../components/ui/select'
 import { Textarea } from '../../components/ui/textarea'
+import { AiEditing, ArrowUpRight, Library } from '../../components/ui/icon'
 import {
   getCloudAuthState,
   getValidCloudAccessToken,
@@ -43,6 +44,7 @@ import { syncAnnotationToCloud } from '../../lib/cloud-api'
 const defaultFolders = createDefaultFolders()
 const UNTITLED_NOTE_TITLE = '无标题'
 const COLOR_PRESETS = ['#64748B', '#4D78F2', '#2A9D8F', '#8B5CF6', '#E9C46A', '#E56B6F']
+const CREATION_PAGE_URL = 'https://lumos-ai-writer.pages.dev/'
 const colorNameMap: Record<string, string> = {
   '#64748B': '灰色',
   '#DD6C32': '红色',
@@ -495,6 +497,12 @@ export function SidepanelApp() {
     })
   }
 
+  function handleOpenCreationPage() {
+    void chrome.tabs.create({
+      url: CREATION_PAGE_URL,
+    })
+  }
+
   async function handleCloudSignIn() {
     const email = cloudEmail.trim()
     const password = cloudPassword
@@ -768,9 +776,25 @@ export function SidepanelApp() {
             读取结果
           </button>
         </div>
-        <button className="library-link-button" type="button" onClick={handleOpenManager}>
-          前往文案库
-        </button>
+        <nav className="sidepanel-destination-nav" aria-label="打开 Lumos 网页功能">
+          <button
+            className="sidepanel-destination-button"
+            type="button"
+            onClick={handleOpenManager}
+          >
+            <Library aria-hidden="true" />
+            <span>笔记库</span>
+          </button>
+          <button
+            className="sidepanel-destination-button workspace"
+            type="button"
+            onClick={handleOpenCreationPage}
+          >
+            <AiEditing aria-hidden="true" />
+            <span>AI 写作台</span>
+            <ArrowUpRight className="destination-arrow" aria-hidden="true" />
+          </button>
+        </nav>
       </div>
     )
   }
