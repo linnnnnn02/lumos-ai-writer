@@ -71,11 +71,13 @@ async function fetchJson(url, options = {}) {
       const message =
         typeof data?.error_description === 'string'
           ? data.error_description
-          : typeof data?.msg === 'string'
-            ? data.msg
-            : typeof data?.message === 'string'
-              ? data.message
-              : `HTTP ${response.status}`
+          : typeof data?.error?.message === 'string'
+            ? data.error.message
+            : typeof data?.msg === 'string'
+              ? data.msg
+              : typeof data?.message === 'string'
+                ? data.message
+                : `HTTP ${response.status}`
       throw new Error(message)
     }
 
@@ -253,6 +255,7 @@ async function main() {
     const projectId = randomUUID()
     const conversationId = randomUUID()
     const messageId = randomUUID()
+    const firstDraftId = randomUUID()
     const now = new Date().toISOString()
     const workspaceInput = {
       projects: [
@@ -277,7 +280,7 @@ async function main() {
               createdAt: now,
               updatedAt: now,
               lastOpenedAt: now,
-              state: {},
+              state: { currentDraftVersionId: firstDraftId },
               messages: [
                 {
                   id: messageId,
@@ -295,6 +298,17 @@ async function main() {
                 body: ['这是无 AI 的持久化冒烟测试。', '测试账号删除后数据会自动清理。', '不产生模型费用。'],
                 source: 'smoke_test',
               },
+              drafts: [
+                {
+                  id: firstDraftId,
+                  version: 1,
+                  title: '工作草稿',
+                  body: ['这是无 AI 的持久化冒烟测试。', '测试账号删除后数据会自动清理。', '不产生模型费用。'],
+                  source: 'smoke_test',
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
             },
           ],
         },
@@ -313,11 +327,83 @@ async function main() {
     if (
       !workspace?.ok ||
       smokeProject?.conversations?.[0]?.messages?.[0]?.id !== messageId ||
-      smokeProject?.conversations?.[0]?.draft?.title !== '工作草稿'
+      smokeProject?.conversations?.[0]?.draft?.title !== '工作草稿' ||
+      smokeProject?.conversations?.[0]?.drafts?.length !== 1
     ) {
       throw new Error('/v1/workspace did not return the saved workspace state.')
     }
     printStep('read cloud workspace', smokeProject.name)
+
+    const secondDraftId = randomUUID()
+    const secondDraftTime = new Date(Date.now() + 1000).toISOString()
+    const workspaceConversation = workspaceInput.projects[0].conversations[0]
+    workspaceConversation.state = { currentDraftVersionId: secondDraftId }
+    workspaceConversation.draft = {
+      title: '工作草稿第二版',
+      body: ['第一版仍应保留。', '第二版成为当前工作稿。'],
+      source: 'manual_edit',
+    }
+    workspaceConversation.drafts.push({
+      id: secondDraftId,
+      version: 2,
+      title: '工作草稿第二版',
+      body: ['第一版仍应保留。', '第二版成为当前工作稿。'],
+      source: 'manual_edit',
+      createdAt: secondDraftTime,
+      updatedAt: secondDraftTime,
+    })
+
+    await apiRequest('/v1/workspace', accessToken, {
+      method: 'PUT',
+      body: workspaceInput,
+    })
+    const versionedWorkspace = await apiRequest('/v1/workspace', accessToken)
+    const versionedConversation = versionedWorkspace?.projects
+      ?.find((project) => project.id === projectId)
+      ?.conversations?.find((conversation) => conversation.id === conversationId)
+    if (
+      versionedConversation?.draft?.id !== secondDraftId ||
+      versionedConversation?.drafts?.length !== 2 ||
+      !versionedConversation.drafts.some((draft) => draft.id === firstDraftId)
+    ) {
+      throw new Error('/v1/workspace did not preserve both draft versions.')
+    }
+    printStep('preserved draft history', '2 versions')
+
+    const firstDraftSnapshot = workspaceConversation.drafts[0]
+    firstDraftSnapshot.title = '不应覆盖的新标题'
+    firstDraftSnapshot.body = ['这是一份来自旧设备的过期内容。']
+    firstDraftSnapshot.updatedAt = new Date(Date.parse(now) - 1000).toISOString()
+    await apiRequest('/v1/workspace', accessToken, {
+      method: 'PUT',
+      body: workspaceInput,
+    })
+    const staleWorkspace = await apiRequest('/v1/workspace', accessToken)
+    const staleConversation = staleWorkspace?.projects
+      ?.find((project) => project.id === projectId)
+      ?.conversations?.find((conversation) => conversation.id === conversationId)
+    if (staleConversation?.drafts?.find((draft) => draft.id === firstDraftId)?.title !== '工作草稿') {
+      throw new Error('/v1/workspace allowed a stale client to overwrite draft history.')
+    }
+    printStep('rejected stale draft overwrite')
+
+    firstDraftSnapshot.title = '工作草稿'
+    firstDraftSnapshot.body = ['这是无 AI 的持久化冒烟测试。', '测试账号删除后数据会自动清理。', '不产生模型费用。']
+    firstDraftSnapshot.updatedAt = now
+    workspaceConversation.state = { currentDraftVersionId: null }
+    workspaceConversation.draft = null
+    await apiRequest('/v1/workspace', accessToken, {
+      method: 'PUT',
+      body: workspaceInput,
+    })
+    const invalidatedWorkspace = await apiRequest('/v1/workspace', accessToken)
+    const invalidatedConversation = invalidatedWorkspace?.projects
+      ?.find((project) => project.id === projectId)
+      ?.conversations?.find((conversation) => conversation.id === conversationId)
+    if (invalidatedConversation?.draft !== null || invalidatedConversation?.drafts?.length !== 2) {
+      throw new Error('/v1/workspace deleted history when the current draft was invalidated.')
+    }
+    printStep('invalidated current draft', 'history retained')
 
     const memory = await apiRequest('/v1/feedback-memories', accessToken, {
       method: 'POST',

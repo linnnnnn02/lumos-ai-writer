@@ -86,6 +86,7 @@ const messageColumns = 'id,conversation_id,channel,role,content,created_at'
 const draftColumns = 'id,conversation_id,version,title,body,source,created_at,updated_at'
 const feedbackMemoryColumns =
   'id,project_id,conversation_id,draft_id,type,content,context,source,created_at,updated_at'
+const currentDraftVersionStateKey = 'currentDraftVersionId'
 
 export class WorkspaceOwnershipError extends Error {
   constructor(message = 'Workspace resource does not belong to the current user.') {
@@ -242,16 +243,33 @@ export async function listWorkspace(config: AppConfig, user: User): Promise<GetW
     messagesByConversation.set(row.conversation_id, messages)
   }
 
-  const latestDraftByConversation = new Map<string, WorkspaceDraftDto>()
+  const draftsByConversation = new Map<string, WorkspaceDraftDto[]>()
+  const draftsById = new Map<string, WorkspaceDraftDto>()
   for (const row of (draftResult.data ?? []) as DraftRow[]) {
-    if (!row.conversation_id || latestDraftByConversation.has(row.conversation_id)) continue
-    latestDraftByConversation.set(row.conversation_id, toDraftDto(row))
+    if (!row.conversation_id) continue
+    const draft = toDraftDto(row)
+    const drafts = draftsByConversation.get(row.conversation_id) ?? []
+    drafts.push(draft)
+    draftsByConversation.set(row.conversation_id, drafts)
+    draftsById.set(draft.id, draft)
   }
 
   const conversationsByProject = new Map<string, WorkspaceConversationDto[]>()
   for (const row of (conversationResult.data ?? []) as ConversationRow[]) {
     if (!row.project_id) continue
     const conversations = conversationsByProject.get(row.project_id) ?? []
+    const state = toObject(row.state)
+    const drafts = draftsByConversation.get(row.id) ?? []
+    const hasCurrentDraftMarker = Object.prototype.hasOwnProperty.call(
+      state,
+      currentDraftVersionStateKey,
+    )
+    const currentDraftId = state[currentDraftVersionStateKey]
+    const currentDraft = hasCurrentDraftMarker
+      ? typeof currentDraftId === 'string'
+        ? draftsById.get(currentDraftId) ?? null
+        : null
+      : drafts[0] ?? null
     conversations.push({
       id: row.id,
       title: row.title,
@@ -266,9 +284,10 @@ export async function listWorkspace(config: AppConfig, user: User): Promise<GetW
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastOpenedAt: row.last_opened_at,
-      state: toObject(row.state),
+      state,
       messages: messagesByConversation.get(row.id) ?? [],
-      draft: latestDraftByConversation.get(row.id) ?? null,
+      draft: currentDraft,
+      drafts,
     })
     conversationsByProject.set(row.project_id, conversations)
   }
@@ -318,6 +337,10 @@ export async function syncWorkspace(
   const projectIds = projects.map((project) => project.id)
   const conversationIds = conversations.map(({ conversation }) => conversation.id)
   const messageIds = messages.map(({ message }) => message.id)
+  const draftSnapshots = conversations.flatMap(({ conversation }) =>
+    (conversation.drafts ?? []).map((draft) => ({ conversation, draft })),
+  )
+  const draftIds = draftSnapshots.map(({ draft }) => draft.id)
   const folderIds = Array.from(
     new Set(projects.flatMap((project) => (project.folderId ? [project.folderId] : []))),
   )
@@ -334,10 +357,15 @@ export async function syncWorkspace(
     }
   }
 
+  if (new Set(draftIds).size !== draftIds.length) {
+    throw new WorkspaceOwnershipError('A draft snapshot was included more than once.')
+  }
+
   await Promise.all([
     assertOwnedIds(supabase, 'projects', user, projectIds),
     assertOwnedIds(supabase, 'conversations', user, conversationIds),
     assertOwnedIds(supabase, 'chat_messages', user, messageIds),
+    assertOwnedIds(supabase, 'drafts', user, draftIds),
     assertOwnedFolderIds(supabase, user, folderIds),
   ])
 
@@ -421,8 +449,121 @@ export async function syncWorkspace(
       assertNoDatabaseError(deleteMessagesResult.error)
     }
 
+    const existingDraftsResult = await supabase
+      .from('drafts')
+      .select(draftColumns)
+      .eq('user_id', user.id)
+      .in('conversation_id', conversationIds)
+    assertNoDatabaseError(existingDraftsResult.error)
+
+    const existingDrafts = (existingDraftsResult.data ?? []) as DraftRow[]
+    const existingDraftsById = new Map(existingDrafts.map((draft) => [draft.id, draft]))
+    if (draftIds.length > 0) {
+      const incomingDraftsResult = await supabase
+        .from('drafts')
+        .select(draftColumns)
+        .eq('user_id', user.id)
+        .in('id', draftIds)
+      assertNoDatabaseError(incomingDraftsResult.error)
+
+      for (const draft of (incomingDraftsResult.data ?? []) as DraftRow[]) {
+        const incomingDraft = draftSnapshots.find((item) => item.draft.id === draft.id)
+        if (incomingDraft && incomingDraft.conversation.id !== draft.conversation_id) {
+          throw new WorkspaceOwnershipError('A draft snapshot belongs to another conversation.')
+        }
+        existingDraftsById.set(draft.id, draft)
+      }
+    }
+    const usedVersionsByConversation = new Map<string, Set<number>>()
+    for (const draft of existingDrafts) {
+      if (!draft.conversation_id) continue
+      const versions = usedVersionsByConversation.get(draft.conversation_id) ?? new Set<number>()
+      versions.add(draft.version)
+      usedVersionsByConversation.set(draft.conversation_id, versions)
+    }
+
     for (const { conversation } of conversations) {
-      if (conversation.draft) {
+      if (conversation.drafts) {
+        const incomingDrafts = [...conversation.drafts].sort(
+          (first, second) => first.version - second.version,
+        )
+        const usedVersions = usedVersionsByConversation.get(conversation.id) ?? new Set<number>()
+
+        for (const draft of incomingDrafts) {
+          const existingDraft = existingDraftsById.get(draft.id)
+          if (existingDraft) {
+            if (existingDraft.conversation_id !== conversation.id) {
+              throw new WorkspaceOwnershipError('A draft snapshot belongs to another conversation.')
+            }
+
+            const existingBody = toStringArray(existingDraft.body)
+            const hasSameContent =
+              existingDraft.title === draft.title &&
+              existingDraft.source === draft.source &&
+              existingBody.length === draft.body.length &&
+              existingBody.every((paragraph, index) => paragraph === draft.body[index])
+            if (hasSameContent) continue
+
+            const incomingUpdatedAt = Date.parse(draft.updatedAt ?? '')
+            const existingUpdatedAt = Date.parse(existingDraft.updated_at)
+            if (
+              !Number.isNaN(incomingUpdatedAt) &&
+              !Number.isNaN(existingUpdatedAt) &&
+              incomingUpdatedAt < existingUpdatedAt
+            ) {
+              continue
+            }
+
+            let updateDraftQuery = supabase
+              .from('drafts')
+              .update({
+                title: draft.title,
+                body: draft.body,
+                source: draft.source,
+                updated_at: draft.updatedAt ?? now,
+              })
+              .eq('user_id', user.id)
+              .eq('id', draft.id)
+            if (!Number.isNaN(incomingUpdatedAt)) {
+              updateDraftQuery = updateDraftQuery.lte('updated_at', draft.updatedAt!)
+            }
+            const draftResult = await updateDraftQuery
+            assertNoDatabaseError(draftResult.error)
+            continue
+          }
+
+          let version = draft.version
+          while (usedVersions.has(version)) version += 1
+
+          const draftResult = await supabase.from('drafts').insert({
+            id: draft.id,
+            user_id: user.id,
+            conversation_id: conversation.id,
+            version,
+            title: draft.title,
+            body: draft.body,
+            source: draft.source,
+            created_at: draft.createdAt ?? now,
+            updated_at: draft.updatedAt ?? now,
+          })
+          assertNoDatabaseError(draftResult.error)
+          usedVersions.add(version)
+          existingDraftsById.set(draft.id, {
+            id: draft.id,
+            conversation_id: conversation.id,
+            version,
+            title: draft.title,
+            body: draft.body,
+            source: draft.source,
+            created_at: draft.createdAt ?? now,
+            updated_at: draft.updatedAt ?? now,
+          })
+        }
+
+        usedVersionsByConversation.set(conversation.id, usedVersions)
+      } else if (conversation.draft) {
+        // Older clients only know about one working draft. Keep their overwrite behavior,
+        // but never delete the row when that client invalidates its current draft.
         const draftResult = await supabase.from('drafts').upsert(
           {
             user_id: user.id,
@@ -434,14 +575,6 @@ export async function syncWorkspace(
           },
           { onConflict: 'conversation_id,version' },
         )
-        assertNoDatabaseError(draftResult.error)
-      } else {
-        const draftResult = await supabase
-          .from('drafts')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('conversation_id', conversation.id)
-          .eq('version', 1)
         assertNoDatabaseError(draftResult.error)
       }
     }

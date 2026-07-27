@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { aiDraftCopySchema, projectLengthSchema } from './ai.js'
+import { projectLengthSchema } from './ai.js'
 
 export const conversationStepSchema = z.enum(['learn', 'length', 'plan', 'rewrite', 'reader'])
 
@@ -38,6 +38,7 @@ export const workspaceConversationDtoSchema = z.object({
   state: z.record(z.string(), z.unknown()),
   messages: z.array(workspaceChatMessageDtoSchema),
   draft: workspaceDraftDtoSchema.nullable(),
+  drafts: z.array(workspaceDraftDtoSchema).default([]),
 })
 
 export const workspaceProjectDtoSchema = z.object({
@@ -85,12 +86,21 @@ const syncWorkspaceMessageSchema = workspaceChatMessageDtoSchema.omit({ createdA
   createdAt: z.string().optional(),
 })
 
-const syncWorkspaceDraftSchema = aiDraftCopySchema.extend({
+const syncWorkspaceDraftSchema = z.object({
+  title: z.string().max(2000),
+  body: z.array(z.string().max(50000)).max(200),
   source: z.string().trim().min(1).max(80),
 })
 
+const syncWorkspaceDraftSnapshotSchema = syncWorkspaceDraftSchema.extend({
+  id: z.string().uuid(),
+  version: z.number().int().positive(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+})
+
 const syncWorkspaceConversationSchema = workspaceConversationDtoSchema
-  .omit({ messages: true, draft: true, createdAt: true })
+  .omit({ messages: true, draft: true, drafts: true, createdAt: true })
   .extend({
     createdAt: z.string().optional(),
     title: z.string().trim().min(1).max(240),
@@ -100,6 +110,7 @@ const syncWorkspaceConversationSchema = workspaceConversationDtoSchema
     state: z.record(z.string(), z.unknown()),
     messages: z.array(syncWorkspaceMessageSchema).max(500),
     draft: syncWorkspaceDraftSchema.nullable(),
+    drafts: z.array(syncWorkspaceDraftSnapshotSchema).optional(),
   })
 
 export const syncWorkspaceRequestSchema = z.object({
