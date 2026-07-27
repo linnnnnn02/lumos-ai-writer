@@ -258,6 +258,79 @@ button:disabled {
   animation: sidepanel-field-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.sidepanel-destination-nav {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: var(--ui-space-1);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--ui-field-radius);
+  background: var(--panel-surface-muted);
+  padding: 3px;
+}
+
+.sidepanel-destination-button {
+  display: inline-flex;
+  min-height: var(--ui-control-height-sm);
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-control-gap-sm);
+  border: 0;
+  border-radius: calc(var(--ui-field-radius) - 3px);
+  background: transparent;
+  color: var(--panel-text-muted);
+  cursor: pointer;
+  font-size: var(--ui-control-font-sm);
+  font-weight: 700;
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
+  white-space: nowrap;
+}
+
+.sidepanel-destination-button svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.sidepanel-destination-button:hover,
+.sidepanel-destination-button:focus-visible {
+  background: var(--panel-surface-raised);
+  color: var(--panel-text);
+  transform: none;
+}
+
+.sidepanel-destination-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.14);
+}
+
+.sidepanel-destination-button.workspace {
+  background: var(--panel-surface-raised);
+  color: var(--panel-text);
+  box-shadow: var(--panel-shadow-muted);
+}
+
+.sidepanel-destination-button.workspace:hover {
+  background: #fff;
+}
+
+.sidepanel-destination-button .destination-arrow {
+  width: 12px;
+  height: 12px;
+  color: var(--panel-text-soft);
+}
+
+@media (max-width: 520px) {
+  .sidepanel-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidepanel-destination-nav {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Legacy class retained for older extension pages loaded during hot reload. */
 .library-link-button {
   min-height: var(--ui-control-height-md);
   border: 1px solid var(--panel-border);

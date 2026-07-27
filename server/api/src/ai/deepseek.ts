@@ -30,10 +30,15 @@ import {
 } from '../skills/rewrite-v1/index.js'
 import {
   filterGroundedReaderSuggestions,
+  normalizeReaderPreviewConfidence,
+  normalizeReaderPreviewOutput,
   readerPreviewSkillV1,
   validateReaderPreviewSkillOutput,
 } from '../skills/reader-preview-v1/index.js'
-import { writerModelSkillV1 } from '../skills/writer-model-v1/index.js'
+import {
+  normalizeWriterModelOutput,
+  writerModelSkillV1,
+} from '../skills/writer-model-v1/index.js'
 import type { WritingProfileContext } from '../writing-profile.js'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
@@ -157,13 +162,56 @@ function parseJsonWithBoundedMissingArrayCommas(content: string): unknown {
   throw new DeepSeekUpstreamError('DeepSeek returned invalid JSON content.', 502)
 }
 
+function escapeControlCharactersInsideJsonStrings(content: string) {
+  let result = ''
+  let insideString = false
+  let escaped = false
+
+  for (const character of content) {
+    if (!insideString) {
+      result += character
+      if (character === '"') insideString = true
+      continue
+    }
+
+    if (escaped) {
+      result += character
+      escaped = false
+      continue
+    }
+
+    if (character === '\\') {
+      result += character
+      escaped = true
+      continue
+    }
+
+    if (character === '"') {
+      result += character
+      insideString = false
+      continue
+    }
+
+    if (character.charCodeAt(0) < 0x20) {
+      result += JSON.stringify(character).slice(1, -1)
+      continue
+    }
+
+    result += character
+  }
+
+  return result
+}
+
 export function parseJsonContent(content: string): unknown {
   try {
     return JSON.parse(content)
   } catch {
     const match = content.match(/\{[\s\S]*\}/)
     if (!match) throw new DeepSeekUpstreamError('DeepSeek returned non-JSON content.', 502)
-    return parseJsonWithBoundedMissingArrayCommas(match[0])
+    return parseJsonWithBoundedMissingArrayCommas(
+      escapeControlCharactersInsideJsonStrings(match[0]),
+    )
   }
 }
 
@@ -470,76 +518,91 @@ export async function generateDraftWithDeepSeek(
 
   try {
     candidateDraft = validateDraftSkillOutput(candidateDraft, input.length)
-  } catch {
-    let repairData: DeepSeekChatCompletionResponse
-    try {
-      repairData = await requestDeepSeekChatCompletion(config, {
-        model: preparedSkill.model,
-        messages: [
-          {
-            role: 'system',
-            content: draftRepairSystemPrompt,
+  } catch (initialValidationError) {
+    let combinedUsage = initialUsage
+    let lastValidationError: unknown = initialValidationError
+
+    for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+      let repairData: DeepSeekChatCompletionResponse
+      try {
+        repairData = await requestDeepSeekChatCompletion(config, {
+          model: preparedSkill.model,
+          messages: [
+            {
+              role: 'system',
+              content: draftRepairSystemPrompt,
+            },
+            {
+              role: 'user',
+              content: buildDraftRepairUserPrompt(input, candidateDraft),
+            },
+          ],
+          response_format: {
+            type: 'json_object',
           },
-          {
-            role: 'user',
-            content: buildDraftRepairUserPrompt(input, candidateDraft),
+          thinking: {
+            type: 'disabled',
           },
-        ],
-        response_format: {
-          type: 'json_object',
-        },
-        thinking: {
-          type: 'disabled',
-        },
-        max_tokens: preparedSkill.maxTokens,
-        temperature: 0.2,
-        stream: false,
-      })
-    } catch (error) {
-      throw new DeepSeekOutputValidationError(
-        error,
-        initialUsage,
-        preparedSkill.metadata.promptHash,
-      )
+          max_tokens: preparedSkill.maxTokens,
+          temperature: 0.2,
+          stream: false,
+        })
+      } catch (error) {
+        throw new DeepSeekOutputValidationError(
+          error,
+          combinedUsage,
+          preparedSkill.metadata.promptHash,
+        )
+      }
+
+      const repairUsage = toUsage(repairData.usage)
+      combinedUsage = mergeAiUsage(combinedUsage, repairUsage)
+      if (repairData.error?.message) {
+        throw new DeepSeekOutputValidationError(
+          new DeepSeekUpstreamError(repairData.error.message, 502),
+          combinedUsage,
+          preparedSkill.metadata.promptHash,
+        )
+      }
+      const repairContent = repairData.choices?.[0]?.message?.content
+      if (!repairContent) {
+        throw new DeepSeekOutputValidationError(
+          new Error('DeepSeek returned an empty repaired draft.'),
+          combinedUsage,
+          preparedSkill.metadata.promptHash,
+        )
+      }
+
+      try {
+        candidateDraft = preparedSkill.outputSchema.parse(
+          parseJsonContent(repairContent),
+        )
+      } catch (error) {
+        throw new DeepSeekOutputValidationError(
+          error,
+          combinedUsage,
+          preparedSkill.metadata.promptHash,
+        )
+      }
+
+      try {
+        candidateDraft = validateDraftSkillOutput(candidateDraft, input.length)
+        return {
+          draft: candidateDraft,
+          skill: preparedSkill.metadata,
+          model: preparedSkill.model,
+          usage: combinedUsage,
+        }
+      } catch (error) {
+        lastValidationError = error
+      }
     }
 
-    const repairUsage = toUsage(repairData.usage)
-    const combinedUsage = mergeAiUsage(initialUsage, repairUsage)
-    if (repairData.error?.message) {
-      throw new DeepSeekOutputValidationError(
-        new DeepSeekUpstreamError(repairData.error.message, 502),
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-    const repairContent = repairData.choices?.[0]?.message?.content
-    if (!repairContent) {
-      throw new DeepSeekOutputValidationError(
-        new Error('DeepSeek returned an empty repaired draft.'),
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    try {
-      candidateDraft = validateDraftSkillOutput(
-        preparedSkill.outputSchema.parse(parseJsonContent(repairContent)),
-        input.length,
-      )
-    } catch (error) {
-      throw new DeepSeekOutputValidationError(
-        error,
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    return {
-      draft: candidateDraft,
-      skill: preparedSkill.metadata,
-      model: preparedSkill.model,
-      usage: combinedUsage,
-    }
+    throw new DeepSeekOutputValidationError(
+      lastValidationError,
+      combinedUsage,
+      preparedSkill.metadata.promptHash,
+    )
   }
 
   return {
@@ -770,10 +833,14 @@ export async function previewDraftForReaderWithDeepSeek(
   const groundingSource = getReaderPreviewGroundingSource(input)
   let candidatePreview: AiReaderPreviewResult
   try {
-    candidatePreview = preparedSkill.outputSchema.parse(
-      unwrapDeepSeekObject(
-        parseJsonContent(content),
-        ['audienceSummary', 'annotations', 'suggestions'],
+    candidatePreview = normalizeReaderPreviewConfidence(
+      preparedSkill.outputSchema.parse(
+        normalizeReaderPreviewOutput(
+          unwrapDeepSeekObject(
+            parseJsonContent(content),
+            ['audienceSummary', 'annotations', 'suggestions'],
+          ),
+        ),
       ),
     )
   } catch (error) {
@@ -862,7 +929,8 @@ export async function learnWritingProfileWithDeepSeek(
     content,
     data,
     preparedSkill.metadata,
-    (value) => preparedSkill.outputSchema.parse(value),
+    (value) =>
+      preparedSkill.outputSchema.parse(normalizeWriterModelOutput(value, input)),
   )
 
   return {

@@ -6,7 +6,10 @@ import {
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
 import { prepareAiSkill } from '../src/skills/runtime.js'
-import { writerModelSkillV1 } from '../src/skills/writer-model-v1/index.js'
+import {
+  normalizeWriterModelOutput,
+  writerModelSkillV1,
+} from '../src/skills/writer-model-v1/index.js'
 import { collectWritingEvidenceIds } from '../src/writing-profile.js'
 
 async function readJsonFixture(name: string) {
@@ -46,6 +49,47 @@ assert.ok(userPayload.input.feedbackEvidence.every((item) => item.content.length
 assert.ok(prepared.systemPrompt.includes('profile_correction > manual_edit'))
 assert.ok(prepared.systemPrompt.includes('项目主题、受众和一次性要求只能进入 openQuestions'))
 assert.doesNotThrow(() => prepared.outputSchema.parse(expectedOutput))
+assert.ok(prepared.systemPrompt.includes('dimension 只能是以下值之一'))
+
+const normalizedOutput = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...expectedOutput,
+      evidenceCount: 999,
+      preferences: [
+        {
+          ...expectedOutput.preferences[0],
+          dimension: 'credibility',
+        },
+        {
+          ...expectedOutput.preferences[1],
+          scope: 'project',
+          confidence: 1,
+          supportCount: 99,
+          evidenceIds: [
+            expectedOutput.preferences[1].evidenceIds[0],
+            'invented-evidence-id',
+            expectedOutput.preferences[1].evidenceIds[0],
+          ],
+        },
+      ],
+    },
+    input,
+  ),
+)
+assert.equal(normalizedOutput.preferences.length, 1)
+assert.equal(normalizedOutput.preferences[0]?.scope, input.scope)
+assert.equal(normalizedOutput.preferences[0]?.supportCount, 1)
+assert.equal(normalizedOutput.preferences[0]?.confidence, 0.45)
+assert.deepEqual(normalizedOutput.preferences[0]?.evidenceIds, [
+  expectedOutput.preferences[1].evidenceIds[0],
+])
+assert.equal(
+  normalizedOutput.evidenceCount,
+  input.libraryEvidence.notes.length +
+    input.libraryEvidence.snippets.length +
+    input.feedbackEvidence.length,
+)
 
 const evidenceTypes = new Map<string, string>()
 for (const note of input.libraryEvidence.notes) evidenceTypes.set(note.id, 'library_pattern')

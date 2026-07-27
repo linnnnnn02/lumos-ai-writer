@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from 'react'
-import { MoreHorizontal, Waste } from '../../components/ui/icon'
+import { AiEditing, ArrowUpRight, MoreHorizontal, Waste } from '../../components/ui/icon'
 import { pinyin } from 'pinyin-pro'
 import {
   normalizeNoteUrl,
@@ -158,6 +158,7 @@ type FetchNoteCoverResponse =
 
 const UNTITLED_NOTE_TITLE = '无标题'
 const COLOR_PRESETS = ['#64748B', '#4D78F2', '#2A9D8F', '#8B5CF6', '#E9C46A', '#E56B6F']
+const CREATION_PAGE_URL = 'https://lumos-ai-writer.pages.dev/'
 const TRASH_RETENTION_DAYS = 7
 
 const colorNameMap: Record<string, string> = {
@@ -1734,6 +1735,23 @@ export function OptionsApp() {
             <h1>笔记库</h1>
           </div>
         </div>
+
+        <a
+          className="workspace-nav-entry"
+          href={CREATION_PAGE_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="打开 AI 写作台"
+        >
+          <span className="workspace-nav-icon" aria-hidden="true">
+            <AiEditing />
+          </span>
+          <span className="workspace-nav-copy">
+            <strong>AI 写作台</strong>
+            <small>生成与改写文案</small>
+          </span>
+          <ArrowUpRight className="workspace-nav-arrow" aria-hidden="true" />
+        </a>
 
         <Button
           className="new-folder-button"

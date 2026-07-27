@@ -21,6 +21,7 @@
     "eval:skills": "pnpm --filter @lumos-ai/api eval:skills",
     "smoke:p0": "node scripts/smoke-p0.mjs",
     "smoke:p0:ai": "node scripts/smoke-p0.mjs --ai",
+    "smoke:ai-pilot": "node scripts/smoke-ai-pilot.mjs",
     "report:ai": "node scripts/report-ai-usage.mjs",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",

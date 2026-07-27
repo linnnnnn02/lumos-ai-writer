@@ -1,4 +1,5 @@
 import {
+  writingPreferenceDimensionSchema,
   writingProfileSchema,
   type BuildWritingProfileRequest,
   type WritingProfile,
@@ -34,6 +35,98 @@ const outputContract = {
 
 function trimText(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildEvidenceTypeMap(input: BuildWritingProfileRequest) {
+  const evidenceTypes = new Map<string, string>()
+  for (const note of input.libraryEvidence.notes) {
+    evidenceTypes.set(note.id, 'library_pattern')
+  }
+  for (const snippet of input.libraryEvidence.snippets) {
+    evidenceTypes.set(
+      snippet.id,
+      snippet.reasonText ? 'snippet_reason' : 'snippet_label',
+    )
+  }
+  for (const feedback of input.feedbackEvidence) {
+    evidenceTypes.set(feedback.id, feedback.type)
+  }
+  return evidenceTypes
+}
+
+function getConfidenceLimit(evidenceTypes: string[]) {
+  if (evidenceTypes.length === 1) {
+    return evidenceTypes[0] === 'profile_correction' ? 0.85 : 0.45
+  }
+  if (evidenceTypes.length === 2) return 0.7
+
+  const hasStrongEvidence = evidenceTypes.some((type) =>
+    ['profile_correction', 'manual_edit', 'final_choice'].includes(type),
+  )
+  return hasStrongEvidence ? 0.95 : 0.8
+}
+
+export function normalizeWriterModelOutput(
+  value: unknown,
+  input: BuildWritingProfileRequest,
+) {
+  if (!isRecord(value)) return value
+
+  const evidenceTypes = buildEvidenceTypeMap(input)
+  const allowedDimensions = new Set(writingPreferenceDimensionSchema.options)
+  const preferences = Array.isArray(value.preferences)
+    ? value.preferences.flatMap((preference) => {
+        if (!isRecord(preference)) return []
+        if (
+          typeof preference.dimension !== 'string' ||
+          !allowedDimensions.has(
+            preference.dimension as (typeof writingPreferenceDimensionSchema.options)[number],
+          )
+        ) {
+          return []
+        }
+
+        const evidenceIds = Array.from(
+          new Set(
+            (Array.isArray(preference.evidenceIds) ? preference.evidenceIds : []).filter(
+              (id): id is string => typeof id === 'string' && evidenceTypes.has(id),
+            ),
+          ),
+        )
+        if (evidenceIds.length === 0) return []
+
+        const evidenceTypeList = evidenceIds
+          .map((id) => evidenceTypes.get(id))
+          .filter((type): type is string => Boolean(type))
+        const rawConfidence =
+          typeof preference.confidence === 'number' && Number.isFinite(preference.confidence)
+            ? preference.confidence
+            : 0
+
+        return [
+          {
+            ...preference,
+            scope: input.scope,
+            confidence: Math.min(
+              Math.max(rawConfidence, 0),
+              getConfidenceLimit(evidenceTypeList),
+            ),
+            supportCount: evidenceIds.length,
+            evidenceIds,
+          },
+        ]
+      })
+    : []
+
+  return {
+    ...value,
+    preferences,
+    evidenceCount: evidenceTypes.size,
+  }
 }
 
 export function compactWriterModelInput(input: BuildWritingProfileRequest) {
@@ -78,6 +171,7 @@ const writerModelSystemPrompt = [
   'scope=project 时，可以记录当前项目覆盖，但 preference.scope 必须为 project。',
   '单条非明确纠正证据只能形成待验证偏好，confidence 不得高于 0.45；单条 profile_correction 可达到 0.85；两条一致独立证据不得高于 0.7；三条以上且包含明确纠正、手动改稿或最终选择时才可高于 0.8。',
   'supportCount 必须等于该偏好引用的独立 evidenceIds 数量。出现冲突时保留在 contradictions，不要平均成模糊结论。',
+  `dimension 只能是以下值之一：${writingPreferenceDimensionSchema.options.join(', ')}。无法归类时不要输出该条 preference。`,
   'application 必须明确说明未来写作怎么选内容、组织结构或处理措辞，不能只写“更自然”“更像用户”。',
   'previousProfile 只是上一版假设；新证据支持时强化，冲突时降低置信度或保留矛盾，不得无条件复制。',
   'top-level 的原则和模式必须能够由 preferences 中的证据支持。',

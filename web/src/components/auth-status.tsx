@@ -78,6 +78,13 @@ function getSessionAvatarUrl(session: Session | null) {
 
 function getFriendlyAuthError(message: string) {
   const normalized = message.toLowerCase()
+  if (
+    normalized.includes('unexpected end of json') ||
+    normalized.includes('failed to fetch') ||
+    normalized.includes('networkerror')
+  ) {
+    return '登录服务暂时未连接，请稍后再试。'
+  }
   if (normalized.includes('invalid login credentials')) return '邮箱或密码不正确，请重新输入。'
   if (normalized.includes('email not confirmed')) return '请先打开确认邮件，完成账号确认。'
   if (normalized.includes('rate limit')) return '发送次数过多，请稍后再试。'
