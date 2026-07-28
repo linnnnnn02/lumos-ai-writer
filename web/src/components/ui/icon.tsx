@@ -40,6 +40,7 @@ import {
   Undo03Icon,
   UserCircleIcon,
   UserGroupIcon,
+  WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 
 type IconProps = Omit<HugeiconsIconProps, 'icon' | 'altIcon' | 'strokeWidth'>
@@ -78,6 +79,7 @@ export const Funnel = createIcon(FilterHorizontalIcon, 'Funnel')
 export const Github = createIcon(GithubIcon, 'Github')
 export const GripVertical = createIcon(DragDropVerticalIcon, 'GripVertical')
 export const Highlighter = createIcon(HighlighterIcon, 'Highlighter')
+export const History = createIcon(WorkHistoryIcon, 'History')
 export const Image = createIcon(Image02Icon, 'Image')
 export const Layers3 = createIcon(Layers02Icon, 'Layers3')
 export const Loader2 = createIcon(Loading03Icon, 'Loader2')

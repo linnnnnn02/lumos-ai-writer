@@ -37,6 +37,7 @@ import {
   FolderOpen,
   GripVertical,
   Highlighter,
+  History,
   Image,
   Layers3,
   Loader2,
@@ -78,6 +79,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { LearnWorkspace } from '@/components/learn-workspace'
 import { LibraryManager } from '@/components/library-manager'
+import { DraftVersionHistory } from '@/components/draft-version-history'
 import { AuthStatus } from '@/components/auth-status'
 import {
   WorkflowTitleMenu,
@@ -110,6 +112,14 @@ import { getCurrentAccessToken } from '@/lib/supabase-browser'
 import { loadLocalWorkspace, saveLocalWorkspace } from '@/lib/local-workspace'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
+import {
+  ensureBaseDraftVersion,
+  evolveDraftVersions,
+  isSameDraftCopy,
+  normalizeDraftVersions,
+  type DraftCopy as InitialDraftCopy,
+  type DraftVersionRecord,
+} from './lib/draft-versions'
 import { buildFallbackSelectionRewrite } from './lib/rewrite'
 
 type ConversationStep = 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
@@ -318,11 +328,6 @@ const initialProjects: ProjectRecord[] = [
 
 const defaultConversationTitle = '新的文案对话'
 
-type InitialDraftCopy = {
-  title: string
-  body: string[]
-}
-
 type DraftDragSelectionSegment = {
   fieldId: string
   startIndex: number
@@ -453,6 +458,8 @@ type HydratedCloudWorkspace = {
   analysisByConversation: Record<string, AiAnalysisResult>
   draftCopyByConversation: Record<string, InitialDraftCopy>
   draftReadyByConversation: Record<string, boolean>
+  draftVersionsByConversation: Record<string, DraftVersionRecord[]>
+  currentDraftVersionIdByConversation: Record<string, string>
   rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
@@ -520,18 +527,12 @@ function isReaderPreviewRecord(value: unknown): value is ReaderPreviewRecord {
   )
 }
 
-function isSameDraftCopy(first: InitialDraftCopy, second: InitialDraftCopy) {
-  return (
-    first.title === second.title &&
-    first.body.length === second.body.length &&
-    first.body.every((paragraph, index) => paragraph === second.body[index])
-  )
-}
-
 function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCloudWorkspace {
   const analysisByConversation: Record<string, AiAnalysisResult> = {}
   const draftCopyByConversation: Record<string, InitialDraftCopy> = {}
   const draftReadyByConversation: Record<string, boolean> = {}
+  const draftVersionsByConversation: Record<string, DraftVersionRecord[]> = {}
+  const currentDraftVersionIdByConversation: Record<string, string> = {}
   const rewriteMessagesByConversation: Record<string, RewriteChatMessage[]> = {}
   const planAttachmentsByConversation: Record<string, PlanAttachment[]> = {}
   const readerAudienceByConversation: Record<string, string> = {}
@@ -569,9 +570,20 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       const draft = conversation.draft
         ? { title: conversation.draft.title, body: conversation.draft.body }
         : null
+      const draftVersions = normalizeDraftVersions(
+        (conversation.drafts ?? []).length > 0
+          ? conversation.drafts
+          : conversation.draft
+            ? [conversation.draft]
+            : [],
+      )
+      if (draftVersions.length > 0) {
+        draftVersionsByConversation[conversation.id] = draftVersions
+      }
       if (draft) {
         draftCopyByConversation[conversation.id] = draft
         draftReadyByConversation[conversation.id] = true
+        currentDraftVersionIdByConversation[conversation.id] = conversation.draft?.id ?? ''
       }
 
       const chatMessages = conversation.messages
@@ -632,6 +644,8 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
     analysisByConversation,
     draftCopyByConversation,
     draftReadyByConversation,
+    draftVersionsByConversation,
+    currentDraftVersionIdByConversation,
     rewriteMessagesByConversation,
     planAttachmentsByConversation,
     readerAudienceByConversation,
@@ -651,6 +665,8 @@ function buildWorkspaceSyncPayload(input: {
   analysisByConversation: Record<string, AiAnalysisResult>
   draftCopyByConversation: Record<string, InitialDraftCopy>
   draftReadyByConversation: Record<string, boolean>
+  draftVersionsByConversation: Record<string, DraftVersionRecord[]>
+  currentDraftVersionIdByConversation: Record<string, string>
   rewriteMessagesByConversation: Record<string, RewriteChatMessage[]>
   planAttachmentsByConversation: Record<string, PlanAttachment[]>
   readerAudienceByConversation: Record<string, string>
@@ -665,56 +681,77 @@ function buildWorkspaceSyncPayload(input: {
       folderId: project.folderId || null,
       activeConversationId: project.activeConversationId || null,
       updatedAt: project.updatedAt,
-      conversations: project.conversations.map((conversation) => ({
-        id: conversation.id,
-        title: conversation.title,
-        step: conversation.step,
-        pinned: Boolean(conversation.pinned),
-        selectedReferenceIds: conversation.selectedItemIds,
-        length: conversation.length,
-        topic: conversation.topic,
-        targetAudience: conversation.targetAudience,
-        analysisReady: conversation.analysisReady,
-        finalizedAt: conversation.finalizedAt ?? null,
-        createdAt: conversation.createdAt,
-        updatedAt: conversation.updatedAt,
-        lastOpenedAt: conversation.lastOpenedAt,
-        state: {
-          ...(input.analysisByConversation[conversation.id]
-            ? { analysis: input.analysisByConversation[conversation.id] }
-            : {}),
-          rewriteMessages: input.rewriteMessagesByConversation[conversation.id] ?? [],
-          planAttachments: input.planAttachmentsByConversation[conversation.id] ?? [],
-          readerAudience: input.readerAudienceByConversation[conversation.id] ?? '',
-          ...(input.readerPreviewByConversation[conversation.id]
-            ? { readerPreview: input.readerPreviewByConversation[conversation.id] }
-            : {}),
-          ...(conversation.finalDraft ? { finalDraft: conversation.finalDraft } : {}),
-          writingBrief: conversation.writingBrief,
-          chatInput: input.chatInputByConversation[conversation.id] ?? '',
-          rewriteInput: input.rewriteInputByConversation[conversation.id] ?? '',
-        },
-        messages: conversation.chatMessages
-          .filter((message) => !isLegacyAnalysisErrorMessage(message))
-          .map((message, index) => {
-            const { id, role, ...content } = message
-            return {
-              id,
-              channel: 'analysis',
-              role,
-              content,
-              createdAt: getMessageCreatedAt(conversation, index),
-            }
-          }),
-        draft:
-          input.draftReadyByConversation[conversation.id] &&
-          input.draftCopyByConversation[conversation.id]
-            ? {
-                ...input.draftCopyByConversation[conversation.id],
-                source: 'working_draft',
+      conversations: project.conversations.map((conversation) => {
+        const versions = input.draftVersionsByConversation[conversation.id] ?? []
+        const currentDraft = input.draftCopyByConversation[conversation.id]
+        const currentVersion =
+          versions.find(
+            (version) =>
+              version.id === input.currentDraftVersionIdByConversation[conversation.id],
+          ) ??
+          [...versions].reverse().find(
+            (version) => currentDraft && isSameDraftCopy(version, currentDraft),
+          ) ??
+          versions[versions.length - 1]
+
+        return {
+          id: conversation.id,
+          title: conversation.title,
+          step: conversation.step,
+          pinned: Boolean(conversation.pinned),
+          selectedReferenceIds: conversation.selectedItemIds,
+          length: conversation.length,
+          topic: conversation.topic,
+          targetAudience: conversation.targetAudience,
+          analysisReady: conversation.analysisReady,
+          finalizedAt: conversation.finalizedAt ?? null,
+          createdAt: conversation.createdAt,
+          updatedAt: conversation.updatedAt,
+          lastOpenedAt: conversation.lastOpenedAt,
+          state: {
+            ...(versions.length > 0
+              ? {
+                  currentDraftVersionId: input.draftReadyByConversation[conversation.id]
+                    ? currentVersion?.id ?? null
+                    : null,
+                }
+              : {}),
+            ...(input.analysisByConversation[conversation.id]
+              ? { analysis: input.analysisByConversation[conversation.id] }
+              : {}),
+            rewriteMessages: input.rewriteMessagesByConversation[conversation.id] ?? [],
+            planAttachments: input.planAttachmentsByConversation[conversation.id] ?? [],
+            readerAudience: input.readerAudienceByConversation[conversation.id] ?? '',
+            ...(input.readerPreviewByConversation[conversation.id]
+              ? { readerPreview: input.readerPreviewByConversation[conversation.id] }
+              : {}),
+            ...(conversation.finalDraft ? { finalDraft: conversation.finalDraft } : {}),
+            writingBrief: conversation.writingBrief,
+            chatInput: input.chatInputByConversation[conversation.id] ?? '',
+            rewriteInput: input.rewriteInputByConversation[conversation.id] ?? '',
+          },
+          messages: conversation.chatMessages
+            .filter((message) => !isLegacyAnalysisErrorMessage(message))
+            .map((message, index) => {
+              const { id, role, ...content } = message
+              return {
+                id,
+                channel: 'analysis',
+                role,
+                content,
+                createdAt: getMessageCreatedAt(conversation, index),
               }
-            : null,
-      })),
+            }),
+          draft:
+            input.draftReadyByConversation[conversation.id] && currentDraft
+              ? {
+                  ...currentDraft,
+                  source: currentVersion?.source ?? 'working_draft',
+                }
+              : null,
+          ...(versions.length > 0 ? { drafts: versions } : {}),
+        }
+      }),
     })),
   }
 }
@@ -798,6 +835,31 @@ function loadGuestWorkspaceSnapshot(): LocalWorkspaceSnapshot | null {
   const record = <T,>(candidate: unknown) =>
     (isObject(candidate) ? candidate : {}) as Record<string, T>
 
+  const draftCopyByConversation = record<InitialDraftCopy>(value.draftCopyByConversation)
+  const draftReadyByConversation = record<boolean>(value.draftReadyByConversation)
+  const storedDraftVersions = record<unknown>(value.draftVersionsByConversation)
+  const storedCurrentVersionIds = record<string>(value.currentDraftVersionIdByConversation)
+  const draftVersionsByConversation: Record<string, DraftVersionRecord[]> = {}
+  const currentDraftVersionIdByConversation: Record<string, string> = {}
+
+  for (const conversationId of new Set([
+    ...Object.keys(storedDraftVersions),
+    ...Object.keys(draftCopyByConversation),
+  ])) {
+    const versions = ensureBaseDraftVersion(
+      normalizeDraftVersions(storedDraftVersions[conversationId]),
+      draftCopyByConversation[conversationId],
+    )
+    if (versions.length === 0) continue
+
+    draftVersionsByConversation[conversationId] = versions
+    if (draftReadyByConversation[conversationId]) {
+      currentDraftVersionIdByConversation[conversationId] =
+        versions.find((version) => version.id === storedCurrentVersionIds[conversationId])?.id ??
+        versions[versions.length - 1].id
+    }
+  }
+
   return {
     projects,
     activeProjectId:
@@ -806,8 +868,10 @@ function loadGuestWorkspaceSnapshot(): LocalWorkspaceSnapshot | null {
         ? value.activeProjectId
         : projects[0]?.id ?? '',
     analysisByConversation: record<AiAnalysisResult>(value.analysisByConversation),
-    draftCopyByConversation: record<InitialDraftCopy>(value.draftCopyByConversation),
-    draftReadyByConversation: record<boolean>(value.draftReadyByConversation),
+    draftCopyByConversation,
+    draftReadyByConversation,
+    draftVersionsByConversation,
+    currentDraftVersionIdByConversation,
     rewriteMessagesByConversation: record<RewriteChatMessage[]>(value.rewriteMessagesByConversation),
     planAttachmentsByConversation: record<PlanAttachment[]>(value.planAttachmentsByConversation),
     readerAudienceByConversation: record<string>(value.readerAudienceByConversation),
@@ -1355,6 +1419,13 @@ function App() {
   const [draftCopyByConversation, setDraftCopyByConversation] = useState<
     Record<string, InitialDraftCopy>
   >(restoredGuestWorkspace?.draftCopyByConversation ?? {})
+  const [draftVersionsByConversation, setDraftVersionsByConversation] = useState<
+    Record<string, DraftVersionRecord[]>
+  >(restoredGuestWorkspace?.draftVersionsByConversation ?? {})
+  const [currentDraftVersionIdByConversation, setCurrentDraftVersionIdByConversation] = useState<
+    Record<string, string>
+  >(restoredGuestWorkspace?.currentDraftVersionIdByConversation ?? {})
+  const [isDraftVersionHistoryOpen, setIsDraftVersionHistoryOpen] = useState(false)
   const [, setDraftUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
@@ -1415,6 +1486,7 @@ function App() {
   const cloudWorkspaceHydratedUserIdRef = useRef('')
   const skipNextWorkspaceAutosaveRef = useRef(false)
   const workspaceSaveQueueRef = useRef(Promise.resolve())
+  const draftVersionsRef = useRef(draftVersionsByConversation)
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
@@ -1464,6 +1536,8 @@ function App() {
         analysisByConversation,
         draftCopyByConversation,
         draftReadyByConversation,
+        draftVersionsByConversation,
+        currentDraftVersionIdByConversation,
         rewriteMessagesByConversation,
         planAttachmentsByConversation,
         readerAudienceByConversation,
@@ -1475,6 +1549,8 @@ function App() {
       analysisByConversation,
       draftCopyByConversation,
       draftReadyByConversation,
+      draftVersionsByConversation,
+      currentDraftVersionIdByConversation,
       planAttachmentsByConversation,
       projects,
       readerAudienceByConversation,
@@ -1540,6 +1616,12 @@ function App() {
       setAnalysisByConversation(restored?.analysisByConversation ?? {})
       setDraftCopyByConversation(restored?.draftCopyByConversation ?? {})
       setDraftReadyByConversation(restored?.draftReadyByConversation ?? {})
+      const restoredDraftVersions = restored?.draftVersionsByConversation ?? {}
+      draftVersionsRef.current = restoredDraftVersions
+      setDraftVersionsByConversation(restoredDraftVersions)
+      setCurrentDraftVersionIdByConversation(
+        restored?.currentDraftVersionIdByConversation ?? {},
+      )
       setRewriteMessagesByConversation(restored?.rewriteMessagesByConversation ?? {})
       setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
       setReaderAudienceByConversation(restored?.readerAudienceByConversation ?? {})
@@ -1572,6 +1654,9 @@ function App() {
     setAnalysisByConversation(hydrated.analysisByConversation)
     setDraftCopyByConversation(hydrated.draftCopyByConversation)
     setDraftReadyByConversation(hydrated.draftReadyByConversation)
+    draftVersionsRef.current = hydrated.draftVersionsByConversation
+    setDraftVersionsByConversation(hydrated.draftVersionsByConversation)
+    setCurrentDraftVersionIdByConversation(hydrated.currentDraftVersionIdByConversation)
     setRewriteMessagesByConversation(hydrated.rewriteMessagesByConversation)
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
     setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
@@ -1600,6 +1685,8 @@ function App() {
       analysisByConversation,
       draftCopyByConversation,
       draftReadyByConversation,
+      draftVersionsByConversation,
+      currentDraftVersionIdByConversation,
       rewriteMessagesByConversation,
       planAttachmentsByConversation,
       readerAudienceByConversation,
@@ -1640,6 +1727,8 @@ function App() {
     cloudWorkspaceStatus,
     draftCopyByConversation,
     draftReadyByConversation,
+    draftVersionsByConversation,
+    currentDraftVersionIdByConversation,
     planAttachmentsByConversation,
     projects,
     readerAudienceByConversation,
@@ -2076,6 +2165,9 @@ function App() {
   )
   const initialDraftCopy =
     draftCopyByConversation[activeConversation.id] ?? generatedInitialDraftCopy
+  const activeDraftVersions = draftVersionsByConversation[activeConversation.id] ?? []
+  const activeCurrentDraftVersionId =
+    currentDraftVersionIdByConversation[activeConversation.id] ?? ''
 
   const creationBrief = useMemo(
     () => ({
@@ -2233,6 +2325,60 @@ function App() {
       ...conversation,
       finalizedAt: undefined,
     }))
+  }
+
+  function recordDraftSnapshot(
+    conversationId: string,
+    nextDraft: InitialDraftCopy,
+    source: string,
+    options: { coalesce?: boolean; force?: boolean } = {},
+  ) {
+    const nextVersions = evolveDraftVersions({
+      versions: draftVersionsRef.current[conversationId] ?? [],
+      nextDraft,
+      source,
+      baseDraft: draftCopyByConversation[conversationId],
+      coalesce: options.coalesce,
+      force: options.force,
+    })
+    const currentVersion = nextVersions[nextVersions.length - 1]
+    const nextVersionsByConversation = {
+      ...draftVersionsRef.current,
+      [conversationId]: nextVersions,
+    }
+
+    draftVersionsRef.current = nextVersionsByConversation
+    setDraftVersionsByConversation(nextVersionsByConversation)
+    setCurrentDraftVersionIdByConversation((current) => ({
+      ...current,
+      [conversationId]: currentVersion.id,
+    }))
+    setDraftCopyByConversation((current) => ({
+      ...current,
+      [conversationId]: nextDraft,
+    }))
+    setDraftReadyByConversation((current) => ({
+      ...current,
+      [conversationId]: true,
+    }))
+  }
+
+  function handleRestoreDraftVersion(version: DraftVersionRecord) {
+    const restoredDraft = {
+      title: version.title,
+      body: [...version.body],
+    }
+
+    recordDraftSnapshot(activeConversation.id, restoredDraft, 'restored', { force: true })
+    markDraftEdited()
+    clearRewriteSelection()
+    setDraftDragSelection(null)
+    setDraftPointerDrag(null)
+    setDraftDropTarget(null)
+    setDraftDropLanding(null)
+    setDraftMovePrompt(null)
+    setIsDraftVersionHistoryOpen(false)
+    showFinalCopyToast(`已将版本 ${version.version} 恢复为新版本`)
   }
 
   function handleWritingBriefChange(
@@ -3080,14 +3226,12 @@ function App() {
         }))
       }
 
-      setDraftCopyByConversation((current) => ({
-        ...current,
-        [conversationId]: nextDraft,
-      }))
-      setDraftReadyByConversation((current) => ({
-        ...current,
-        [conversationId]: true,
-      }))
+      recordDraftSnapshot(
+        conversationId,
+        nextDraft,
+        isUsingCloudLibrary ? 'ai_generation' : 'demo_generation',
+        { force: true },
+      )
       setDraftBridgeMessagesByConversation((current) => {
         const next = { ...current }
         delete next[conversationId]
@@ -3313,13 +3457,8 @@ function App() {
     const previousValue = getDraftFieldValue(initialDraftCopy, fieldId)
     if (previousValue === normalizedValue) return
 
-    setDraftCopyByConversation((current) => {
-      const currentDraft = current[activeConversation.id] ?? generatedInitialDraftCopy
-      return {
-        ...current,
-        [activeConversation.id]: setDraftFieldValue(currentDraft, fieldId, normalizedValue),
-      }
-    })
+    const nextDraft = setDraftFieldValue(initialDraftCopy, fieldId, normalizedValue)
+    recordDraftSnapshot(activeConversation.id, nextDraft, 'manual_edit', { coalesce: true })
     markDraftEdited()
 
     rememberExplicitFeedback({
@@ -4038,7 +4177,7 @@ function App() {
     const removedBodyIndexes = getRemovedDraftBodyIndexes(currentDraft, selection)
     const draftWithoutSelection = removeDraftDragSelectionFromDraft(currentDraft, selection)
 
-    let nextDraft = draftWithoutSelection
+    let nextDraft: InitialDraftCopy
     let beforeText: string
     let afterText: string
     let targetFieldForPrompt: HTMLElement | null
@@ -4146,10 +4285,7 @@ function App() {
       clientY,
     )
 
-    setDraftCopyByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: nextDraft,
-    }))
+    recordDraftSnapshot(activeConversation.id, nextDraft, 'manual_edit', { coalesce: true })
     markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
@@ -4201,10 +4337,7 @@ function App() {
         },
       }
     })
-    setDraftCopyByConversation((current) => ({
-      ...current,
-      [conversationId]: previousDraft,
-    }))
+    recordDraftSnapshot(conversationId, previousDraft, 'manual_edit', { coalesce: true })
     markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
@@ -4231,10 +4364,7 @@ function App() {
         },
       }
     })
-    setDraftCopyByConversation((current) => ({
-      ...current,
-      [conversationId]: nextDraft,
-    }))
+    recordDraftSnapshot(conversationId, nextDraft, 'manual_edit', { coalesce: true })
     markDraftEdited()
     setDraftDragSelection(null)
     setDraftPointerDrag(null)
@@ -4500,13 +4630,8 @@ function App() {
       suggestion.text,
       previousValue.slice(selectedIndex + message.selectedText.length),
     ].join('')
-    setDraftCopyByConversation((current) => {
-      const currentDraft = current[activeConversation.id] ?? generatedInitialDraftCopy
-      return {
-        ...current,
-        [activeConversation.id]: setDraftFieldValue(currentDraft, message.fieldId!, nextValue),
-      }
-    })
+    const nextDraft = setDraftFieldValue(initialDraftCopy, message.fieldId, nextValue)
+    recordDraftSnapshot(activeConversation.id, nextDraft, 'ai_rewrite', { coalesce: true })
     markDraftEdited()
     setRewriteMessagesByConversation((current) => ({
       ...current,
@@ -6020,6 +6145,15 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDraftVersionHistoryOpen(true)}
+                disabled={activeDraftVersions.length === 0}
+              >
+                <History className="h-4 w-4" />
+                历史版本 {activeDraftVersions.length}
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => goToStep('learn')}>
                 上一步
               </Button>
@@ -6408,6 +6542,15 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDraftVersionHistoryOpen(true)}
+                disabled={activeDraftVersions.length === 0}
+              >
+                <History className="h-4 w-4" />
+                历史版本 {activeDraftVersions.length}
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => goToStep('plan')}>
                 上一步
               </Button>
@@ -6963,6 +7106,16 @@ function App() {
           {finalCopyToast}
         </div>
       ) : null}
+      <DraftVersionHistory
+        key={`${activeConversation.id}:${
+          isDraftVersionHistoryOpen ? activeCurrentDraftVersionId || 'invalid' : 'closed'
+        }`}
+        currentVersionId={hasDraftReady ? activeCurrentDraftVersionId : ''}
+        isOpen={isDraftVersionHistoryOpen}
+        versions={activeDraftVersions}
+        onClose={() => setIsDraftVersionHistoryOpen(false)}
+        onRestore={handleRestoreDraftVersion}
+      />
       {showShellHeader ? (
         <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(248,250,252,0.82)] backdrop-blur-2xl">
           <div className="flex w-full items-center justify-between gap-4 px-5 py-4 md:px-8">
