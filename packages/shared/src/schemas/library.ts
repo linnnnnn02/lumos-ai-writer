@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import { noteLearningStatuses, noteQualityFlags } from '../library-quality.js'
+
+export const noteLearningStatusSchema = z.enum(noteLearningStatuses)
+export const noteQualityFlagSchema = z.enum(noteQualityFlags)
 
 export const folderDtoSchema = z.object({
   id: z.string(),
@@ -20,6 +24,8 @@ export const noteDtoSchema = z.object({
   coverImageUrl: z.string().optional(),
   contentText: z.string(),
   savedAt: z.string(),
+  learningStatus: noteLearningStatusSchema.default('ready'),
+  qualityFlags: z.array(noteQualityFlagSchema).default([]),
 })
 
 export type NoteDto = z.infer<typeof noteDtoSchema>
@@ -87,6 +93,10 @@ export const upsertNoteResponseSchema = z.object({
   note: noteDtoSchema,
 })
 
+export const updateNoteLearningStatusRequestSchema = z.object({
+  status: z.enum(['ready', 'excluded']),
+})
+
 export const createSnippetRequestSchema = z.object({
   noteId: z.string().uuid().optional(),
   noteUrl: z.string().trim().min(1).max(2048).optional(),
@@ -151,6 +161,9 @@ export type UpdateFolderRequest = z.infer<typeof updateFolderRequestSchema>
 export type UpdateFolderResponse = z.infer<typeof updateFolderResponseSchema>
 export type UpsertNoteRequest = z.infer<typeof upsertNoteRequestSchema>
 export type UpsertNoteResponse = z.infer<typeof upsertNoteResponseSchema>
+export type UpdateNoteLearningStatusRequest = z.infer<
+  typeof updateNoteLearningStatusRequestSchema
+>
 export type CreateSnippetRequest = z.infer<typeof createSnippetRequestSchema>
 export type CreateSnippetResponse = z.infer<typeof createSnippetResponseSchema>
 export type UpdateSnippetRequest = z.infer<typeof updateSnippetRequestSchema>

@@ -65,6 +65,7 @@ export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
   const strongestReason = input.snippets[0]?.reasonText
   const secondSnippet = input.snippets[1]?.selectedText
   const secondReason = input.snippets[1]?.reasonText
+  const hasReferenceEvidence = input.notes.length > 0 || input.snippets.length > 0
   const tagText = snippetTags.length > 0 ? snippetTags.join('、') : '开头、语气、整体调性'
   const noteCountText = `${input.notes.length} 篇笔记和 ${input.snippets.length} 个标注片段`
   const featuredSnippets = input.snippets.slice(0, 2).map((snippet, index) => ({
@@ -89,32 +90,40 @@ export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
         `避免模板总结、硬广夸法和空泛提问。`,
       ],
     },
-	    coreJudgement: `这组参考文案通常先把读者放进具体场景，让读者先做选择或产生疑问，再顺势补背景和关键信息。`,
+    coreJudgement: hasReferenceEvidence
+      ? '这组参考文案通常先把读者放进具体场景，让读者先做选择或产生疑问，再顺势补背景和关键信息。'
+      : `本轮不套用具体参考文案，先围绕“${input.topic}”生成一版可编辑初稿。`,
     evidence:
       strongestSnippet && secondSnippet
         ? `这两处分别处理选择点和读者关系。`
         : strongestSnippet
           ? `这句先给读者一个判断入口，再展开背景。`
-	          : `这组标注集中在${tagText}，主要参考它们的信息顺序、互动方式和真实语气。`,
+          : hasReferenceEvidence
+            ? `这组标注集中在${tagText}，主要参考它们的信息顺序、互动方式和真实语气。`
+            : '本轮没有选择参考素材，不从资料库推断新的写作偏好。',
     effectivePatterns: [
       `先给具体场景或选择，让读者立刻知道自己要判断什么。`,
       `再补背景、差异和理由，信息只围绕前面的判断展开。`,
       `用你的取舍或一个具体问题收住，让读者有明确回复点。`,
     ],
     featuredSnippets,
-    userPreference: strongestReason
-	      ? `初稿保留真实复盘、互动称呼和具体情境，少写模板总结、硬广夸法和过满解释。你标注的“${strongestReason}”会影响开头、称呼和收尾。`
-	      : reasonLines.length > 0
-	        ? `初稿参考这些偏好：${reasonLines.join('；')}。它们会影响开头、称呼和收尾。`
-	        : `初稿优先参考${tagText}里的表达方式，让内容更具体、更像真实场景、更少模板腔。`,
+    userPreference: !hasReferenceEvidence
+      ? '只应用已有的长期写作偏好和本次明确要求，不新增未经用户确认的风格判断。'
+      : strongestReason
+        ? `初稿保留真实复盘、互动称呼和具体情境，少写模板总结、硬广夸法和过满解释。你标注的“${strongestReason}”会影响开头、称呼和收尾。`
+        : reasonLines.length > 0
+          ? `初稿参考这些偏好：${reasonLines.join('；')}。它们会影响开头、称呼和收尾。`
+          : `初稿优先参考${tagText}里的表达方式，让内容更具体、更像真实场景、更少模板腔。`,
     reuseSuggestion: `写作路径：让读者先做判断 -> 补最关键事实 -> 说清你的取舍 -> 留一个能回复的问题。`,
     avoidPitfall: `空泛提问、硬广夸法、模板化总结，以及把所有卖点一次塞进第一屏。`,
     preferenceQuestion: `接下来写初稿时，你希望更偏互动感、真人复盘感，还是信息表达更直接？`,
     writingMove: `起手句模板：帮我选一下：{具体对象/方案}，我现在最纠结的是{真实取舍}。`,
-	    summary: `这轮选中的 ${noteCountText} 更适合按同一条节奏处理：先让读者判断，再补信息，最后用态度或互动收住。初稿沿这条路径展开。`,
+    summary: hasReferenceEvidence
+      ? `这轮选中的 ${noteCountText} 更适合按同一条节奏处理：先让读者判断，再补信息，最后用态度或互动收住。初稿沿这条路径展开。`
+      : '本轮直接根据需求生成，不把未选择的资料库内容带入初稿。',
     wording: [
       `语气要像真实取舍，避开宣传稿口吻。句子可以短，但每句都要承担一个动作：让读者判断、理解或回应。`,
-	      `你圈选最多的标签集中在${tagText}，初稿会把这些标签落实到开头任务、称呼方式和收尾力度里。`,
+      `你圈选最多的标签集中在${tagText}，初稿会把这些标签落实到开头任务、称呼方式和收尾力度里。`,
       strongestSnippet
         ? `复用“${strongestSnippet}”这类句子时，重点保留它的进入动作，不照搬具体措辞。`
         : `写初稿时，继续保留“先拉人进场景，再补信息”的表达方式。`,
@@ -122,7 +131,7 @@ export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
     structure: [
       `结构上使用“让读者先做判断 -> 补最关键事实 -> 说清你的取舍 -> 留一个能回复的问题”。`,
       `开头负责让读者判断“这和我有没有关系”；中段补必要信息；结尾用态度、提醒或互动收住。`,
-	      `初稿先搭这个顺序，再填具体卖点和表达细节。`,
+      `初稿先搭这个顺序，再填具体卖点和表达细节。`,
     ],
     preference: [
       `当前偏好可以这样处理：保留情绪和态度，避开端着、过满、模板感。`,
@@ -142,7 +151,7 @@ export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
     ],
     nextStep: [
       '下一步先进入篇幅选择，再基于这份判断去搭结构化初稿。',
-	      '改框架或逐句打磨时会更稳。',
+      '改框架或逐句打磨时会更稳。',
     ],
   }
 }

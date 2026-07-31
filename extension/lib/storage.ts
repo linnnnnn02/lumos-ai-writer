@@ -411,17 +411,30 @@ export async function clearPendingSnippetSelection() {
   await savePendingSnippetSelection(null)
 }
 
+export function reconcileFolderNoteCounts(
+  folders: SavedFolderRecord[],
+  notes: SavedNoteRecord[],
+) {
+  const noteCountByFolderId = new Map<string, number>()
+  notes.forEach((note) => {
+    if (!note.folderId) return
+    noteCountByFolderId.set(note.folderId, (noteCountByFolderId.get(note.folderId) ?? 0) + 1)
+  })
+
+  return folders.map((folder) => ({
+    ...folder,
+    noteCount: noteCountByFolderId.get(folder.id) ?? 0,
+    updatedAt: folder.updatedAt || new Date().toISOString(),
+  }))
+}
+
 export async function getSavedFolders() {
   const storage = await storageGet([FOLDERS_STORAGE_KEY, NOTES_STORAGE_KEY])
   const storedFolders =
     (storage[FOLDERS_STORAGE_KEY] as SavedFolderRecord[] | undefined) ?? createDefaultFolders()
   const storedNotes = (storage[NOTES_STORAGE_KEY] as SavedNoteRecord[] | undefined) ?? []
 
-  const normalizedFolders = storedFolders.map((folder) => ({
-    ...folder,
-    noteCount: storedNotes.filter((note) => note.folderId === folder.id).length,
-    updatedAt: folder.updatedAt || new Date().toISOString(),
-  }))
+  const normalizedFolders = reconcileFolderNoteCounts(storedFolders, storedNotes)
 
   await storageSet({
     [FOLDERS_STORAGE_KEY]: normalizedFolders,
@@ -437,7 +450,12 @@ export async function saveFolders(folders: SavedFolderRecord[]) {
 }
 
 export async function saveNotes(notes: SavedNoteRecord[]) {
+  const storage = await storageGet(FOLDERS_STORAGE_KEY)
+  const storedFolders =
+    (storage[FOLDERS_STORAGE_KEY] as SavedFolderRecord[] | undefined) ?? createDefaultFolders()
+
   await storageSet({
+    [FOLDERS_STORAGE_KEY]: reconcileFolderNoteCounts(storedFolders, notes),
     [NOTES_STORAGE_KEY]: notes,
   })
 }

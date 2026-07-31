@@ -1,14 +1,18 @@
 import type { User } from '@supabase/supabase-js'
 import {
+  assessNoteLearningQuality,
   normalizeNoteUrl,
   type AiUsage,
   type CreateFolderRequest,
   type CreateSnippetRequest,
   type FolderDto,
   type NoteDto,
+  type NoteLearningStatus,
+  type NoteQualityFlag,
   type SnippetDto,
   type TrashFolderGroup,
   type UpdateFolderRequest,
+  type UpdateNoteLearningStatusRequest,
   type UpdateSnippetRequest,
   type UpsertNoteRequest,
 } from '@lumos-ai/shared'
@@ -44,6 +48,9 @@ type NoteRow = {
   source_url: string
   cover_image_url: string | null
   content_text: string | null
+  learning_status: NoteLearningStatus
+  quality_flags: NoteQualityFlag[] | null
+  learning_reviewed_at: string | null
   created_at: string
   updated_at: string
 }
@@ -71,7 +78,7 @@ type SnippetRow = {
 }
 
 const noteSelectColumns =
-  'id,folder_id,title,filename,author_name,source_url,cover_image_url,content_text,created_at,updated_at'
+  'id,folder_id,title,filename,author_name,source_url,cover_image_url,content_text,learning_status,quality_flags,learning_reviewed_at,created_at,updated_at'
 const snippetSelectColumns = 'id,note_id,selected_text,reason_text,color_value,color_tag_name,created_at'
 
 type RecordAiRunInput = {
@@ -96,7 +103,12 @@ export class SupabaseSchemaMissingError extends Error {
 
 function assertNoDatabaseError(error: DatabaseError | null) {
   if (!error) return
-  if (error.code === '42P01' || error.code === 'PGRST205') {
+  if (
+    error.code === '42P01' ||
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    error.code === 'PGRST205'
+  ) {
     throw new SupabaseSchemaMissingError('Supabase schema has not been installed yet.')
   }
   throw new Error(error.message || 'Supabase request failed.')
@@ -120,6 +132,20 @@ function toFolderDto(folder: FolderRow, noteCount = 0): FolderDto {
 }
 
 function toNoteDto(note: NoteRow, folderName = ''): NoteDto {
+  const assessedQualityFlags = assessNoteLearningQuality({
+    title: note.title,
+    contentText: note.content_text ?? '',
+    folderName,
+  })
+  const qualityFlags = note.learning_reviewed_at
+    ? (note.quality_flags ?? assessedQualityFlags)
+    : assessedQualityFlags
+  const learningStatus = note.learning_reviewed_at
+    ? note.learning_status
+    : qualityFlags.length > 0
+      ? 'pending_review'
+      : 'ready'
+
   return {
     id: note.id,
     folderId: note.folder_id ?? '',
@@ -131,6 +157,8 @@ function toNoteDto(note: NoteRow, folderName = ''): NoteDto {
     coverImageUrl: note.cover_image_url ?? '',
     contentText: note.content_text ?? '',
     savedAt: note.created_at || note.updated_at,
+    learningStatus,
+    qualityFlags,
   }
 }
 
@@ -448,6 +476,50 @@ export async function upsertNote(
     folderName = ((folderResult.data as FolderNameRow | null) ?? null)?.name ?? ''
   }
 
+  const existingResult = await supabase
+    .from('notes')
+    .select(
+      'id,folder_id,title,content_text,learning_status,quality_flags,learning_reviewed_at',
+    )
+    .eq('user_id', user.id)
+    .eq('normalized_source_url', normalizedSourceUrl)
+    .maybeSingle()
+
+  assertNoDatabaseError(existingResult.error)
+
+  const existingNote = existingResult.data as
+    | Pick<
+        NoteRow,
+        | 'id'
+        | 'folder_id'
+        | 'title'
+        | 'content_text'
+        | 'learning_status'
+        | 'quality_flags'
+        | 'learning_reviewed_at'
+      >
+    | null
+  const contentText = input.contentText ?? ''
+  const noteContentChanged =
+    !existingNote ||
+    existingNote.title !== input.title ||
+    (existingNote.content_text ?? '') !== contentText ||
+    existingNote.folder_id !== folderId
+  const assessedQualityFlags = assessNoteLearningQuality({
+    title: input.title,
+    contentText,
+    folderName,
+  })
+  const learningStatus: NoteLearningStatus = noteContentChanged
+    ? assessedQualityFlags.length > 0
+      ? 'pending_review'
+      : 'ready'
+    : existingNote.learning_status
+  const qualityFlags = noteContentChanged
+    ? assessedQualityFlags
+    : (existingNote.quality_flags ?? assessedQualityFlags)
+  const learningReviewedAt = noteContentChanged ? null : existingNote.learning_reviewed_at
+
   const { data, error } = await supabase
     .from('notes')
     .upsert(
@@ -461,15 +533,16 @@ export async function upsertNote(
         normalized_source_url: normalizedSourceUrl,
         cover_image_url: input.coverImageUrl ?? null,
         content_text: input.contentText ?? null,
+        learning_status: learningStatus,
+        quality_flags: qualityFlags,
+        learning_reviewed_at: learningReviewedAt,
         captured_at: input.savedAt ?? new Date().toISOString(),
       },
       {
         onConflict: 'user_id,normalized_source_url',
       },
     )
-    .select(
-      'id,folder_id,title,filename,author_name,source_url,cover_image_url,content_text,created_at,updated_at',
-    )
+    .select(noteSelectColumns)
     .single()
 
   assertNoDatabaseError(error)
@@ -482,9 +555,7 @@ export async function listNotes(config: AppConfig, user: User): Promise<NoteDto[
   const [noteResult, folderResult] = await Promise.all([
     supabase
       .from('notes')
-      .select(
-        'id,folder_id,title,filename,author_name,source_url,cover_image_url,content_text,created_at,updated_at',
-      )
+      .select(noteSelectColumns)
       .eq('user_id', user.id)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false }),
@@ -502,6 +573,29 @@ export async function listNotes(config: AppConfig, user: User): Promise<NoteDto[
   return ((noteResult.data ?? []) as NoteRow[]).map((note) =>
     toNoteDto(note, note.folder_id ? (folderNames.get(note.folder_id) ?? '') : ''),
   )
+}
+
+export async function updateNoteLearningStatus(
+  config: AppConfig,
+  user: User,
+  noteId: string,
+  input: UpdateNoteLearningStatusRequest,
+): Promise<void> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('notes')
+    .update({
+      learning_status: input.status,
+      learning_reviewed_at: new Date().toISOString(),
+    })
+    .eq('user_id', user.id)
+    .eq('id', noteId)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+  assertSingleMutation(data, 'Note')
 }
 
 export async function deleteNote(

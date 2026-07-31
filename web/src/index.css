@@ -72,15 +72,31 @@
   --gradient-wash: radial-gradient(circle at top left, rgba(103, 199, 255, 0.18), transparent 32%),
     radial-gradient(circle at top right, rgba(148, 163, 184, 0.16), transparent 34%),
     linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.88));
+  /* 4px primitive scale. Semantic aliases below express proximity, not just size. */
+  --ui-space-0: 0;
   --ui-space-1: 0.25rem;
-  --ui-space-1-5: 0.375rem;
   --ui-space-2: 0.5rem;
-  --ui-space-2-5: 0.625rem;
   --ui-space-3: 0.75rem;
   --ui-space-4: 1rem;
   --ui-space-5: 1.25rem;
   --ui-space-6: 1.5rem;
-  --ui-control-height-sm: 1.875rem;
+  --ui-space-8: 2rem;
+  --ui-space-10: 2.5rem;
+  --ui-space-12: 3rem;
+  --ui-space-16: 4rem;
+  --ui-gap-related: var(--ui-space-1);
+  --ui-gap-control: var(--ui-space-2);
+  --ui-gap-field: var(--ui-space-2);
+  --ui-gap-group: var(--ui-space-3);
+  --ui-gap-block: var(--ui-space-4);
+  --ui-gap-section: var(--ui-space-6);
+  --ui-gap-region: var(--ui-space-8);
+  --ui-inset-control: var(--ui-space-3);
+  --ui-inset-card: var(--ui-space-4);
+  --ui-inset-panel: var(--ui-space-5);
+  --ui-inset-dialog: var(--ui-space-6);
+  --ui-page-gutter: var(--ui-space-4);
+  --ui-control-height-sm: 2rem;
   --ui-control-height-md: 2.25rem;
   --ui-control-height-lg: 2.5rem;
   --ui-control-height-xl: 2.75rem;
@@ -88,15 +104,15 @@
   --ui-control-md: var(--ui-control-height-md);
   --ui-control-lg: var(--ui-control-height-lg);
   --ui-control-xl: var(--ui-control-height-xl);
-  --ui-control-gap-sm: 0.3125rem;
-  --ui-control-gap-md: 0.375rem;
-  --ui-control-gap-lg: 0.4375rem;
-  --ui-control-gap-xl: 0.5rem;
+  --ui-control-gap-sm: var(--ui-space-1);
+  --ui-control-gap-md: var(--ui-space-2);
+  --ui-control-gap-lg: var(--ui-space-2);
+  --ui-control-gap-xl: var(--ui-space-2);
   --ui-control-gap: var(--ui-control-gap-md);
-  --ui-control-inset-x-sm: 0.625rem;
-  --ui-control-inset-x-md: 0.75rem;
-  --ui-control-inset-x-lg: 0.875rem;
-  --ui-control-inset-x-xl: 1rem;
+  --ui-control-inset-x-sm: var(--ui-space-2);
+  --ui-control-inset-x-md: var(--ui-space-3);
+  --ui-control-inset-x-lg: var(--ui-space-4);
+  --ui-control-inset-x-xl: var(--ui-space-4);
   --ui-control-px-sm: var(--ui-control-inset-x-sm);
   --ui-control-px-md: var(--ui-control-inset-x-md);
   --ui-control-px-lg: var(--ui-control-inset-x-lg);
@@ -122,17 +138,18 @@
   --ui-radius-dialog: 0.875rem;
   --ui-radius-pill: 999px;
   --ui-field-px: var(--ui-control-inset-x-md);
-  --ui-field-py: 0.625rem;
-  --ui-field-gap: 0.5rem;
+  --ui-field-py: var(--ui-space-2);
+  --ui-field-gap: var(--ui-gap-field);
   --ui-field-radius: var(--ui-radius-control);
   --ui-chip-height: var(--ui-control-height-sm);
   --ui-chip-px: var(--ui-control-inset-x-md);
-  --ui-form-gap: 0.75rem;
-  --ui-panel-gap: 1rem;
-  --ui-panel-inset: 1rem;
-  --ui-dialog-inset: 1.25rem;
+  --ui-form-gap: var(--ui-gap-block);
+  --ui-panel-gap: var(--ui-gap-block);
+  --ui-panel-inset: var(--ui-inset-card);
+  --ui-dialog-inset: var(--ui-inset-dialog);
   --ui-textarea-sm: 4rem;
   --ui-textarea-md: 6rem;
+  --ui-textarea-lg: 8.25rem;
   --ui-chat-input-min: 8.25rem;
   --ui-chat-input-px: 1.25rem;
   --ui-chat-input-py: 1rem;
@@ -148,6 +165,18 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --ui-page-gutter: var(--ui-space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --ui-page-gutter: var(--ui-space-8);
+  }
 }
 
 * {
@@ -215,6 +244,55 @@ textarea[data-rewrite-chat-input]:focus {
   min-height: 100vh;
 }
 
+[data-library-shell] {
+  grid-template-columns: var(--library-sidebar-width) minmax(0, 1fr);
+}
+
+@media (max-width: 767px) {
+  [data-library-shell] {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  [data-library-shell] > aside {
+    height: auto;
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: var(--ui-space-4);
+  }
+
+  [data-library-shell] > aside nav {
+    display: flex;
+    margin-top: var(--ui-space-3);
+    gap: var(--ui-space-1);
+    overflow-x: auto;
+    padding-right: 0;
+  }
+
+  [data-library-shell] > aside nav > button {
+    min-width: 8rem;
+    flex: none;
+  }
+
+  [data-library-shell] > aside [data-library-trash-nav] {
+    margin-top: var(--ui-space-3);
+    padding-top: var(--ui-space-3);
+  }
+
+  [data-library-shell] > aside [role='separator'] {
+    display: none;
+  }
+
+  [data-library-shell] > section {
+    flex: 1;
+    overflow: visible;
+  }
+}
+
 .glass-panel {
   border: 1px solid rgba(255, 255, 255, 0.72);
   background: var(--surface-raised);
@@ -248,6 +326,20 @@ textarea[data-rewrite-chat-input]:focus {
   border-color: rgba(15, 23, 42, 0.13);
   background: var(--surface-hover);
   box-shadow: var(--shadow-hover);
+}
+
+.ui-card-actions > :where(a, button) {
+  display: inline-flex;
+  min-height: var(--ui-control-height-sm);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-item);
+  padding-inline: var(--ui-space-2);
+  outline: none;
+}
+
+.ui-card-actions > :where(a, button):focus-visible {
+  box-shadow: 0 0 0 4px var(--ring);
 }
 
 .ui-control-sm {
@@ -314,6 +406,18 @@ textarea[data-rewrite-chat-input]:focus {
   }
 }
 
+@keyframes ui-tooltip-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes ui-backdrop-in {
   0% {
     opacity: 0;
@@ -374,6 +478,12 @@ textarea[data-rewrite-chat-input]:focus {
 .shadcn-popover-content[data-state='open'] {
   animation: ui-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transform-origin: var(--radix-select-content-transform-origin, top center);
+}
+
+.ui-tooltip-content[data-state='delayed-open'],
+.ui-tooltip-content[data-state='instant-open'] {
+  animation: ui-tooltip-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: var(--radix-tooltip-content-transform-origin);
 }
 
 .ui-choice-card {

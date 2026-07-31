@@ -28,6 +28,7 @@ import type {
   SyncWorkspaceResponse,
   UpdateFolderRequest,
   UpdateFolderResponse,
+  UpdateNoteLearningStatusRequest,
   UpdateSnippetRequest,
   UpdateSnippetResponse,
   UpsertNoteRequest,
@@ -130,6 +131,17 @@ export function getNotes(token: string) {
 export function upsertNote(token: string, input: UpsertNoteRequest) {
   return requestJson<UpsertNoteResponse>('/v1/notes', token, {
     method: 'POST',
+    body: input,
+  })
+}
+
+export function updateNoteLearningStatus(
+  token: string,
+  noteId: string,
+  input: UpdateNoteLearningStatusRequest,
+) {
+  return requestJson<DeleteResourceResponse>(`/v1/notes/${noteId}/learning-status`, token, {
+    method: 'PATCH',
     body: input,
   })
 }

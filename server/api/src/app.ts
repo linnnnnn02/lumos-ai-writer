@@ -35,6 +35,7 @@ import {
   syncWorkspaceResponseSchema,
   updateFolderRequestSchema,
   updateFolderResponseSchema,
+  updateNoteLearningStatusRequestSchema,
   updateSnippetRequestSchema,
   updateSnippetResponseSchema,
   upsertNoteRequestSchema,
@@ -86,6 +87,7 @@ import {
   restoreNote,
   SupabaseSchemaMissingError,
   updateFolder,
+  updateNoteLearningStatus,
   updateSnippet,
   upsertNote,
   upsertUserProfile,
@@ -634,6 +636,38 @@ export function createApiApp() {
       return c.json(upsertNoteResponseSchema.parse({ ok: true, note }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.patch('/v1/notes/:noteId/learning-status', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Notes will be connected after Supabase setup.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, updateNoteLearningStatusRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      await updateNoteLearningStatus(config, user, c.req.param('noteId'), body)
+      return c.json(deleteResourceResponseSchema.parse({ ok: true }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (getErrorMessage(error) === 'Note not found.') {
+        return jsonError(c, {
+          code: 'not_found',
+          message: 'Note not found.',
+          status: 404,
+        })
+      }
       throw error
     }
   })

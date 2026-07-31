@@ -1,5 +1,7 @@
 import * as React from 'react'
 import type {
+  NoteLearningStatus,
+  NoteQualityFlag,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
@@ -9,6 +11,7 @@ import type {
 import { normalizeNoteUrl } from '@lumos-ai/shared'
 import { pinyin } from 'pinyin-pro'
 import {
+  AlertTriangle,
   ArrowLeft,
   Clock3,
   FolderOpen,
@@ -16,10 +19,12 @@ import {
   MoreHorizontal,
   Plus,
   Search,
+  ShieldCheck,
   Trash2,
   X,
 } from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
+import { AuthStatus } from '@/components/auth-status'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -93,6 +98,8 @@ type LibraryManagerProps = {
   snippets: SavedSnippetRecord[]
   status: LibraryStatus
   trashGroups: TrashFolderGroup[]
+  isRefreshing?: boolean
+  refreshedAt?: string
   onBack: () => void
   onCreateFolder: (name: string) => Promise<void>
   onDeleteFolder: (folder: SavedFolderRecord) => Promise<void>
@@ -110,6 +117,10 @@ type LibraryManagerProps = {
     existingSnippets: SavedSnippetRecord[],
   ) => Promise<void>
   onUpdateFolder: (folder: SavedFolderRecord, name: string) => Promise<void>
+  onUpdateNoteLearningStatus: (
+    note: SavedNoteRecord,
+    status: Extract<NoteLearningStatus, 'ready' | 'excluded'>,
+  ) => Promise<void>
 }
 
 const ALL_FOLDERS = 'all'
@@ -146,6 +157,16 @@ function getDisplayNoteTitle(note: Pick<SavedNoteRecord, 'filename' | 'title'>) 
 
 function getDisplayAuthorName(authorName: string | null | undefined) {
   return authorName?.trim() || '作者未知'
+}
+
+function getNoteLearningStatus(note: SavedNoteRecord): NoteLearningStatus {
+  return note.learningStatus ?? 'ready'
+}
+
+function getQualityFlagLabel(flag: NoteQualityFlag) {
+  if (flag === 'content_too_short') return '正文过短，暂时无法判断可学习内容'
+  if (flag === 'title_body_mismatch') return '标题与正文主题可能不一致'
+  return '文件夹与内容主题可能不一致'
 }
 
 function normalizeSearchText(text: string | null | undefined) {
@@ -436,7 +457,9 @@ function clampSidebarWidth(width: number) {
 export function LibraryManager({
   error = '',
   folders,
+  isRefreshing = false,
   notes,
+  refreshedAt = '',
   snippets,
   status,
   trashGroups,
@@ -453,6 +476,7 @@ export function LibraryManager({
   onSaveNote,
   onSaveNoteSnippets,
   onUpdateFolder,
+  onUpdateNoteLearningStatus,
 }: LibraryManagerProps) {
   const [activeFolderId, setActiveFolderId] = React.useState(ALL_FOLDERS)
   const [activeTagId, setActiveTagId] = React.useState('all')
@@ -485,6 +509,13 @@ export function LibraryManager({
 
   const canMutate = status === 'ready'
   const isLoading = status === 'initializing' || status === 'loading'
+  const isSyncing = isLoading || isRefreshing
+  const refreshedTimeLabel = refreshedAt
+    ? new Date(refreshedAt).toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : ''
   const trashTotalCount = trashGroups.reduce(
     (count, group) => count + 1 + group.notes.length,
     0,
@@ -522,6 +553,15 @@ export function LibraryManager({
       ),
     [effectiveActiveFolderId, notes],
   )
+
+  const noteCountByFolderId = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    notes.forEach((note) => {
+      if (!note.folderId) return
+      counts.set(note.folderId, (counts.get(note.folderId) ?? 0) + 1)
+    })
+    return counts
+  }, [notes])
 
   const tagNameByColor = React.useMemo(() => {
     const map = new Map<string, string>()
@@ -629,6 +669,10 @@ export function LibraryManager({
   const noteDraft = selectedDetailNote
     ? noteDrafts[selectedDetailNote.id] ?? toNoteDraft(selectedDetailNote)
     : null
+  const selectedDetailLearningStatus = selectedDetailNote
+    ? getNoteLearningStatus(selectedDetailNote)
+    : 'ready'
+  const selectedDetailQualityFlags = selectedDetailNote?.qualityFlags ?? []
   const detailContent = selectedDetailNote
     ? formatContentTextForDisplay(selectedDetailNote.contentText, selectedDetailNote)
     : ''
@@ -722,6 +766,18 @@ export function LibraryManager({
   async function handleSaveNote() {
     if (!selectedDetailNote || !noteDraft || detailTrashEntry) return
     await runMutation(() => onSaveNote(selectedDetailNote, noteDraft), '笔记已保存。')
+  }
+
+  async function handleUpdateLearningStatus(
+    note: SavedNoteRecord,
+    status: Extract<NoteLearningStatus, 'ready' | 'excluded'>,
+  ) {
+    await runMutation(async () => {
+      await onUpdateNoteLearningStatus(note, status)
+      setDetailNote((current) =>
+        current?.id === note.id ? { ...current, learningStatus: status } : current,
+      )
+    }, status === 'ready' ? '已确认参与 AI 学习。' : '已设为不参与 AI 学习。')
   }
 
   async function handleSaveDetailSnippets() {
@@ -924,7 +980,7 @@ export function LibraryManager({
       <div className="inline-flex min-h-[var(--ui-control-height-lg)] items-center gap-2 rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--surface-muted)] px-3">
         <span className="text-xs font-bold text-[var(--soft-foreground)]">排序</span>
         <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-          <SelectTrigger className="h-[var(--ui-control-height-sm)] border-0 bg-transparent px-1 text-xs font-bold shadow-none">
+          <SelectTrigger controlSize="sm" className="border-0 bg-transparent px-1 text-xs font-bold shadow-none">
             <SelectValue />
           </SelectTrigger>
           <SelectContent align="end">
@@ -945,6 +1001,7 @@ export function LibraryManager({
     actions: React.ReactNode,
   ) {
     const coverImageUrl = getDisplayCoverImageUrl(note.coverImageUrl)
+    const learningStatus = getNoteLearningStatus(note)
     return (
       <article
         key={note.id}
@@ -972,6 +1029,23 @@ export function LibraryManager({
               decoding="async"
               onError={hideBrokenCoverImage}
             />
+          ) : null}
+          {learningStatus !== 'ready' ? (
+            <span
+              className={cn(
+                'absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold shadow-sm',
+                learningStatus === 'pending_review'
+                  ? 'bg-[rgba(255,248,230,0.94)] text-[#8a5a16]'
+                  : 'bg-[rgba(241,243,246,0.94)] text-[var(--muted-foreground)]',
+              )}
+            >
+              {learningStatus === 'pending_review' ? (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              ) : (
+                <X className="h-3.5 w-3.5" />
+              )}
+              {learningStatus === 'pending_review' ? '待确认' : '不参与学习'}
+            </span>
           ) : null}
           <div className="absolute bottom-2 right-2 rounded-full bg-white/86 px-2 py-1 text-xs font-bold text-[var(--foreground)] shadow-sm">
             {noteSnippets.length} 个片段
@@ -1002,7 +1076,7 @@ export function LibraryManager({
             </span>
           </div>
           <div
-            className="flex flex-wrap items-center justify-end gap-2 text-xs font-bold"
+            className="ui-card-actions flex flex-wrap items-center justify-end gap-[var(--ui-gap-control)] text-xs font-bold"
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
@@ -1020,7 +1094,7 @@ export function LibraryManager({
         'grid min-h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]',
         isResizingSidebar && 'cursor-col-resize select-none',
       )}
-      style={{ gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr)` }}
+      style={{ '--library-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
     >
       <aside className="relative flex h-screen flex-col border-r border-[var(--border)] bg-white/62 px-4 py-6">
         <div className="flex items-center gap-3 px-1 pb-5">
@@ -1048,7 +1122,8 @@ export function LibraryManager({
             onSubmit={(event) => void handleCreateFolder(event)}
           >
             <Input
-              className="h-[var(--ui-control-height-sm)] border-0 bg-transparent shadow-none"
+              controlSize="sm"
+              className="border-0 bg-transparent shadow-none"
               value={newFolderName}
               placeholder="输入文件夹名"
               onChange={(event) => setNewFolderName(event.target.value)}
@@ -1093,12 +1168,14 @@ export function LibraryManager({
               }}
             >
               <span className="truncate">{folder.name}</span>
-              <span className="text-xs font-bold text-[var(--soft-foreground)]">{folder.noteCount}</span>
+              <span className="text-xs font-bold text-[var(--soft-foreground)]">
+                {noteCountByFolderId.get(folder.id) ?? 0}
+              </span>
             </button>
           ))}
         </nav>
 
-        <div className="mt-3 border-t border-[var(--border)] pt-3">
+        <div data-library-trash-nav className="mt-3 border-t border-[var(--border)] pt-3">
           <button
             className={cn(
               'grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--ui-field-radius)] px-3 py-2 text-left transition',
@@ -1131,19 +1208,20 @@ export function LibraryManager({
         />
       </aside>
 
-      <section className="min-w-0 overflow-y-auto px-7 pb-16 pt-5">
-        <header className="grid min-h-16 grid-cols-[minmax(18rem,40rem)_auto] items-center justify-center gap-4">
+      <section className="min-w-0 overflow-y-auto px-[var(--ui-page-gutter)] pb-[var(--ui-space-16)] pt-[var(--ui-space-5)]">
+        <header className="grid min-h-16 grid-cols-1 items-center gap-[var(--ui-gap-block)] py-[var(--ui-space-3)] sm:grid-cols-[minmax(18rem,40rem)_auto] sm:justify-center sm:py-0">
           <div className="relative w-full">
             <Input
               ref={searchInputRef}
-              className="h-[var(--ui-control-height-lg)] rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pr-20"
+              controlSize="lg"
+              className="rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pr-20"
               value={query}
               placeholder={appView === 'trash' ? '搜索回收站' : '搜索文件名、标题、正文'}
               onChange={(event) => setQuery(event.target.value)}
             />
             {query ? (
               <button
-                className="absolute right-12 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-[var(--soft-foreground)] hover:bg-[var(--surface-muted)]"
+                className="absolute right-10 top-1/2 grid size-[var(--ui-control-height-sm)] -translate-y-1/2 place-items-center rounded-full text-[var(--soft-foreground)] hover:bg-[var(--surface-muted)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
                 type="button"
                 aria-label="清空搜索"
                 onMouseDown={(event) => event.preventDefault()}
@@ -1157,16 +1235,40 @@ export function LibraryManager({
             ) : null}
             <Search className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={canMutate ? 'accent' : 'outline'}>
-              {canMutate ? '云端' : status === 'demo' ? 'Demo' : '连接中'}
-            </Badge>
-            <Button variant="secondary" size="sm" onClick={onRefresh} disabled={isLoading}>
-              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
-              刷新
+          <div className="flex items-center justify-end gap-[var(--ui-gap-control)]">
+            {status !== 'ready' ? (
+              <Badge variant="outline">{status === 'demo' ? '演示只读' : '连接中'}</Badge>
+            ) : null}
+            {status === 'ready' && refreshedTimeLabel ? (
+              <span className="hidden text-xs font-semibold text-[var(--soft-foreground)] md:inline">
+                {isRefreshing ? '正在同步' : `${refreshedTimeLabel} 已同步`}
+              </span>
+            ) : null}
+            <AuthStatus />
+            <Button variant="secondary" size="sm" onClick={onRefresh} disabled={isSyncing}>
+              {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
+              {isRefreshing ? '同步中' : '刷新'}
             </Button>
           </div>
         </header>
+
+        {status === 'demo' ? (
+          <p
+            className="mx-auto mt-2 max-w-7xl text-sm leading-6 text-[var(--muted-foreground)]"
+            role="note"
+          >
+            当前是只读演示数据。登录后可以新建文件夹、编辑文案和管理标注片段。
+          </p>
+        ) : null}
+
+        {status === 'ready' && error ? (
+          <p
+            className="mx-auto mt-2 max-w-7xl text-sm leading-6 text-[rgba(185,28,28,0.88)]"
+            role="status"
+          >
+            同步失败，当前仍显示{refreshedTimeLabel ? ` ${refreshedTimeLabel} ` : '上次'}的数据。点击刷新可重试。
+          </p>
+        ) : null}
 
         {feedback ? (
           <p className="mx-auto mt-1 max-w-7xl text-sm text-[var(--muted-foreground)]" role="status">
@@ -1396,7 +1498,7 @@ export function LibraryManager({
           }}
         >
           <section
-            className="grid max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-[var(--ui-radius-dialog)] border border-white/70 bg-[var(--surface-raised-strong)] shadow-[var(--shadow-elevated)]"
+            className="grid max-h-[92vh] min-w-0 w-full max-w-6xl grid-cols-[minmax(0,1fr)] overflow-hidden rounded-[var(--ui-radius-dialog)] border border-white/70 bg-[var(--surface-raised-strong)] shadow-[var(--shadow-elevated)]"
             role="dialog"
             aria-modal="true"
             aria-labelledby="note-detail-title"
@@ -1409,15 +1511,91 @@ export function LibraryManager({
                 <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                   {detailTrashEntry ? '回收站详情' : getDisplayAuthorName(selectedDetailNote.authorName)}
                 </p>
+                {!detailTrashEntry ? (
+                  <span className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-[var(--soft-foreground)]">
+                    {selectedDetailLearningStatus === 'ready' ? (
+                      <ShieldCheck className="h-3.5 w-3.5 text-[#17675b]" />
+                    ) : selectedDetailLearningStatus === 'pending_review' ? (
+                      <AlertTriangle className="h-3.5 w-3.5 text-[#8a5a16]" />
+                    ) : (
+                      <X className="h-3.5 w-3.5" />
+                    )}
+                    {selectedDetailLearningStatus === 'ready'
+                      ? '参与 AI 学习'
+                      : selectedDetailLearningStatus === 'pending_review'
+                        ? '待确认，暂不参与 AI 学习'
+                        : '不参与 AI 学习'}
+                  </span>
+                ) : null}
               </div>
               <Button variant="ghost" size="icon" aria-label="关闭详情" onClick={resetDetail}>
                 <X className="h-4 w-4" />
               </Button>
             </header>
 
+            {!detailTrashEntry && selectedDetailLearningStatus !== 'ready' ? (
+              <section
+                className={cn(
+                  'flex flex-col gap-3 px-[var(--ui-inset-panel)] py-[var(--ui-inset-card)] sm:flex-row sm:items-center sm:justify-between',
+                  selectedDetailLearningStatus === 'pending_review'
+                    ? 'bg-[rgba(255,248,230,0.72)]'
+                    : 'bg-[var(--surface-muted)]',
+                )}
+                aria-label="AI 学习状态"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-extrabold text-[var(--foreground)]">
+                    {selectedDetailLearningStatus === 'pending_review'
+                      ? '先确认这篇素材是否抓取正确'
+                      : '这篇素材已不参与推荐和写作'}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">
+                    {selectedDetailLearningStatus === 'pending_review'
+                      ? selectedDetailQualityFlags.map(getQualityFlagLabel).join('；')
+                      : '内容仍保留在文案库，不会被 AI 当作你的写作偏好。'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-[var(--ui-gap-control)]">
+                  {selectedDetailLearningStatus === 'pending_review' ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={isMutating}
+                        onClick={() =>
+                          void handleUpdateLearningStatus(selectedDetailNote, 'excluded')
+                        }
+                      >
+                        暂不参与学习
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={isMutating}
+                        onClick={() => void handleUpdateLearningStatus(selectedDetailNote, 'ready')}
+                      >
+                        确认内容无误
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={isMutating}
+                      onClick={() => void handleUpdateLearningStatus(selectedDetailNote, 'ready')}
+                    >
+                      重新参与学习
+                    </Button>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
             {!detailTrashEntry ? (
-              <div className="grid gap-3 border-b border-[var(--border)] px-5 py-4 md:grid-cols-4">
-                <label className="grid gap-1.5">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-[var(--ui-gap-group)] border-b border-[var(--border)] px-[var(--ui-inset-panel)] py-[var(--ui-inset-card)] md:grid-cols-4">
+                <label className="grid min-w-0 gap-[var(--ui-field-gap)]">
                   <span className="text-xs font-bold text-[var(--muted-foreground)]">标题</span>
                   <Input
                     value={noteDraft.title}
@@ -1427,7 +1605,7 @@ export function LibraryManager({
                     disabled={!canMutate || isMutating}
                   />
                 </label>
-                <label className="grid gap-1.5">
+                <label className="grid min-w-0 gap-[var(--ui-field-gap)]">
                   <span className="text-xs font-bold text-[var(--muted-foreground)]">文件名</span>
                   <Input
                     value={noteDraft.filename}
@@ -1437,7 +1615,7 @@ export function LibraryManager({
                     disabled={!canMutate || isMutating}
                   />
                 </label>
-                <label className="grid gap-1.5">
+                <label className="grid min-w-0 gap-[var(--ui-field-gap)]">
                   <span className="text-xs font-bold text-[var(--muted-foreground)]">作者</span>
                   <Input
                     value={noteDraft.authorName}
@@ -1447,7 +1625,7 @@ export function LibraryManager({
                     disabled={!canMutate || isMutating}
                   />
                 </label>
-                <label className="grid gap-1.5">
+                <label className="grid min-w-0 gap-[var(--ui-field-gap)]">
                   <span className="text-xs font-bold text-[var(--muted-foreground)]">文件夹</span>
                   <Select
                     value={noteDraft.folderId || NO_FOLDER}
@@ -1472,8 +1650,8 @@ export function LibraryManager({
               </div>
             ) : null}
 
-            <div className="grid min-h-0 gap-4 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.85fr)]">
-              <Card className="min-h-0 overflow-hidden">
+            <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] gap-[var(--ui-gap-block)] overflow-y-auto p-[var(--ui-inset-panel)] lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.85fr)]">
+              <Card className="min-h-0 min-w-0 overflow-hidden">
                 <CardHeader className="flex-row items-start justify-between gap-3">
                   <div>
                     <CardTitle>正文</CardTitle>
@@ -1521,7 +1699,7 @@ export function LibraryManager({
                 </CardContent>
               </Card>
 
-              <Card className="min-h-0 overflow-hidden">
+              <Card className="min-h-0 min-w-0 overflow-hidden">
                 <CardHeader className="flex-row items-start justify-between gap-3">
                   <div>
                     <CardTitle>高亮片段</CardTitle>
@@ -1663,7 +1841,7 @@ export function LibraryManager({
                           <label className="grid gap-2">
                             <span className="text-xs font-bold text-[var(--muted-foreground)]">高亮原文</span>
                             <Textarea
-                              className="min-h-[4.75rem]"
+                              controlSize="sm"
                               value={draft.selectedText}
                               placeholder="输入高亮原文"
                               disabled={!canMutate || isMutating}
@@ -1676,7 +1854,7 @@ export function LibraryManager({
                           <label className="grid gap-2">
                             <span className="text-xs font-bold text-[var(--muted-foreground)]">记录理由</span>
                             <Textarea
-                              className="min-h-[4.75rem]"
+                              controlSize="sm"
                               value={draft.reasonText}
                               placeholder="为什么值得参考"
                               disabled={!canMutate || isMutating}
@@ -1699,11 +1877,21 @@ export function LibraryManager({
               </Card>
             </div>
 
-            <footer className="flex items-center justify-between gap-4 border-t border-[var(--border)] px-5 py-4">
+            <footer className="flex flex-col items-stretch justify-between gap-[var(--ui-gap-group)] border-t border-[var(--border)] px-[var(--ui-inset-panel)] py-[var(--ui-inset-card)] sm:flex-row sm:items-center sm:gap-[var(--ui-gap-block)]">
               <span className="text-sm font-bold text-[var(--muted-foreground)]" role="status">
                 {detailFeedback}
               </span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-[var(--ui-gap-control)]">
+                {!detailTrashEntry && selectedDetailLearningStatus === 'ready' ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!canMutate || isMutating}
+                    onClick={() => void handleUpdateLearningStatus(selectedDetailNote, 'excluded')}
+                  >
+                    不参与 AI 学习
+                  </Button>
+                ) : null}
                 <Button type="button" variant="outline" onClick={resetDetail}>
                   关闭
                 </Button>

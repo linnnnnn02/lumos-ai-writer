@@ -1,7 +1,23 @@
 import * as React from 'react'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 type CardProps = React.HTMLAttributes<HTMLDivElement>
+
+const cardInsetVariants = cva('', {
+  variants: {
+    density: {
+      compact: 'p-[var(--ui-space-4)]',
+      default: 'p-[var(--ui-space-6)]',
+      spacious: 'p-[var(--ui-space-8)]',
+    },
+  },
+  defaultVariants: {
+    density: 'default',
+  },
+})
+
+type CardSectionProps = CardProps & VariantProps<typeof cardInsetVariants>
 
 export function Card({ className, ...props }: CardProps) {
   return (
@@ -15,8 +31,8 @@ export function Card({ className, ...props }: CardProps) {
   )
 }
 
-export function CardHeader({ className, ...props }: CardProps) {
-  return <div className={cn('flex flex-col gap-[var(--ui-space-2)] p-[var(--ui-space-6)]', className)} {...props} />
+export function CardHeader({ className, density, ...props }: CardSectionProps) {
+  return <div className={cn('flex flex-col gap-[var(--ui-gap-control)]', cardInsetVariants({ density }), className)} {...props} />
 }
 
 export function CardTitle({ className, ...props }: CardProps) {
@@ -32,10 +48,10 @@ export function CardDescription({ className, ...props }: CardProps) {
   return <div className={cn('text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]', className)} {...props} />
 }
 
-export function CardContent({ className, ...props }: CardProps) {
-  return <div className={cn('p-[var(--ui-space-6)] pt-0', className)} {...props} />
+export function CardContent({ className, density, ...props }: CardSectionProps) {
+  return <div className={cn(cardInsetVariants({ density }), 'pt-0', className)} {...props} />
 }
 
-export function CardFooter({ className, ...props }: CardProps) {
-  return <div className={cn('flex items-center gap-[var(--ui-space-3)] p-[var(--ui-space-6)] pt-0', className)} {...props} />
+export function CardFooter({ className, density, ...props }: CardSectionProps) {
+  return <div className={cn('flex items-center gap-[var(--ui-gap-group)]', cardInsetVariants({ density }), 'pt-0', className)} {...props} />
 }

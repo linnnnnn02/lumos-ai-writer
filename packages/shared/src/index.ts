@@ -1,5 +1,8 @@
+import type { NoteLearningStatus, NoteQualityFlag } from './library-quality.js'
+
 export const projectLengths = ['short', 'medium', 'long'] as const
 
+export * from './library-quality.js'
 export * from './schemas/api.js'
 export * from './schemas/ai.js'
 export * from './schemas/library.js'
@@ -58,6 +61,8 @@ export interface SavedNoteRecord extends ExtractedNoteRecord {
   folderName: string
   filename: string
   savedAt: string
+  learningStatus?: NoteLearningStatus
+  qualityFlags?: NoteQualityFlag[]
 }
 
 export interface SavedSnippetRecord extends NoteSnippetRecord {
