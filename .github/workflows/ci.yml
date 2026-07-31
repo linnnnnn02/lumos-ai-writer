@@ -36,6 +36,9 @@ jobs:
       - name: Test API CORS policy
         run: pnpm test:cors
 
+      - name: Test annotation cloud sync
+        run: pnpm test:annotation-sync
+
       - name: Lint
         run: pnpm lint
 

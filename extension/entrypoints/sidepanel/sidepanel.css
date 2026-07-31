@@ -566,6 +566,33 @@ button:disabled {
   line-height: 1.5;
 }
 
+.cloud-feedback-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cloud-sync-retry-button {
+  min-height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--panel-accent-deep);
+  cursor: pointer;
+  font-size: var(--ui-text-caption);
+  font-weight: 740;
+  padding: 0 10px;
+}
+
+.cloud-sync-retry-button:hover,
+.cloud-sync-retry-button:focus-visible {
+  background: #fff;
+  outline: none;
+}
+
 .cloud-feedback.error {
   color: #bb542a;
 }
@@ -1035,7 +1062,71 @@ button:disabled {
 }
 
 .annotation-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   margin-top: 10px;
+}
+
+.annotation-cloud-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--panel-text-muted);
+}
+
+.annotation-cloud-state::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.annotation-cloud-state.syncing::before {
+  animation: cloud-sync-pulse 1.1s ease-in-out infinite;
+}
+
+.annotation-cloud-state.synced {
+  color: #247b48;
+}
+
+.annotation-cloud-state.failed {
+  color: #a74f2d;
+}
+
+.annotation-cloud-state button {
+  min-height: 26px;
+  border: 1px solid rgba(167, 79, 45, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 740;
+  padding: 0 9px;
+}
+
+.annotation-cloud-state button:hover,
+.annotation-cloud-state button:focus-visible {
+  border-color: rgba(167, 79, 45, 0.34);
+  background: #fff;
+  outline: none;
+}
+
+@keyframes cloud-sync-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .back-button {

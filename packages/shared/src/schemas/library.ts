@@ -98,6 +98,7 @@ export const updateNoteLearningStatusRequestSchema = z.object({
 })
 
 export const createSnippetRequestSchema = z.object({
+  id: z.string().uuid().optional(),
   noteId: z.string().uuid().optional(),
   noteUrl: z.string().trim().min(1).max(2048).optional(),
   selectedText: z.string().trim().min(1).max(10000),
@@ -109,6 +110,24 @@ export const createSnippetRequestSchema = z.object({
 
 export const createSnippetResponseSchema = z.object({
   ok: z.literal(true),
+  snippet: snippetDtoSchema,
+})
+
+export const syncAnnotationRequestSchema = z.object({
+  folderName: z.string().trim().min(1).max(80),
+  note: upsertNoteRequestSchema.omit({ folderId: true }),
+  snippet: createSnippetRequestSchema
+    .omit({ noteId: true, noteUrl: true })
+    .extend({ id: z.string().uuid() }),
+})
+
+export const syncAnnotationResponseSchema = z.object({
+  ok: z.literal(true),
+  folder: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+  }),
+  note: noteDtoSchema,
   snippet: snippetDtoSchema,
 })
 
@@ -166,6 +185,8 @@ export type UpdateNoteLearningStatusRequest = z.infer<
 >
 export type CreateSnippetRequest = z.infer<typeof createSnippetRequestSchema>
 export type CreateSnippetResponse = z.infer<typeof createSnippetResponseSchema>
+export type SyncAnnotationRequest = z.infer<typeof syncAnnotationRequestSchema>
+export type SyncAnnotationResponse = z.infer<typeof syncAnnotationResponseSchema>
 export type UpdateSnippetRequest = z.infer<typeof updateSnippetRequestSchema>
 export type UpdateSnippetResponse = z.infer<typeof updateSnippetResponseSchema>
 export type DeleteResourceResponse = z.infer<typeof deleteResourceResponseSchema>
