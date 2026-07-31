@@ -3,7 +3,8 @@ import type { CurrentUser, PublicConfigResponse } from '@lumos-ai/shared'
 
 const CLOUD_SESSION_STORAGE_KEY = 'lumosCloudSession'
 const CLOUD_USER_STORAGE_KEY = 'lumosCloudUser'
-const DEFAULT_API_BASE_URL = 'http://localhost:8788/api'
+const LOCAL_API_BASE_URL = 'http://localhost:8788/api'
+const PRODUCTION_API_BASE_URL = 'https://lumos-ai-writer.pages.dev/api'
 
 export type CloudAuthState =
   | {
@@ -55,9 +56,11 @@ async function setStorageValue<T>(key: string, value: T | null) {
 }
 
 export function getCloudApiBaseUrl() {
-  const envUrl = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-    ?.WXT_PUBLIC_API_BASE_URL
-  return (envUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+  const env = (import.meta as unknown as {
+    env?: Record<string, string | undefined>
+  }).env
+  const fallbackUrl = env?.COMMAND === 'serve' ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL
+  return (env?.WXT_PUBLIC_API_BASE_URL || fallbackUrl).replace(/\/+$/, '')
 }
 
 async function getPublicConfig(): Promise<PublicConfigResponse> {

@@ -32,6 +32,9 @@ jobs:
       - name: Build extension
         run: pnpm --filter extension build
 
+      - name: Verify production target
+        run: pnpm check:extension-artifact
+
       - name: Package Chrome MV3 extension
         run: |
           cd extension/.output/chrome-mv3

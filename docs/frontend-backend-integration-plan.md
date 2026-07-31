@@ -1613,7 +1613,7 @@ GitHub Actions
 - push 到 `main` 或手动触发时自动构建插件。
 - 生成 `lumos-ai-writer-chrome-mv3.zip`。
 - 上传为 GitHub Actions artifact。
-- 如果要让 artifact 指向线上 API，需要在 GitHub 仓库变量里设置 `WXT_PUBLIC_API_BASE_URL=https://app.yourdomain.com/api`。
+- 正式构建默认指向当前生产 API；仓库变量 `WXT_PUBLIC_API_BASE_URL` 可在切换自定义域名或 staging 环境时覆盖默认地址。
 
 ### 12.5 Cloud IDE
 
