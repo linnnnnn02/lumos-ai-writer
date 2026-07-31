@@ -664,11 +664,17 @@ export function OptionsApp() {
   }
 
   useEffect(() => {
-    void loadData()
-    if (typeof chrome === 'undefined') return
-    void chrome.runtime
-      ?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
-      .catch(() => undefined)
+    void (async () => {
+      await loadData()
+      if (typeof chrome === 'undefined') return
+
+      try {
+        await chrome.runtime?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+        await loadData()
+      } catch {
+        // The local library stays available when cloud refresh is temporarily unavailable.
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -683,6 +689,7 @@ export function OptionsApp() {
     function requestCloudTrashRefresh() {
       void chrome.runtime
         ?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+        .then(() => loadData())
         .catch(() => undefined)
     }
 

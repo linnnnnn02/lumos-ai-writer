@@ -1,6 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background'
 import { getCloudTrash, syncAnnotationToCloud } from '../lib/cloud-api'
-import { getStoredCloudAccessToken } from '../lib/cloud-session'
+import { getValidCloudAccessToken } from '../lib/cloud-session'
 import {
   getAnnotationCloudSyncQueue,
   saveAnnotationCloudSyncQueue,
@@ -57,7 +57,7 @@ export default defineBackground(() => {
     if (cloudTrashRefreshPromise) return cloudTrashRefreshPromise
 
     cloudTrashRefreshPromise = (async () => {
-      const token = await getStoredCloudAccessToken()
+      const token = await getValidCloudAccessToken()
       if (!token) {
         return {
           authenticated: false,
@@ -162,7 +162,7 @@ export default defineBackground(() => {
       const job = await claimNextAnnotationSync()
       if (!job) return
 
-      const token = await getStoredCloudAccessToken()
+      const token = await getValidCloudAccessToken()
       if (!token) {
         await failAnnotationSync(job.id, '云端登录已过期，请在插件中重新登录。')
         continue

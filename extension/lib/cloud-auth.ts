@@ -1,12 +1,13 @@
 import { createClient, type Session } from '@supabase/supabase-js'
-import type { CurrentUser, PublicConfigResponse } from '@lumos-ai/shared'
-import { getCloudApiBaseUrl } from './cloud-config'
+import type { CurrentUser } from '@lumos-ai/shared'
 import {
   CLOUD_SESSION_STORAGE_KEY,
   CLOUD_USER_STORAGE_KEY,
+  getCloudPublicConfig,
   getCloudStorageValue,
   setCloudStorageValue,
 } from './cloud-session'
+export { getValidCloudAccessToken } from './cloud-session'
 
 export type CloudAuthState =
   | {
@@ -17,17 +18,6 @@ export type CloudAuthState =
       status: 'unauthenticated'
       user: null
     }
-
-async function getPublicConfig(): Promise<PublicConfigResponse> {
-  const response = await fetch(`${getCloudApiBaseUrl()}/v1/config/public`)
-  const data = await response.json()
-
-  if (!response.ok) {
-    throw new Error(data?.error?.message || '云端配置读取失败')
-  }
-
-  return data as PublicConfigResponse
-}
 
 function getDisplayNameFromSession(session: Session) {
   const metadata = session.user.user_metadata ?? {}
@@ -51,7 +41,7 @@ function toCurrentUser(session: Session): CurrentUser {
 }
 
 async function createSupabaseAuthClient() {
-  const config = await getPublicConfig()
+  const config = await getCloudPublicConfig()
   if (!config.authConfigured || !config.supabaseUrl || !config.supabaseAnonKey) {
     throw new Error('云端登录还没有配置好')
   }
@@ -105,25 +95,4 @@ export async function signOutFromCloud() {
     setCloudStorageValue(CLOUD_SESSION_STORAGE_KEY, null),
     setCloudStorageValue(CLOUD_USER_STORAGE_KEY, null),
   ])
-}
-
-export async function getValidCloudAccessToken() {
-  const session = await getCloudStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
-  if (!session?.access_token) return null
-
-  const expiresAtMs = (session.expires_at ?? 0) * 1000
-  if (expiresAtMs > Date.now() + 60_000) return session.access_token
-
-  const supabase = await createSupabaseAuthClient()
-  const { data, error } = await supabase.auth.refreshSession({
-    refresh_token: session.refresh_token,
-  })
-
-  if (error || !data.session) {
-    await signOutFromCloud()
-    return null
-  }
-
-  await saveCloudSession(data.session)
-  return data.session.access_token
 }

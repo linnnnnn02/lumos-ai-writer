@@ -1,4 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
+import type { PublicConfigResponse } from '@lumos-ai/shared'
+import { getCloudApiBaseUrl } from './cloud-config'
 
 export const CLOUD_SESSION_STORAGE_KEY = 'lumosCloudSession'
 export const CLOUD_USER_STORAGE_KEY = 'lumosCloudUser'
@@ -42,10 +44,65 @@ export async function setCloudStorageValue<T>(key: string, value: T | null) {
   }
 }
 
-export async function getStoredCloudAccessToken() {
+export async function getCloudPublicConfig(): Promise<PublicConfigResponse> {
+  const response = await fetch(`${getCloudApiBaseUrl()}/v1/config/public`)
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || '云端配置读取失败')
+  }
+
+  return data as PublicConfigResponse
+}
+
+async function clearStoredCloudSession() {
+  await Promise.all([
+    setCloudStorageValue(CLOUD_SESSION_STORAGE_KEY, null),
+    setCloudStorageValue(CLOUD_USER_STORAGE_KEY, null),
+  ])
+}
+
+export async function getValidCloudAccessToken() {
   const session = await getCloudStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
   if (!session?.access_token) return null
 
   const expiresAtMs = (session.expires_at ?? 0) * 1000
-  return expiresAtMs > Date.now() + 5_000 ? session.access_token : null
+  if (expiresAtMs > Date.now() + 60_000) return session.access_token
+  if (!session.refresh_token) {
+    await clearStoredCloudSession()
+    return null
+  }
+
+  const config = await getCloudPublicConfig()
+  if (!config.authConfigured || !config.supabaseUrl || !config.supabaseAnonKey) {
+    throw new Error('云端登录还没有配置好')
+  }
+
+  const response = await fetch(
+    `${config.supabaseUrl.replace(/\/+$/, '')}/auth/v1/token?grant_type=refresh_token`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: config.supabaseAnonKey,
+        Authorization: `Bearer ${config.supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    },
+  )
+  const refreshedSession = (await response.json()) as Session
+
+  if (!response.ok || !refreshedSession.access_token) {
+    await clearStoredCloudSession()
+    return null
+  }
+
+  const normalizedSession = {
+    ...refreshedSession,
+    expires_at:
+      refreshedSession.expires_at ??
+      Math.floor(Date.now() / 1000) + (refreshedSession.expires_in ?? 3600),
+  }
+  await setCloudStorageValue(CLOUD_SESSION_STORAGE_KEY, normalizedSession)
+  return normalizedSession.access_token
 }
