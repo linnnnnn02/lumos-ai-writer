@@ -1,4 +1,6 @@
 import type {
+  ListFoldersResponse,
+  ListNotesResponse,
   ListTrashResponse,
   SavedFolderRecord,
   SavedNoteRecord,
@@ -67,4 +69,16 @@ export async function syncAnnotationToCloud(
 
 export async function getCloudTrash(token: string) {
   return requestCloudJson<ListTrashResponse>('/v1/trash', token)
+}
+
+export async function getCloudLibrary(token: string) {
+  const [folderResponse, noteResponse] = await Promise.all([
+    requestCloudJson<ListFoldersResponse>('/v1/folders', token),
+    requestCloudJson<ListNotesResponse>('/v1/notes', token),
+  ])
+
+  return {
+    folders: folderResponse.folders,
+    notes: noteResponse.notes,
+  }
 }

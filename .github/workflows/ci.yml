@@ -42,6 +42,9 @@ jobs:
       - name: Test extension cloud session refresh
         run: pnpm test:cloud-session-refresh
 
+      - name: Test extension cloud identity matching
+        run: pnpm test:cloud-library-identity
+
       - name: Test cloud trash reconciliation
         run: pnpm test:cloud-trash-reconcile
 

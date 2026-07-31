@@ -18,7 +18,9 @@ export interface FolderSummary {
   updatedAt: string
 }
 
-export interface SavedFolderRecord extends FolderSummary {}
+export interface SavedFolderRecord extends FolderSummary {
+  cloudId?: string
+}
 
 export interface NoteSnippetRecord {
   id: string
@@ -57,6 +59,7 @@ export interface ExtractedNoteRecord {
 
 export interface SavedNoteRecord extends ExtractedNoteRecord {
   id: string
+  cloudId?: string
   folderId: string
   folderName: string
   filename: string

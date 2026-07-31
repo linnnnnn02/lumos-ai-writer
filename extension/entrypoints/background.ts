@@ -1,5 +1,9 @@
 import { defineBackground } from 'wxt/utils/define-background'
-import { getCloudTrash, syncAnnotationToCloud } from '../lib/cloud-api'
+import { getCloudLibrary, getCloudTrash, syncAnnotationToCloud } from '../lib/cloud-api'
+import {
+  applyCloudAnnotationIdentity,
+  applyCloudLibraryIdentitySnapshot,
+} from '../lib/cloud-library-identity'
 import { getValidCloudAccessToken } from '../lib/cloud-session'
 import {
   getAnnotationCloudSyncQueue,
@@ -66,7 +70,13 @@ export default defineBackground(() => {
         }
       }
 
-      const trash = await getCloudTrash(token)
+      const [trash, library] = await Promise.all([
+        getCloudTrash(token),
+        getCloudLibrary(token).catch(() => null),
+      ])
+      if (library) {
+        await applyCloudLibraryIdentitySnapshot(library)
+      }
       const result = await applyCloudTrashSnapshot(trash.groups)
       return {
         authenticated: true,
@@ -169,7 +179,8 @@ export default defineBackground(() => {
       }
 
       try {
-        await syncAnnotationToCloud(token, job)
+        const result = await syncAnnotationToCloud(token, job)
+        await applyCloudAnnotationIdentity(job, result)
         await completeAnnotationSync(job.id)
       } catch (error) {
         await failAnnotationSync(
