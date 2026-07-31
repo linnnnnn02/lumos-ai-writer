@@ -24,12 +24,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
 import { cn } from '@/lib/utils'
-import {
-  WorkflowTitleMenu,
-  type WorkflowStepId,
-  type WorkflowTitleMenuStep,
-} from '@/components/workflow-title-menu'
 
 type ChatMessage = {
   id: string
@@ -59,34 +55,39 @@ type LearnWorkspaceProps = {
   analysisReady: boolean
   chatInput: string
   chatMessages: ChatMessage[]
-  activeWorkflowStep: WorkflowStepId
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
   snippets: SavedSnippetRecord[]
   libraryStatus?: 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
   libraryError?: string
-  workflowSteps: WorkflowTitleMenuStep[]
+  nonLearningNoteCount?: number
   analysisError?: string
   analysisWaitSeconds?: number
+  canReturnToDraft?: boolean
   isAnalyzing?: boolean
+  isSidebarOpen: boolean
   isStreaming: boolean
   projectName: string
   conversations: Array<{ id: string; title: string; pinned?: boolean; finalizedAt?: string }>
   selectedItemIds: string[]
+  writingRequest: string
+  referenceRecommendations: Array<{ noteId: string; reason: string }>
   onBackToWorkspace: () => void
+  onOpenLibrary: () => void
+  onCloseSidebar: () => void
   onCreateConversation: () => void
   onConversationTitleChange: (conversationId: string, title: string) => void
   onToggleConversationPin: (conversationId: string) => void
   onSwitchConversation: (conversationId: string) => void
   onStartAnalysis: () => void
   onBackToSelection: () => void
-  onNext: () => void
+  onReturnToDraft?: () => void
+  onOpenSidebar: () => void
   onToggleItems: (itemIds: string[]) => void
   onSelectItems: (itemIds: string[]) => void
   onDeselectItems: (itemIds: string[]) => void
   onSendChat: () => void
   onChatInputChange: (value: string) => void
-  onWorkflowStepChange: (step: WorkflowStepId) => void
 }
 
 type TagTab = {
@@ -104,6 +105,7 @@ type RenderTag = {
 
 type RenderItem = {
   id: string
+  noteId: string
   title: string
   folderName: string
   itemIds: string[]
@@ -409,7 +411,7 @@ function AnalysisBlock({
             {commonConclusion}
           </p>
 
-        <div className="mt-3 grid gap-1.5 rounded-[var(--ui-radius-card)] bg-[rgba(241,243,246,0.72)] px-3.5 py-2.5">
+        <div className="mt-3 grid gap-[var(--ui-gap-control)] rounded-[var(--ui-radius-card)] bg-[rgba(241,243,246,0.72)] px-[var(--ui-space-3)] py-[var(--ui-space-2)]">
           {commonMoves.map((move) => (
             <p key={`${move.title}-${move.body}`} className="text-sm leading-6 text-[var(--foreground)]">
               <span className="font-semibold text-[var(--accent-strong)]">{move.title}：</span>
@@ -419,8 +421,8 @@ function AnalysisBlock({
         </div>
 
         {featuredSnippets.length > 0 ? (
-	          <section className="mt-7">
-	            <p className="text-sm font-semibold text-[var(--foreground)]">重点句子</p>
+          <section className="mt-7">
+            <p className="text-sm font-semibold text-[var(--foreground)]">重点句子</p>
             <div className="mt-3 grid gap-3 xl:grid-cols-2">
               {featuredSnippets.map((snippet) => (
                 <button
@@ -447,14 +449,14 @@ function AnalysisBlock({
                     “{snippet.quote}”
                   </blockquote>
                   <p className="mt-2 text-[length:var(--ui-text-control)] leading-6 text-[var(--foreground)]">
-	                    <span className="font-semibold">写法：</span>
-	                    {snippet.description}
-	                  </p>
-	                  {snippet.reason ? (
-	                    <p className="mt-1 text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]">
-	                      <span className="font-semibold text-[var(--foreground)]">理由：</span>
-	                      {snippet.reason}
-	                    </p>
+                    <span className="font-semibold">写法：</span>
+                    {snippet.description}
+                  </p>
+                  {snippet.reason ? (
+                    <p className="mt-1 text-[length:var(--ui-text-control)] leading-6 text-[var(--muted-foreground)]">
+                      <span className="font-semibold text-[var(--foreground)]">理由：</span>
+                      {snippet.reason}
+                    </p>
                   ) : null}
                 </button>
               ))}
@@ -532,7 +534,7 @@ function AssistantBlock({
             {leadLine}
           </p>
         ) : (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-[var(--ui-gap-control)]">
             {trailingLines.map((line, index) => (
               <p
                 key={`${message.id}-${index}`}
@@ -578,7 +580,7 @@ function UserBlock({ message }: { message: ChatMessage }) {
     <article className="ui-chat-row mx-auto flex max-w-5xl justify-end pl-12">
       <div className="flex w-fit max-w-[86%] flex-col items-end md:max-w-[44rem]">
         <span className="mb-2 px-1 text-xs font-semibold text-[var(--soft-foreground)]">你</span>
-        <div className="rounded-[var(--ui-radius-panel)] rounded-br-[0.4rem] bg-[#202428] px-5 py-3.5 text-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]">
+        <div className="rounded-[var(--ui-radius-panel)] rounded-br-[0.4rem] bg-[#202428] px-5 py-3 text-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]">
           {message.lines.map((line, index) => (
             <p key={`${message.id}-${index}`} className="text-[length:var(--ui-text-body)] leading-7">
               {line}
@@ -662,38 +664,44 @@ export function LearnWorkspace({
   analysisReady,
   chatInput,
   chatMessages,
-  activeWorkflowStep,
   folders,
   notes,
   snippets,
   libraryStatus = 'demo',
   libraryError = '',
-  workflowSteps,
+  nonLearningNoteCount = 0,
   analysisError = '',
   analysisWaitSeconds = 0,
+  canReturnToDraft = false,
   isAnalyzing = false,
+  isSidebarOpen,
   isStreaming,
   projectName,
   conversations,
   selectedItemIds,
+  writingRequest,
+  referenceRecommendations,
   onBackToWorkspace,
+  onOpenLibrary,
+  onCloseSidebar,
   onCreateConversation,
   onConversationTitleChange,
   onToggleConversationPin,
   onSwitchConversation,
   onStartAnalysis,
   onBackToSelection,
-  onNext,
+  onReturnToDraft,
+  onOpenSidebar,
   onToggleItems,
   onSelectItems,
   onDeselectItems,
   onSendChat,
   onChatInputChange,
-  onWorkflowStepChange,
 }: LearnWorkspaceProps) {
   const [activeTab, setActiveTab] = React.useState('all')
   const [folderFilterId, setFolderFilterId] = React.useState('all')
   const [isFilterOpen, setIsFilterOpen] = React.useState(false)
+  const [showAllReferences, setShowAllReferences] = React.useState(false)
   const [openConversationMenuId, setOpenConversationMenuId] = React.useState<string | null>(null)
   const [conversationMenuPosition, setConversationMenuPosition] = React.useState({
     left: 0,
@@ -849,6 +857,11 @@ export function LearnWorkspace({
 
   const selectedItemIdSet = React.useMemo(() => new Set(selectedItemIds), [selectedItemIds])
 
+  const recommendationByNoteId = React.useMemo(
+    () => new Map(referenceRecommendations.map((item) => [item.noteId, item.reason])),
+    [referenceRecommendations],
+  )
+
   const notesByUrl = React.useMemo(
     () => new Map(notes.map((note) => [note.sourceUrl, note])),
     [notes],
@@ -869,18 +882,43 @@ export function LearnWorkspace({
     return map
   }, [notesByUrl, snippets])
 
+  const selectableItemIdsByNoteId = React.useMemo(
+    () =>
+      new Map(
+        notes.map((note) => {
+          const noteSnippets = snippetsByNoteUrl.get(note.sourceUrl) ?? []
+          return [
+            note.id,
+            noteSnippets.length > 0
+              ? noteSnippets.map((snippet) => `snippet:${snippet.id}`)
+              : [`note:${note.id}`],
+          ] as const
+        }),
+      ),
+    [notes, snippetsByNoteUrl],
+  )
+
+  const selectedReferenceNotes = React.useMemo(
+    () =>
+      notes.flatMap((note) => {
+        const itemIds = selectableItemIdsByNoteId.get(note.id) ?? []
+        return itemIds.some((itemId) => selectedItemIdSet.has(itemId))
+          ? [{ itemIds, note }]
+          : []
+      }),
+    [notes, selectableItemIdsByNoteId, selectedItemIdSet],
+  )
+  const selectedReferenceNoteIdSet = React.useMemo(
+    () => new Set(selectedReferenceNotes.map(({ note }) => note.id)),
+    [selectedReferenceNotes],
+  )
+
   const activeFolder = React.useMemo(
     () => folders.find((folder) => folder.id === folderFilterId),
     [folderFilterId, folders],
   )
 
-  const activeTag = React.useMemo(
-    () => tabs.find((tab) => tab.id === activeTab),
-    [activeTab, tabs],
-  )
-
-  const isFiltered = folderFilterId !== 'all' || activeTab !== 'all'
-  const activeFilterCount = Number(folderFilterId !== 'all') + Number(activeTab !== 'all')
+  const isFolderFiltered = folderFilterId !== 'all'
 
   const activeTabItems = React.useMemo<RenderItem[]>(() => {
     return notes
@@ -912,6 +950,7 @@ export function LearnWorkspace({
 
         return {
           id: `${activeTab}:${note.id}`,
+          noteId: note.id,
           title: note.title,
           folderName: note.folderName,
           itemIds,
@@ -931,9 +970,30 @@ export function LearnWorkspace({
       .filter(Boolean) as RenderItem[]
   }, [activeTab, folderFilterId, notes, selectedItemIdSet, selectedSnippetIdSet, snippetsByNoteUrl])
 
+  const sortedActiveTabItems = React.useMemo(
+    () =>
+      [...activeTabItems].sort(
+        (first, second) =>
+          Number(recommendationByNoteId.has(second.noteId)) -
+          Number(recommendationByNoteId.has(first.noteId)),
+      ),
+    [activeTabItems, recommendationByNoteId],
+  )
+  const visibleReferenceItems = React.useMemo(
+    () =>
+      showAllReferences
+        ? sortedActiveTabItems
+        : sortedActiveTabItems.filter(
+            (item) =>
+              recommendationByNoteId.has(item.noteId) ||
+              selectedReferenceNoteIdSet.has(item.noteId),
+          ),
+    [recommendationByNoteId, selectedReferenceNoteIdSet, showAllReferences, sortedActiveTabItems],
+  )
+
   const activeResultItemIds = React.useMemo(
-    () => getUniqueValues(activeTabItems.flatMap((item) => item.itemIds)),
-    [activeTabItems],
+    () => getUniqueValues(visibleReferenceItems.flatMap((item) => item.itemIds)),
+    [visibleReferenceItems],
   )
 
   const activeResultSelectedCount = React.useMemo(
@@ -958,14 +1018,6 @@ export function LearnWorkspace({
 
     return '当前筛选下没有文案。'
   }, [libraryError, libraryStatus, notes.length])
-
-  const filterSummary = React.useMemo(() => {
-    if (!isFiltered) return '未筛选'
-
-    return [activeFolder?.name, activeTag && activeTag.id !== 'all' ? activeTag.fullLabel : '']
-      .filter(Boolean)
-      .join(' · ')
-  }, [activeFolder?.name, activeTag, isFiltered])
 
   const setupMessages = React.useMemo(
     () =>
@@ -994,8 +1046,15 @@ export function LearnWorkspace({
     if (isAnalyzing) {
       const isLongWait = analysisWaitSeconds >= 30
       return {
-        title: isLongWait ? 'AI 正在处理' : '正在拆解文案',
-        text: '正在整理结构和偏好。',
+        title: isLongWait
+          ? '仍在生成初稿'
+          : selectedItemIds.length > 0
+            ? '正在学习参考并生成'
+            : '正在生成初稿',
+        text:
+          selectedItemIds.length > 0
+            ? '正在提炼所选素材的写法，并应用到这次需求。'
+            : '正在整理这次需求和已有写作偏好。',
         variant: 'analysis' as const,
       }
     }
@@ -1026,43 +1085,49 @@ export function LearnWorkspace({
       title: '正在整理回答',
       variant: 'dots' as const,
     }
-  }, [analysisMessages.length, analysisReady, analysisWaitSeconds, chatMessages, isAnalyzing, isStreaming])
+  }, [
+    analysisMessages.length,
+    analysisReady,
+    analysisWaitSeconds,
+    chatMessages,
+    isAnalyzing,
+    isStreaming,
+    selectedItemIds.length,
+  ])
 
   const filterControl = (
     <div className="relative">
       <Button
         type="button"
-        variant={isFiltered ? 'subtle' : 'outline'}
+        variant={isFolderFiltered ? 'subtle' : 'outline'}
         size="sm"
         className={cn(
           'min-w-[6.75rem] shadow-[0_8px_18px_rgba(48,34,22,0.04)]',
-          isFiltered
+          isFolderFiltered
             ? 'border-[rgba(77,120,242,0.22)] bg-[rgba(103,199,255,0.18)] text-[#566174] hover:bg-[rgba(103,199,255,0.24)]'
             : 'border-[var(--border)] bg-white/82 text-[var(--foreground)] hover:bg-white/92',
         )}
         aria-haspopup="dialog"
         aria-expanded={isFilterOpen}
         aria-label={
-          isFiltered
-            ? `筛选，已启用 ${activeFilterCount} 个筛选条件：${filterSummary}`
-            : '筛选'
+          isFolderFiltered ? `按文件夹筛选，当前为 ${activeFolder?.name ?? '未知文件夹'}` : '按文件夹筛选'
         }
         onClick={() => setIsFilterOpen((current) => !current)}
       >
         <Funnel
           className={cn(
             'h-4 w-4 shrink-0',
-            isFiltered ? 'text-[#566174]' : 'text-[var(--soft-foreground)]',
+            isFolderFiltered ? 'text-[#566174]' : 'text-[var(--soft-foreground)]',
           )}
         />
-        <span>{isFiltered ? `${activeFilterCount} 筛选` : '筛选'}</span>
+        <span className="max-w-32 truncate">{activeFolder?.name ?? '文件夹'}</span>
       </Button>
 
       {isFilterOpen ? (
         <div
-          className="ui-popover-motion absolute right-0 top-[calc(100%+0.65rem)] z-40 w-[min(38rem,calc(100vw-4rem))] rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/96 p-[var(--ui-panel-inset)] shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+          className="ui-popover-motion absolute right-0 top-[calc(100%+var(--ui-gap-control))] z-40 w-[min(28rem,calc(100vw-4rem))] rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/96 p-[var(--ui-panel-inset)] shadow-[0_22px_54px_rgba(48,34,22,0.12)] backdrop-blur-xl"
           role="dialog"
-          aria-label="筛选文案"
+          aria-label="按文件夹筛选文案"
         >
           <div className="grid gap-[var(--ui-panel-gap)]">
             <div>
@@ -1104,48 +1169,14 @@ export function LearnWorkspace({
               </div>
             </div>
 
-            <div>
-              <div className="mb-2 text-xs font-semibold text-[var(--soft-foreground)]">
-                按标注标签
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {tabs.map((tab) => (
-                  <Button
-                    key={tab.id}
-                    type="button"
-                    title={tab.fullLabel}
-                    onClick={() => setActiveTab(tab.id)}
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'shadow-none',
-                      activeTab === tab.id
-                        ? 'bg-[var(--foreground)] text-white hover:bg-[var(--foreground)]'
-                        : 'bg-[var(--secondary)] text-[var(--muted-foreground)] hover:bg-white',
-                    )}
-                  >
-                    {tab.colorValue ? (
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: tab.colorValue }}
-                      />
-                    ) : null}
-                    {tab.fullLabel}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
             <div className="flex justify-between gap-3 border-t border-[var(--border)] pt-3">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  setFolderFilterId('all')
-                  setActiveTab('all')
-                }}
+                disabled={!isFolderFiltered}
+                onClick={() => setFolderFilterId('all')}
               >
-                清空筛选
+                显示全部文件夹
               </Button>
               <Button size="sm" onClick={() => setIsFilterOpen(false)}>
                 完成
@@ -1158,29 +1189,52 @@ export function LearnWorkspace({
   )
 
   return (
-    <div className="grid h-[100dvh] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)] lg:grid-cols-[328px_minmax(0,1fr)] lg:grid-rows-1">
-      <aside className="flex min-h-0 max-h-[34vh] flex-col border-b border-[rgba(15,23,42,0.06)] bg-[radial-gradient(circle_at_0%_0%,rgba(103,199,255,0.055),transparent_36%),linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] lg:max-h-none lg:border-b-0 lg:border-r lg:border-r-[rgba(15,23,42,0.06)]">
+    <div className="relative h-[100dvh] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)]">
+      {isSidebarOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="关闭对话列表"
+            onClick={onCloseSidebar}
+            className="fixed inset-0 z-[70] bg-[rgba(15,23,42,0.16)] backdrop-blur-[2px]"
+          />
+          <aside className="fixed inset-y-0 left-0 z-[80] flex w-[min(20rem,calc(100vw-2rem))] min-h-0 flex-col border-r border-[rgba(15,23,42,0.06)] bg-[linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] shadow-[18px_0_60px_rgba(15,23,42,0.12)]">
         <div className="shrink-0 px-6 pb-3 pt-6">
           <div className="flex items-center gap-3 px-1">
             <Button
               variant="secondary"
               size="icon"
-              onClick={onBackToWorkspace}
+              onClick={() => {
+                onCloseSidebar()
+                onBackToWorkspace()
+              }}
               aria-label="返回项目页"
               className="shrink-0"
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-	            <div className="min-w-0">
-	              <p className="truncate text-base font-semibold text-[var(--foreground)]">
-	                {projectName}
-	              </p>
-	            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base font-semibold text-[var(--foreground)]">
+                {projectName}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onCloseSidebar}
+              aria-label="关闭对话列表"
+            >
+              <X className="h-4 w-4" />
+            </Button>
           </div>
 
           <Button
             type="button"
-            onClick={onCreateConversation}
+            onClick={() => {
+              onCreateConversation()
+              onCloseSidebar()
+            }}
             variant="subtle"
             className="mt-7 w-full justify-between border-[var(--border)] bg-[rgba(241,243,246,0.78)] px-[var(--ui-control-px-lg)] text-left shadow-none hover:bg-[rgba(226,232,240,0.9)]"
           >
@@ -1206,6 +1260,7 @@ export function LearnWorkspace({
               const switchToConversation = () => {
                 setOpenConversationMenuId(null)
                 onSwitchConversation(conversation.id)
+                onCloseSidebar()
               }
 
               return (
@@ -1245,6 +1300,7 @@ export function LearnWorkspace({
                   {isRenaming ? (
                     <Input
                       autoFocus
+                      controlSize="sm"
                       value={draftConversationTitle}
                       onChange={(event) => setDraftConversationTitle(event.target.value)}
                       onBlur={() => commitConversationRename(conversation)}
@@ -1259,7 +1315,7 @@ export function LearnWorkspace({
                           cancelConversationRename()
                         }
                       }}
-                      className="relative z-20 h-[var(--ui-control-height-sm)] min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)] font-semibold"
+                      className="relative z-20 min-w-0 flex-1 rounded-[var(--ui-radius-control)] bg-white/86 font-semibold"
                       aria-label="重命名对话"
                     />
                   ) : (
@@ -1318,15 +1374,32 @@ export function LearnWorkspace({
                     ? createPortal(
                         <div
                           data-conversation-menu
-                          className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/95 p-1.5 text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
+                          className="ui-popover-motion fixed z-[100] w-36 overflow-hidden rounded-[var(--ui-radius-panel)] border border-white/84 bg-white/95 p-[var(--ui-space-1)] text-sm font-medium text-[var(--foreground)] shadow-[0_18px_48px_rgba(48,34,22,0.12)] backdrop-blur-xl"
                           role="menu"
                           style={{
                             left: conversationMenuPosition.left,
                             top: conversationMenuPosition.top,
                           }}
                           onClick={(event) => event.stopPropagation()}
-                          onKeyDown={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.key === 'Escape') {
+                              setOpenConversationMenuId(null)
+                              conversationMenuButtonRefs.current.get(conversation.id)?.focus()
+                            }
+                          }}
                         >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              startConversationRename(conversation)
+                            }}
+                            className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
+                          >
+                            重命名
+                          </button>
                           <button
                             type="button"
                             role="menuitem"
@@ -1339,17 +1412,6 @@ export function LearnWorkspace({
                           >
                             {conversation.pinned ? '取消置顶' : '置顶'}
                           </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              startConversationRename(conversation)
-                            }}
-                            className="flex w-full items-center rounded-[var(--ui-radius-item)] px-3 py-2 text-left transition hover:bg-[var(--secondary)]"
-                          >
-                            重命名
-                          </button>
                         </div>,
                         document.body,
                       )
@@ -1359,40 +1421,34 @@ export function LearnWorkspace({
             })}
           </div>
         </div>
-      </aside>
+          </aside>
+        </>
+      ) : null}
 
-      <section className="relative flex min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
+      <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
         {analysisReady || isAnalyzing ? (
           <header className="grid grid-cols-1 items-center gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-6">
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 items-start">
+              <WorkflowHeaderNav
+                onBackToWorkspace={onBackToWorkspace}
+                onOpenSidebar={onOpenSidebar}
+              />
+              <div className="min-w-0 pt-1">
                 <h1 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                  文案分析
+                  正在准备初稿
                 </h1>
-                {!isAnalyzing ? (
-                  <WorkflowTitleMenu
-                    activeStep={activeWorkflowStep}
-                    steps={workflowSteps}
-                    onStepChange={onWorkflowStepChange}
-                  />
+                {analysisReady && !isAnalyzing ? (
+                  <p className="mt-[var(--ui-gap-related)] text-xs text-[var(--soft-foreground)]">
+                    继续补充偏好，或进入下一步
+                  </p>
                 ) : null}
               </div>
-              {analysisReady && !isAnalyzing ? (
-                <p className="mt-1.5 text-xs text-[var(--soft-foreground)]">
-                  继续补充偏好，或进入下一步
-                </p>
-              ) : null}
             </div>
 
             {analysisReady && !isAnalyzing ? (
-              <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
-                <Button variant="secondary" size="sm" onClick={onBackToSelection}>
-                  上一步
-                </Button>
-                <Button size="sm" onClick={onNext} disabled={isStreaming}>
-                  下一步
-                </Button>
-              </div>
+              <Button variant="secondary" size="sm" onClick={onBackToSelection}>
+                修改需求
+              </Button>
             ) : null}
           </header>
         ) : null}
@@ -1415,7 +1471,7 @@ export function LearnWorkspace({
               ) : null}
             </div>
           ) : !analysisReady ? (
-	          <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
+            <div className="mx-auto flex h-full max-w-7xl flex-col gap-4">
               {setupMessages.length > 0 || typingState ? (
                 <div className="flex max-h-[32%] shrink-0 flex-col gap-4 overflow-y-auto pr-1">
                   {setupMessages.map((message) =>
@@ -1437,21 +1493,101 @@ export function LearnWorkspace({
 
               <section className="flex min-h-0 flex-1 flex-col px-3 py-3">
                 <div className="shrink-0">
-	                  <div className="grid gap-1">
-	                    <div className="flex flex-wrap items-center gap-4">
-	                      <h2 className="text-[length:var(--ui-text-section)] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-	                        选择文案
-                      </h2>
-                      <WorkflowTitleMenu
-                        activeStep={activeWorkflowStep}
-                        steps={workflowSteps}
-	                        onStepChange={onWorkflowStepChange}
-	                      />
-	                    </div>
-	                  </div>
+                  <div className="grid gap-1">
+                    <div className="flex flex-wrap items-center gap-[var(--ui-gap-block)]">
+                      <WorkflowHeaderNav
+                        onBackToWorkspace={onBackToWorkspace}
+                        onOpenSidebar={onOpenSidebar}
+                      />
+                      <h1 className="text-[length:var(--ui-text-section)] font-semibold tracking-[-0.04em] text-[var(--foreground)]">
+                        选择参考
+                      </h1>
+                      <Badge variant="outline">可选</Badge>
+                      {canReturnToDraft && onReturnToDraft ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="ml-auto"
+                          onClick={onReturnToDraft}
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                          返回编辑
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className={canReturnToDraft ? undefined : 'ml-auto'}
+                        onClick={onBackToSelection}
+                      >
+                        修改需求
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-1 border-y border-[rgba(15,23,42,0.07)] py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
+                    <span className="text-xs font-semibold text-[var(--soft-foreground)]">本次需求</span>
+                    <p className="line-clamp-2 text-sm leading-6 text-[var(--foreground)]">
+                      {writingRequest}
+                    </p>
+                    <span className="text-xs font-medium text-[var(--soft-foreground)]">
+                      {referenceRecommendations.length > 0
+                        ? `已找到 ${referenceRecommendations.length} 篇较相关素材`
+                        : '暂无高匹配建议，可直接生成'}
+                    </span>
+                  </div>
+
+                  {nonLearningNoteCount > 0 ? (
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs leading-5 text-[var(--muted-foreground)]">
+                      <span>
+                        {nonLearningNoteCount} 篇素材当前不参与 AI 学习，也不会用于推荐和生成。
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" onClick={onOpenLibrary}>
+                        去文案库处理
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {selectedReferenceNotes.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--ui-radius-card)] bg-white/56 px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                      <span className="shrink-0 font-semibold text-[var(--foreground)]">
+                        已选 {selectedReferenceNotes.length} 篇
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                        {selectedReferenceNotes.map(({ itemIds, note }) => (
+                          <span
+                            key={note.id}
+                            className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--border)] bg-white/82 py-1 pl-2.5 pr-1"
+                          >
+                            <span className="max-w-52 truncate">{note.title}</span>
+                            <button
+                              type="button"
+                              className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--secondary)] hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                              aria-label={`移除已选素材 ${note.title}`}
+                              onClick={() => onDeselectItems(itemIds)}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => onDeselectItems(selectedItemIds)}
+                      >
+                        清空
+                      </Button>
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    {showAllReferences || referenceRecommendations.length > 0 ? (
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
                       {visibleTabs.map((tab) => (
                         <Button
                           key={tab.id}
@@ -1485,9 +1621,10 @@ export function LearnWorkspace({
                           onValueChange={(value) => setActiveTab(value)}
                         >
                           <SelectTrigger
+                            controlSize="sm"
                             aria-label="更多标签"
                             className={cn(
-                              'h-[var(--ui-control-height-sm)] w-auto min-w-[5.75rem] gap-[var(--ui-control-gap-sm)] rounded-full border-white/80 bg-white/62 px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-sm)] shadow-none',
+                              'w-auto min-w-[5.75rem] rounded-full border-white/80 bg-white/62 px-[var(--ui-control-inset-x-md)] shadow-none',
                               activeOverflowTab
                                 ? 'font-semibold text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.04)]'
                                 : 'font-medium text-[var(--muted-foreground)]',
@@ -1504,44 +1641,60 @@ export function LearnWorkspace({
                           </SelectContent>
                         </Select>
                       ) : null}
-                    </div>
+                      </div>
+                    ) : <span />}
 
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      {filterControl}
+                    <div className="flex w-full min-w-0 flex-wrap justify-end gap-[var(--ui-gap-control)] sm:w-auto sm:shrink-0">
                       <Button
-                        variant="outline"
+                        type="button"
+                        variant="ghost"
                         size="sm"
-                        className={cn(
-                          'border-[rgba(31,22,17,0.1)] bg-transparent font-semibold shadow-none hover:bg-white/58',
-                          activeResultItemIds.length === 0
-                            ? 'text-[var(--soft-foreground)]'
-                            : 'text-[var(--foreground)]',
-                        )}
-                        disabled={activeResultItemIds.length === 0}
-                        onClick={() => {
-                          if (isActiveResultFullySelected) {
-                            onDeselectItems(activeResultItemIds)
-                            return
-                          }
-
-                          onSelectItems(activeResultItemIds)
-                        }}
+                        onClick={() => setShowAllReferences((current) => !current)}
                       >
-                        {isActiveResultFullySelected ? '取消全选' : '全选'}
+                        {showAllReferences ? '仅看推荐' : '浏览全部素材'}
                       </Button>
+                      {showAllReferences || referenceRecommendations.length > 0 ? (
+                        <>
+                          {filterControl}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              'border-[rgba(31,22,17,0.1)] bg-transparent font-semibold shadow-none hover:bg-white/58',
+                              activeResultItemIds.length === 0
+                                ? 'text-[var(--soft-foreground)]'
+                                : 'text-[var(--foreground)]',
+                            )}
+                            disabled={activeResultItemIds.length === 0}
+                            onClick={() => {
+                              if (isActiveResultFullySelected) {
+                                onDeselectItems(activeResultItemIds)
+                                return
+                              }
+
+                              onSelectItems(activeResultItemIds)
+                            }}
+                          >
+                            {isActiveResultFullySelected ? '取消全选' : '全选'}
+                          </Button>
+                        </>
+                      ) : null}
                       <Button
-                        size="sm"
-                        className="min-w-[5.5rem] font-semibold"
-                        disabled={isStreaming || selectedItemIds.length === 0}
+                        className="min-w-[8.5rem] font-semibold"
+                        disabled={isStreaming}
                         onClick={onStartAnalysis}
                       >
                         {isAnalyzing ? (
                           <>
                             <span className="draft-thinking-dot h-2 w-2 rounded-full bg-current" />
-                            分析中...
+                            正在生成...
                           </>
                         ) : (
-                          analysisError ? '重试本次分析' : '开始分析'
+                          analysisError
+                            ? '重试生成'
+                            : selectedReferenceNotes.length > 0
+                              ? `用 ${selectedReferenceNotes.length} 篇参考生成`
+                              : '直接生成初稿'
                         )}
                       </Button>
                     </div>
@@ -1558,8 +1711,9 @@ export function LearnWorkspace({
 
                 <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1.5">
                   <div className="grid gap-4 xl:grid-cols-2">
-                    {activeTabItems.map((item) => {
+                    {visibleReferenceItems.map((item) => {
                       const checkboxId = `learning-item-${item.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+                      const recommendationReason = recommendationByNoteId.get(item.noteId)
 
                       return (
                         <div
@@ -1571,7 +1725,7 @@ export function LearnWorkspace({
                               : 'border border-[rgba(15,23,42,0.07)] bg-[var(--surface-muted)]',
                           )}
                         >
-                          <div className="flex items-start gap-3.5">
+                          <div className="flex items-start gap-[var(--ui-gap-group)]">
                             <Checkbox
                               id={checkboxId}
                               className="mt-1.5"
@@ -1586,7 +1740,15 @@ export function LearnWorkspace({
                                 <Badge variant={item.selectedCount > 0 ? 'accent' : 'outline'}>
                                   {item.selectedCount > 0 ? '已选' : '未选'}
                                 </Badge>
+                                {recommendationReason ? (
+                                  <Badge variant="accent">基于需求匹配</Badge>
+                                ) : null}
                               </div>
+                              {recommendationReason ? (
+                                <p className="mt-1.5 text-xs leading-5 text-[var(--muted-foreground)]">
+                                  {recommendationReason}
+                                </p>
+                              ) : null}
                               <div className="mt-2 flex flex-wrap gap-2">
                                 <Badge variant="outline">{item.folderName}</Badge>
                                 {item.tags.length > 0 ? (
@@ -1614,9 +1776,11 @@ export function LearnWorkspace({
                         </div>
                       )
                     })}
-                    {activeTabItems.length === 0 ? (
+                    {visibleReferenceItems.length === 0 ? (
                       <div className="rounded-[var(--ui-radius-card)] border border-dashed border-[rgba(31,22,17,0.12)] bg-[var(--surface-muted)] px-5 py-8 text-sm leading-7 text-[var(--muted-foreground)] xl:col-span-2">
-                        {emptyLibraryMessage}
+                        {showAllReferences
+                          ? emptyLibraryMessage
+                          : '没有找到足够相关的参考素材。直接生成更稳妥，也可以点击“浏览全部素材”手动选择。'}
                       </div>
                     ) : null}
                   </div>
@@ -1662,7 +1826,7 @@ export function LearnWorkspace({
                 <Textarea
                   ref={chatInputRef}
                   rows={1}
-                  className="min-h-[3.25rem] max-h-36 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 py-2.5 text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:!border-0 focus:!ring-0 focus:!ring-offset-0 focus:!shadow-none focus-visible:!outline-none focus-visible:!ring-0"
+                  className="min-h-[3.25rem] max-h-36 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:!border-0 focus:!ring-0 focus:!ring-offset-0 focus:!shadow-none focus-visible:!outline-none focus-visible:!ring-0"
                   value={chatInput}
                   onChange={(event) => onChatInputChange(event.target.value)}
                   onKeyDown={(event) => {
@@ -1674,7 +1838,7 @@ export function LearnWorkspace({
                   placeholder="继续提问，或补充你的偏好..."
                   aria-label="继续提问或补充偏好"
                 />
-                <div className="flex items-center justify-between gap-3 px-2 pb-1 pt-1.5">
+                <div className="flex items-center justify-between gap-[var(--ui-gap-group)] px-[var(--ui-space-2)] pb-[var(--ui-space-1)] pt-[var(--ui-space-1)]">
                   <span className="hidden text-xs text-[var(--soft-foreground)] sm:inline">
                     Enter 发送 · Shift + Enter 换行
                   </span>

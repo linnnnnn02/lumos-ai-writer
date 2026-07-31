@@ -26,6 +26,8 @@ export type CloudLibraryState = {
   snippets: SavedSnippetRecord[]
   trashGroups: TrashFolderGroup[]
   error: string
+  isRefreshing: boolean
+  refreshedAt: string
   refresh: () => void
 }
 
@@ -59,6 +61,8 @@ export function useCloudLibrary(): CloudLibraryState {
     user: null,
     ...emptyLibrary,
     error: '',
+    isRefreshing: false,
+    refreshedAt: '',
     refresh,
   })
   const accessTokenRef = useRef('')
@@ -72,13 +76,17 @@ export function useCloudLibrary(): CloudLibraryState {
       requestIdRef.current = requestId
       accessTokenRef.current = accessToken
 
-      setState((current) => ({
-        ...current,
-        status: 'loading',
-        ...emptyLibrary,
-        error: '',
-        refresh,
-      }))
+      setState((current) => {
+        const isBackgroundRefresh = current.status === 'ready'
+        return {
+          ...current,
+          status: isBackgroundRefresh ? 'ready' : 'loading',
+          ...(isBackgroundRefresh ? {} : emptyLibrary),
+          error: '',
+          isRefreshing: isBackgroundRefresh,
+          refresh,
+        }
+      })
 
       try {
         const [me, folders, notes, snippets, trash] = await Promise.all([
@@ -99,18 +107,24 @@ export function useCloudLibrary(): CloudLibraryState {
           snippets: snippets.snippets,
           trashGroups: trash.groups,
           error: '',
+          isRefreshing: false,
+          refreshedAt: new Date().toISOString(),
           refresh,
         })
       } catch (error) {
         if (!isMounted || requestId !== requestIdRef.current) return
 
-        setState((current) => ({
-          ...current,
-          status: 'error',
-          ...emptyLibrary,
-          error: getErrorMessage(error),
-          refresh,
-        }))
+        setState((current) => {
+          const hasCachedLibrary = current.status === 'ready' && Boolean(current.refreshedAt)
+          return {
+            ...current,
+            status: hasCachedLibrary ? 'ready' : 'error',
+            ...(hasCachedLibrary ? {} : emptyLibrary),
+            error: getErrorMessage(error),
+            isRefreshing: false,
+            refresh,
+          }
+        })
       }
     }
 
@@ -122,13 +136,25 @@ export function useCloudLibrary(): CloudLibraryState {
         user: null,
         ...emptyLibrary,
         error: '',
+        isRefreshing: false,
+        refreshedAt: '',
         refresh,
       })
     }
 
-    function refreshOnFocus() {
+    let activationRefreshTimer = 0
+
+    function scheduleActivationRefresh() {
       if (!accessTokenRef.current) return
-      void loadLibrary(accessTokenRef.current)
+      window.clearTimeout(activationRefreshTimer)
+      activationRefreshTimer = window.setTimeout(() => {
+        void loadLibrary(accessTokenRef.current)
+      }, 120)
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState !== 'visible') return
+      scheduleActivationRefresh()
     }
 
     if (authStatus === 'authenticated' && accessToken) {
@@ -137,11 +163,14 @@ export function useCloudLibrary(): CloudLibraryState {
       setGuestState()
     }
 
-    window.addEventListener('focus', refreshOnFocus)
+    window.addEventListener('focus', scheduleActivationRefresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
 
     return () => {
       isMounted = false
-      window.removeEventListener('focus', refreshOnFocus)
+      window.clearTimeout(activationRefreshTimer)
+      window.removeEventListener('focus', scheduleActivationRefresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [accessToken, authStatus, refresh, refreshVersion])
 

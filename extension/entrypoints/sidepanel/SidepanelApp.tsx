@@ -329,7 +329,7 @@ export function SidepanelApp() {
       areaName: string,
     ) {
       if (areaName !== 'local') return
-      if (changes.savedFolders) {
+      if (changes.savedFolders || changes.savedNotes) {
         void loadFolders()
       }
       if (
@@ -428,6 +428,14 @@ export function SidepanelApp() {
   }, [colorTagNames, savedSnippets])
 
   const selectedColorTagName = tagNameByColor.get(selectedColor) || ''
+  const noteCountByFolderId = useMemo(() => {
+    const counts = new Map<string, number>()
+    savedNotes.forEach((note) => {
+      if (!note.folderId) return
+      counts.set(note.folderId, (counts.get(note.folderId) ?? 0) + 1)
+    })
+    return counts
+  }, [savedNotes])
   const tagOptions = useMemo(
     () => COLOR_PRESETS.map((color) => ({ color, tagName: tagNameByColor.get(color) || '' })),
     [tagNameByColor],
@@ -950,7 +958,7 @@ export function SidepanelApp() {
                 >
                   {folders.map((folder) => (
                     <SelectItem key={folder.id} value={folder.id}>
-                      {folder.name} · {folder.noteCount} 篇
+                      {folder.name} · {noteCountByFolderId.get(folder.id) ?? 0} 篇
                     </SelectItem>
                   ))}
                 </SelectContent>

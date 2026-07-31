@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
@@ -23,8 +24,13 @@ const buttonVariants = cva(
         sm:
           'h-[var(--ui-control-height-sm)] gap-[var(--ui-control-gap-sm)] px-[var(--ui-control-inset-x-md)] py-0 text-[length:var(--ui-control-font-sm)]',
         lg:
+          'h-[var(--ui-control-height-lg)] gap-[var(--ui-control-gap-lg)] px-[var(--ui-control-inset-x-lg)] py-0 text-[length:var(--ui-control-font-lg)]',
+        xl:
           'h-[var(--ui-control-height-xl)] gap-[var(--ui-control-gap-xl)] px-[var(--ui-control-inset-x-xl)] py-0 text-[length:var(--ui-control-font-xl)]',
         icon: 'size-[var(--ui-control-height-md)] p-0 text-[length:var(--ui-control-font-md)]',
+        'icon-sm': 'size-[var(--ui-control-height-sm)] p-0 text-[length:var(--ui-control-font-sm)]',
+        'icon-lg': 'size-[var(--ui-control-height-lg)] p-0 text-[length:var(--ui-control-font-lg)]',
+        'icon-xl': 'size-[var(--ui-control-height-xl)] p-0 text-[length:var(--ui-control-font-xl)]',
       },
     },
     defaultVariants: {
@@ -35,18 +41,38 @@ const buttonVariants = cva(
 )
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants>
+  VariantProps<typeof buttonVariants> & {
+    tooltip?: React.ReactNode
+    tooltipSide?: React.ComponentProps<typeof TooltipContent>['side']
+  }
 
 export function Button({
   className,
   variant,
   size,
+  title,
+  tooltip,
+  tooltipSide,
   ...props
 }: ButtonProps) {
-  return (
+  const isIconButton = typeof size === 'string' && size.startsWith('icon')
+  const accessibleName = props['aria-label']
+  const tooltipContent =
+    tooltip ?? (isIconButton && typeof accessibleName === 'string' ? accessibleName : undefined)
+  const button = (
     <button
       className={cn(buttonVariants({ variant, size }), className)}
+      title={tooltipContent ? undefined : title}
       {...props}
     />
+  )
+
+  if (!tooltipContent) return button
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side={tooltipSide}>{tooltipContent}</TooltipContent>
+    </Tooltip>
   )
 }

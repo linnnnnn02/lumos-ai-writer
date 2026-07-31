@@ -98,7 +98,7 @@ export function DraftVersionHistory({
 
   return createPortal(
     <div
-      className="ui-dialog-backdrop fixed inset-0 z-[180] flex items-end justify-center bg-[rgba(28,21,16,0.2)] p-0 backdrop-blur-md sm:items-center sm:px-5 sm:py-8"
+      className="ui-dialog-backdrop fixed inset-0 z-[180] flex items-end justify-center bg-[rgba(28,21,16,0.2)] p-0 backdrop-blur-md sm:items-center sm:px-[var(--ui-page-gutter)] sm:py-[var(--ui-space-8)]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="draft-version-history-title"
@@ -143,7 +143,7 @@ export function DraftVersionHistory({
               className="max-h-[13rem] overflow-y-auto border-b border-[rgba(15,23,42,0.07)] bg-[rgba(241,245,249,0.58)] p-3 md:max-h-none md:border-b-0 md:border-r"
               aria-label="文案版本列表"
             >
-              <div className="grid gap-1.5">
+              <div className="grid gap-[var(--ui-gap-related)]">
                 {orderedVersions.map((version) => {
                   const isSelected = version.id === selectedVersion.id
                   const isCurrent = version.id === currentVersionId
@@ -154,8 +154,8 @@ export function DraftVersionHistory({
                       onClick={() => setSelectedVersionId(version.id)}
                       className={
                         isSelected
-                          ? 'rounded-[var(--ui-radius-control)] bg-white px-3 py-2.5 text-left shadow-[0_8px_24px_rgba(15,23,42,0.06)] ring-1 ring-[rgba(15,23,42,0.08)]'
-                          : 'rounded-[var(--ui-radius-control)] px-3 py-2.5 text-left text-[var(--muted-foreground)] hover:bg-white/68 hover:text-[var(--foreground)]'
+                          ? 'rounded-[var(--ui-radius-control)] bg-white px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left shadow-[0_8px_24px_rgba(15,23,42,0.06)] ring-1 ring-[rgba(15,23,42,0.08)]'
+                          : 'rounded-[var(--ui-radius-control)] px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left text-[var(--muted-foreground)] hover:bg-white/68 hover:text-[var(--foreground)]'
                       }
                       aria-current={isSelected ? 'true' : undefined}
                     >

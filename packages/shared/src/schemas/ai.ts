@@ -2,6 +2,10 @@ import { z } from 'zod'
 import { noteDtoSchema, snippetDtoSchema } from './library.js'
 
 export const projectLengthSchema = z.enum(['short', 'medium', 'long'])
+const aiReferenceNoteSchema = noteDtoSchema.partial({
+  learningStatus: true,
+  qualityFlags: true,
+})
 
 export const aiFeaturedSnippetSchema = z.object({
   quote: z.string().min(1),
@@ -47,7 +51,7 @@ export const analyzeReferencesRequestSchema = z.object({
   topic: z.string().trim().min(1).max(800),
   targetAudience: z.string().trim().min(1).max(800),
   length: projectLengthSchema,
-  notes: z.array(noteDtoSchema).min(1).max(12),
+  notes: z.array(aiReferenceNoteSchema).min(1).max(12),
   snippets: z.array(snippetDtoSchema).max(40),
 })
 
@@ -58,7 +62,7 @@ export const generateDraftRequestSchema = z.object({
   targetAudience: z.string().trim().min(1).max(800),
   length: projectLengthSchema,
   analysis: aiAnalysisResultSchema,
-  notes: z.array(noteDtoSchema).min(1).max(12),
+  notes: z.array(aiReferenceNoteSchema).max(12),
   snippets: z.array(snippetDtoSchema).max(40),
   brief: z.object({
     mustInclude: z.string().trim().max(800),

@@ -1,5 +1,6 @@
 import * as React from 'react'
 import * as SelectPrimitive from '@radix-ui/react-select'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { Check, ChevronDown, ChevronUp } from '@/components/ui/icon'
 import { cn } from '@/lib/utils'
 
@@ -7,17 +8,35 @@ const Select = SelectPrimitive.Root
 const SelectGroup = SelectPrimitive.Group
 const SelectValue = SelectPrimitive.Value
 
+const selectTriggerVariants = cva(
+  'flex w-full items-center justify-between rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--input)] py-0 leading-[var(--ui-leading-control)] text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(15,23,42,0.18)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(15,23,42,0.18)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
+  {
+    variants: {
+      controlSize: {
+        sm: 'h-[var(--ui-control-height-sm)] gap-[var(--ui-control-gap-sm)] px-[var(--ui-control-inset-x-sm)] text-[length:var(--ui-control-font-sm)]',
+        default: 'h-[var(--ui-control-height-md)] gap-[var(--ui-control-gap-md)] px-[var(--ui-control-inset-x-md)] text-[length:var(--ui-control-font-md)]',
+        lg: 'h-[var(--ui-control-height-lg)] gap-[var(--ui-control-gap-lg)] px-[var(--ui-control-inset-x-lg)] text-[length:var(--ui-control-font-lg)]',
+        xl: 'h-[var(--ui-control-height-xl)] gap-[var(--ui-control-gap-xl)] px-[var(--ui-control-inset-x-xl)] text-[length:var(--ui-control-font-xl)]',
+      },
+    },
+    defaultVariants: {
+      controlSize: 'default',
+    },
+  },
+)
+
+type SelectTriggerProps = React.ComponentProps<typeof SelectPrimitive.Trigger> &
+  VariantProps<typeof selectTriggerVariants>
+
 function SelectTrigger({
   className,
   children,
+  controlSize,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
+}: SelectTriggerProps) {
   return (
     <SelectPrimitive.Trigger
-      className={cn(
-        'flex h-[var(--ui-control-height-md)] w-full items-center justify-between gap-[var(--ui-control-gap-md)] rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--input)] px-[var(--ui-control-inset-x-md)] py-0 text-[length:var(--ui-control-font-md)] leading-[var(--ui-leading-control)] text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] outline-none transition placeholder:text-[var(--soft-foreground)] focus:border-[rgba(15,23,42,0.18)] focus:ring-4 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-[rgba(15,23,42,0.18)] data-[state=open]:bg-white/92 data-[state=open]:shadow-[0_16px_36px_rgba(48,34,22,0.075)] [&>span]:line-clamp-1',
-        className,
-      )}
+      className={cn(selectTriggerVariants({ controlSize }), className)}
       {...props}
     >
       {children}
@@ -77,7 +96,7 @@ function SelectContent({
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
           className={cn(
-            'p-1.5',
+            'p-[var(--ui-space-1)]',
             position === 'popper' &&
               'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]',
           )}
@@ -96,7 +115,7 @@ function SelectLabel({
 }: React.ComponentProps<typeof SelectPrimitive.Label>) {
   return (
     <SelectPrimitive.Label
-      className={cn('px-2 py-1.5 text-[length:var(--ui-text-caption)] font-semibold text-[var(--soft-foreground)]', className)}
+      className={cn('px-[var(--ui-space-2)] py-[var(--ui-space-1)] text-[length:var(--ui-text-caption)] font-semibold text-[var(--soft-foreground)]', className)}
       {...props}
     />
   )
@@ -110,7 +129,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex min-h-[var(--ui-control-height-sm)] w-full cursor-default select-none items-center rounded-[var(--ui-radius-item)] py-[var(--ui-space-1-5)] pl-8 pr-[var(--ui-space-2)] text-[length:var(--ui-control-font-md)] text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--foreground)] data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--foreground)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex min-h-[var(--ui-control-height-sm)] w-full cursor-default select-none items-center rounded-[var(--ui-radius-item)] py-[var(--ui-space-1)] pl-8 pr-[var(--ui-space-2)] text-[length:var(--ui-control-font-md)] text-[var(--foreground)] outline-none transition focus:bg-[var(--accent-soft)] focus:text-[var(--foreground)] data-[highlighted]:bg-[var(--accent-soft)] data-[highlighted]:text-[var(--foreground)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

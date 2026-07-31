@@ -20,6 +20,7 @@ export type CloudWorkspaceState = {
   projects: WorkspaceProjectDto[]
   feedbackMemories: FeedbackMemoryDto[]
   error: string
+  errorVersion: number
   isSaving: boolean
   savedAt: string
   refresh: () => void
@@ -41,9 +42,24 @@ export function useCloudWorkspace(): CloudWorkspaceState {
   const [projects, setProjects] = useState<WorkspaceProjectDto[]>([])
   const [feedbackMemories, setFeedbackMemories] = useState<FeedbackMemoryDto[]>([])
   const [error, setError] = useState('')
+  const [errorVersion, setErrorVersion] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
   const requestIdRef = useRef(0)
+  const hasActiveErrorRef = useRef(false)
+
+  const clearError = useCallback(() => {
+    hasActiveErrorRef.current = false
+    setError('')
+  }, [])
+
+  const reportError = useCallback((nextError: unknown) => {
+    if (!hasActiveErrorRef.current) {
+      hasActiveErrorRef.current = true
+      setErrorVersion((current) => current + 1)
+    }
+    setError(getErrorMessage(nextError))
+  }, [])
 
   const refresh = useCallback(() => {
     setRefreshVersion((current) => current + 1)
@@ -55,33 +71,33 @@ export function useCloudWorkspace(): CloudWorkspaceState {
     }
 
     setIsSaving(true)
-    setError('')
     try {
       const response = await syncWorkspace(accessToken, input)
+      clearError()
       setSavedAt(response.syncedAt)
     } catch (nextError) {
-      setError(getErrorMessage(nextError))
+      reportError(nextError)
       throw nextError
     } finally {
       setIsSaving(false)
     }
-  }, [accessToken, authStatus])
+  }, [accessToken, authStatus, clearError, reportError])
 
   const remember = useCallback(async (input: CreateFeedbackMemoryRequest) => {
     if (authStatus !== 'authenticated' || !accessToken) {
       throw new Error('登录状态已过期，请重新登录后再记录偏好。')
     }
 
-    setError('')
     try {
       const response = await createFeedbackMemory(accessToken, input)
+      clearError()
       setFeedbackMemories((current) => [response.memory, ...current])
       return response.memory
     } catch (nextError) {
-      setError(getErrorMessage(nextError))
+      reportError(nextError)
       throw nextError
     }
-  }, [accessToken, authStatus])
+  }, [accessToken, authStatus, clearError, reportError])
 
   useEffect(() => {
     let isMounted = true
@@ -92,7 +108,7 @@ export function useCloudWorkspace(): CloudWorkspaceState {
       setUserId('')
       setProjects([])
       setFeedbackMemories([])
-      setError('')
+      clearError()
       setSavedAt('')
     }
 
@@ -101,7 +117,7 @@ export function useCloudWorkspace(): CloudWorkspaceState {
       requestIdRef.current = requestId
       setStatus('loading')
       setUserId(nextUserId)
-      setError('')
+      clearError()
 
       try {
         const response = await getWorkspace(accessToken)
@@ -113,7 +129,7 @@ export function useCloudWorkspace(): CloudWorkspaceState {
       } catch (nextError) {
         if (!isMounted || requestIdRef.current !== requestId) return
         setStatus('error')
-        setError(getErrorMessage(nextError))
+        reportError(nextError)
       }
     }
 
@@ -126,7 +142,7 @@ export function useCloudWorkspace(): CloudWorkspaceState {
     return () => {
       isMounted = false
     }
-  }, [accessToken, authStatus, authenticatedUserId, refreshVersion])
+  }, [accessToken, authStatus, authenticatedUserId, clearError, refreshVersion, reportError])
 
   return {
     status,
@@ -134,6 +150,7 @@ export function useCloudWorkspace(): CloudWorkspaceState {
     projects,
     feedbackMemories,
     error,
+    errorVersion,
     isSaving,
     savedAt,
     refresh,

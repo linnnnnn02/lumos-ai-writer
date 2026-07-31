@@ -135,7 +135,7 @@ function PasswordField({
         </label>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold text-[var(--accent-strong)] transition hover:bg-[var(--accent-soft)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+          className="inline-flex min-h-[var(--ui-control-height-sm)] items-center gap-[var(--ui-gap-related)] rounded-full px-[var(--ui-space-2)] py-0 text-xs font-semibold text-[var(--accent-strong)] transition hover:bg-[var(--accent-soft)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
           onClick={onToggleVisibility}
           aria-label={`${visible ? '隐藏' : '显示'}${label}`}
         >
@@ -497,7 +497,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
   return (
     <div className={cn('relative flex items-center justify-end', className)}>
       {session ? (
-        <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/76 bg-white/76 px-2 py-1.5 shadow-[0_12px_28px_rgba(48,34,22,0.05)] backdrop-blur-xl">
+        <div className="flex min-w-0 items-center gap-[var(--ui-gap-control)] rounded-full border border-white/76 bg-white/76 px-[var(--ui-space-2)] py-[var(--ui-space-1)] shadow-[0_12px_28px_rgba(48,34,22,0.05)] backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2 pl-1">
             <img
               src={avatarUrl}
@@ -523,8 +523,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
           </div>
           <Button
             variant="ghost"
-            size="icon"
-            className="size-[var(--ui-control-height-sm)]"
+            size="icon-sm"
             onClick={handleSignOut}
             disabled={isSigningOut}
             aria-label="退出登录"
@@ -548,7 +547,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
 
       {dialogOpen ? (
         <div
-          className="ui-dialog-backdrop fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-[rgba(28,21,16,0.18)] px-4 py-4 backdrop-blur-md sm:py-6"
+          className="ui-dialog-backdrop fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-[rgba(28,21,16,0.18)] px-[var(--ui-page-gutter)] py-[var(--ui-space-4)] backdrop-blur-md sm:py-[var(--ui-space-6)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="auth-dialog-title"
@@ -576,8 +575,8 @@ export function AuthStatus({ className }: AuthStatusProps) {
               {!recoveryLocked ? (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="size-[var(--ui-control-height-sm)] shrink-0"
+                  size="icon-sm"
+                  className="shrink-0"
                   aria-label="关闭登录窗口"
                   onClick={closeDialog}
                 >
@@ -594,7 +593,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    'h-[var(--ui-control-height-sm)] shadow-none',
+                    'shadow-none',
                     view === 'signin'
                       ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                       : 'text-[var(--muted-foreground)] hover:bg-white/58',
@@ -608,7 +607,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    'h-[var(--ui-control-height-sm)] shadow-none',
+                    'shadow-none',
                     view === 'signup'
                       ? 'bg-white text-[var(--foreground)] shadow-[0_8px_18px_rgba(48,34,22,0.05)] hover:bg-white'
                       : 'text-[var(--muted-foreground)] hover:bg-white/58',
@@ -737,7 +736,7 @@ export function AuthStatus({ className }: AuthStatusProps) {
                   <Button
                     type="button"
                     variant="subtle"
-                    className="h-auto w-full justify-between whitespace-normal px-3 py-2.5 text-left shadow-none"
+                    className="h-auto w-full justify-between whitespace-normal px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left shadow-none"
                     onClick={() => switchView('recovery-request')}
                   >
                     <span className="grid gap-0.5">
