@@ -373,6 +373,11 @@ export function SidepanelApp() {
         )
         if (hasNewPendingSelection) {
           setPanelView('capture')
+          activeCloudSyncJobIdRef.current = null
+          activeCloudSyncJobRef.current = null
+          setIsCloudSyncing(false)
+          setAnnotationFeedback('')
+          setAnnotationCloudSync({ status: 'idle', jobId: null, error: '' })
         }
         void loadAnnotationData()
         if (hasNewPendingSelection) {
@@ -409,7 +414,6 @@ export function SidepanelApp() {
         } else if (previousJob) {
           setIsCloudSyncing(false)
           setAnnotationCloudSync({ status: 'synced', jobId: previousJob.id, error: '' })
-          setCloudFeedback('已同步到云端。')
         }
 
         if (failedCount > 0 && currentJob?.status !== 'failed') {
@@ -651,6 +655,7 @@ export function SidepanelApp() {
     setSavedSnippets(nextSnippets)
     setTagNameDraft(nextTagName)
     setIsEditingTagName(false)
+    setAnnotationCloudSync({ status: 'idle', jobId: null, error: '' })
     setAnnotationFeedback('标签名已更新。')
   }
 
@@ -658,11 +663,8 @@ export function SidepanelApp() {
     if (isSavingAnnotationRef.current) return
 
     if (!pendingSelection) {
-      const currentFolder = folders.find((folder) => folder.id === folderId)
       setAnnotationFeedback(
-        savedAnnotationSelection
-          ? `已保存到「${currentFolder?.name || '文案库'}」。`
-          : '先在正文里选中一段文字。',
+        savedAnnotationSelection ? '' : '先在正文里选中一段文字。',
       )
       return
     }
@@ -756,8 +758,7 @@ export function SidepanelApp() {
       setPendingSelection(null)
       setTagNameDraft(nextTagName)
       setIsEditingTagName(false)
-      const localSavedMessage = `已保存到「${activeFolder?.name || '文案库'}」。`
-      setAnnotationFeedback(localSavedMessage)
+      setAnnotationFeedback('')
 
       if (cloudAuthState.status !== 'authenticated') {
         activeCloudSyncJobIdRef.current = null
@@ -1405,34 +1406,37 @@ export function SidepanelApp() {
                     : 'primary-button annotation-save-button'
                 }
                 type="button"
-                aria-label={annotationStatus === 'saved' ? '保存标注，已保存' : '保存标注'}
-                disabled={isAnnotationSaving}
+                aria-label={annotationStatus === 'saved' ? '标注已保存' : '保存标注'}
+                disabled={isAnnotationSaving || annotationStatus === 'saved'}
                 onClick={() => {
                   void handleSaveAnnotation()
                 }}
               >
                 <span className="annotation-save-button-label">
-                  {isAnnotationSaving ? '保存中...' : '保存标注'}
+                  {isAnnotationSaving ? (
+                    '保存中...'
+                  ) : annotationStatus === 'saved' ? (
+                    <>
+                      <span className="annotation-save-complete-icon" aria-hidden="true" />
+                      已保存
+                    </>
+                  ) : (
+                    '保存标注'
+                  )}
                 </span>
-                {annotationStatus === 'saved' ? (
-                  <span className="annotation-save-badge" aria-hidden="true">
-                    <span className="annotation-save-badge-check" />
-                    已保存
-                  </span>
-                ) : null}
               </button>
               <span className="annotation-save-status-text" role="status" aria-live="polite">
                 {annotationStatus === 'saved' ? '已保存' : ''}
               </span>
             </div>
-            {annotationFeedback ? (
+            {annotationFeedback || annotationCloudSync.status !== 'idle' ? (
               <div className="feedback annotation-feedback" role="status" aria-live="polite">
-                <span>{annotationFeedback}</span>
+                {annotationFeedback ? <span>{annotationFeedback}</span> : null}
                 {annotationCloudSync.status === 'syncing' ? (
-                  <span className="annotation-cloud-state syncing">正在同步到云端...</span>
+                  <span className="annotation-cloud-state syncing">云端同步中...</span>
                 ) : null}
                 {annotationCloudSync.status === 'synced' ? (
-                  <span className="annotation-cloud-state synced">已同步到云端。</span>
+                  <span className="annotation-cloud-state synced">云端已同步</span>
                 ) : null}
                 {annotationCloudSync.status === 'failed' ? (
                   <span className="annotation-cloud-state failed">
