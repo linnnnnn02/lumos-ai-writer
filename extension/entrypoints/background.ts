@@ -1,11 +1,12 @@
 import { defineBackground } from 'wxt/utils/define-background'
-import { syncAnnotationToCloud } from '../lib/cloud-api'
-import { getStoredCloudAccessToken } from '../lib/cloud-session'
+import { getCloudTrash, syncAnnotationToCloud } from '../lib/cloud-api'
+import { getValidCloudAccessToken } from '../lib/cloud-session'
 import {
   getAnnotationCloudSyncQueue,
   saveAnnotationCloudSyncQueue,
   type AnnotationCloudSyncJob,
 } from '../lib/cloud-sync-queue'
+import { applyCloudTrashSnapshot } from '../lib/cloud-trash-storage'
 
 export default defineBackground(() => {
   type RuntimeMessage =
@@ -30,6 +31,9 @@ export default defineBackground(() => {
     | {
         type: 'XHS_PROCESS_ANNOTATION_SYNC_QUEUE'
       }
+    | {
+        type: 'XHS_REFRESH_CLOUD_TRASH'
+      }
 
   type FetchNoteCoverResponse =
     | {
@@ -43,6 +47,37 @@ export default defineBackground(() => {
 
   let queueMutationChain: Promise<void> = Promise.resolve()
   let queueProcessingPromise: Promise<void> | null = null
+  let cloudTrashRefreshPromise: Promise<{
+    authenticated: boolean
+    deletedFolderCount: number
+    deletedNoteCount: number
+  }> | null = null
+
+  function refreshCloudTrash() {
+    if (cloudTrashRefreshPromise) return cloudTrashRefreshPromise
+
+    cloudTrashRefreshPromise = (async () => {
+      const token = await getValidCloudAccessToken()
+      if (!token) {
+        return {
+          authenticated: false,
+          deletedFolderCount: 0,
+          deletedNoteCount: 0,
+        }
+      }
+
+      const trash = await getCloudTrash(token)
+      const result = await applyCloudTrashSnapshot(trash.groups)
+      return {
+        authenticated: true,
+        ...result,
+      }
+    })().finally(() => {
+      cloudTrashRefreshPromise = null
+    })
+
+    return cloudTrashRefreshPromise
+  }
 
   function mutateSyncQueue<T>(
     mutation: (queue: AnnotationCloudSyncJob[]) => {
@@ -127,7 +162,7 @@ export default defineBackground(() => {
       const job = await claimNextAnnotationSync()
       if (!job) return
 
-      const token = await getStoredCloudAccessToken()
+      const token = await getValidCloudAccessToken()
       if (!token) {
         await failAnnotationSync(job.id, '云端登录已过期，请在插件中重新登录。')
         continue
@@ -353,11 +388,13 @@ export default defineBackground(() => {
     console.info('Lumos AI Writer extension installed')
     void enableSidePanelBehavior()
     void retryAnnotationSync()
+    void refreshCloudTrash().catch(() => undefined)
   })
 
   chrome.runtime.onStartup?.addListener(() => {
     void enableSidePanelBehavior()
     void retryAnnotationSync()
+    void refreshCloudTrash().catch(() => undefined)
   })
 
   chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
@@ -401,6 +438,18 @@ export default defineBackground(() => {
       return true
     }
 
+    if (message.type === 'XHS_REFRESH_CLOUD_TRASH') {
+      void refreshCloudTrash()
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法读取云端回收站。',
+          })
+        })
+      return true
+    }
+
     if (message.type === 'XHS_OPEN_SIDE_PANEL') {
       void openSidePanel(sender.tab?.id).then((ok) => {
         sendResponse({ ok })
@@ -416,4 +465,5 @@ export default defineBackground(() => {
   })
 
   void startAnnotationSyncQueue()
+  void refreshCloudTrash().catch(() => undefined)
 })

@@ -664,7 +664,46 @@ export function OptionsApp() {
   }
 
   useEffect(() => {
-    void loadData()
+    void (async () => {
+      await loadData()
+      if (typeof chrome === 'undefined') return
+
+      try {
+        await chrome.runtime?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+        await loadData()
+      } catch {
+        // The local library stays available when cloud refresh is temporarily unavailable.
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      typeof document === 'undefined' ||
+      typeof chrome === 'undefined'
+    ) {
+      return
+    }
+
+    function requestCloudTrashRefresh() {
+      void chrome.runtime
+        ?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+        .then(() => loadData())
+        .catch(() => undefined)
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState !== 'visible') return
+      requestCloudTrashRefresh()
+    }
+
+    window.addEventListener('focus', requestCloudTrashRefresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('focus', requestCloudTrashRefresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [])
 
   useEffect(() => {
