@@ -1,10 +1,12 @@
 import { createClient, type Session } from '@supabase/supabase-js'
 import type { CurrentUser, PublicConfigResponse } from '@lumos-ai/shared'
-
-const CLOUD_SESSION_STORAGE_KEY = 'lumosCloudSession'
-const CLOUD_USER_STORAGE_KEY = 'lumosCloudUser'
-const LOCAL_API_BASE_URL = 'http://localhost:8788/api'
-const PRODUCTION_API_BASE_URL = 'https://lumos-ai-writer.pages.dev/api'
+import { getCloudApiBaseUrl } from './cloud-config'
+import {
+  CLOUD_SESSION_STORAGE_KEY,
+  CLOUD_USER_STORAGE_KEY,
+  getCloudStorageValue,
+  setCloudStorageValue,
+} from './cloud-session'
 
 export type CloudAuthState =
   | {
@@ -15,53 +17,6 @@ export type CloudAuthState =
       status: 'unauthenticated'
       user: null
     }
-
-function hasChromeStorage() {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local)
-}
-
-async function getStorageValue<T>(key: string): Promise<T | null> {
-  if (hasChromeStorage()) {
-    const data = await chrome.storage.local.get(key)
-    return (data[key] as T | undefined) ?? null
-  }
-
-  try {
-    const raw = globalThis.localStorage?.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : null
-  } catch {
-    return null
-  }
-}
-
-async function setStorageValue<T>(key: string, value: T | null) {
-  if (hasChromeStorage()) {
-    if (value === null) {
-      await chrome.storage.local.remove(key)
-      return
-    }
-    await chrome.storage.local.set({ [key]: value })
-    return
-  }
-
-  try {
-    if (value === null) {
-      globalThis.localStorage?.removeItem(key)
-    } else {
-      globalThis.localStorage?.setItem(key, JSON.stringify(value))
-    }
-  } catch {
-    // Extension preview can still render even when localStorage is unavailable.
-  }
-}
-
-export function getCloudApiBaseUrl() {
-  const env = (import.meta as unknown as {
-    env?: Record<string, string | undefined>
-  }).env
-  const fallbackUrl = env?.COMMAND === 'serve' ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL
-  return (env?.WXT_PUBLIC_API_BASE_URL || fallbackUrl).replace(/\/+$/, '')
-}
 
 async function getPublicConfig(): Promise<PublicConfigResponse> {
   const response = await fetch(`${getCloudApiBaseUrl()}/v1/config/public`)
@@ -111,8 +66,8 @@ async function createSupabaseAuthClient() {
 }
 
 export async function getCloudAuthState(): Promise<CloudAuthState> {
-  const user = await getStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY)
-  const session = await getStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
+  const user = await getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY)
+  const session = await getCloudStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
 
   if (!user || !session?.access_token) {
     return { status: 'unauthenticated', user: null }
@@ -123,8 +78,8 @@ export async function getCloudAuthState(): Promise<CloudAuthState> {
 
 async function saveCloudSession(session: Session) {
   await Promise.all([
-    setStorageValue(CLOUD_SESSION_STORAGE_KEY, session),
-    setStorageValue(CLOUD_USER_STORAGE_KEY, toCurrentUser(session)),
+    setCloudStorageValue(CLOUD_SESSION_STORAGE_KEY, session),
+    setCloudStorageValue(CLOUD_USER_STORAGE_KEY, toCurrentUser(session)),
   ])
 }
 
@@ -147,13 +102,13 @@ export async function signInToCloud(email: string, password: string): Promise<Cl
 
 export async function signOutFromCloud() {
   await Promise.all([
-    setStorageValue(CLOUD_SESSION_STORAGE_KEY, null),
-    setStorageValue(CLOUD_USER_STORAGE_KEY, null),
+    setCloudStorageValue(CLOUD_SESSION_STORAGE_KEY, null),
+    setCloudStorageValue(CLOUD_USER_STORAGE_KEY, null),
   ])
 }
 
 export async function getValidCloudAccessToken() {
-  const session = await getStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
+  const session = await getCloudStorageValue<Session>(CLOUD_SESSION_STORAGE_KEY)
   if (!session?.access_token) return null
 
   const expiresAtMs = (session.expires_at ?? 0) * 1000

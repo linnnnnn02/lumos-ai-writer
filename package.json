@@ -19,6 +19,7 @@
     "check:deploy": "pnpm typecheck && pnpm typecheck:pages && pnpm lint && pnpm build:pages",
     "check:extension-artifact": "node scripts/check-extension-artifact.mjs",
     "test:cors": "pnpm --filter @lumos-ai/api test:cors",
+    "test:annotation-sync": "pnpm --filter @lumos-ai/api test:annotation-sync",
     "check:p0": "node scripts/check-p0.mjs",
     "eval:skills": "pnpm --filter @lumos-ai/api eval:skills",
     "smoke:p0": "node scripts/smoke-p0.mjs",

@@ -33,6 +33,8 @@ import {
   rewriteDraftResponseSchema,
   syncWorkspaceRequestSchema,
   syncWorkspaceResponseSchema,
+  syncAnnotationRequestSchema,
+  syncAnnotationResponseSchema,
   updateFolderRequestSchema,
   updateFolderResponseSchema,
   updateNoteLearningStatusRequestSchema,
@@ -85,6 +87,7 @@ import {
   recordAiRun,
   restoreFolder,
   restoreNote,
+  syncAnnotation,
   SupabaseSchemaMissingError,
   updateFolder,
   updateNoteLearningStatus,
@@ -855,6 +858,31 @@ export function createApiApp() {
     try {
       const snippet = await createSnippet(config, user, body)
       return c.json(createSnippetResponseSchema.parse({ ok: true, snippet }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      throw error
+    }
+  })
+
+  app.post('/v1/annotation-sync', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Cloud sync is unavailable.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, syncAnnotationRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const result = await syncAnnotation(config, user, body)
+      return c.json(syncAnnotationResponseSchema.parse({ ok: true, ...result }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
       throw error

@@ -1,4 +1,11 @@
 import { defineBackground } from 'wxt/utils/define-background'
+import { syncAnnotationToCloud } from '../lib/cloud-api'
+import { getStoredCloudAccessToken } from '../lib/cloud-session'
+import {
+  getAnnotationCloudSyncQueue,
+  saveAnnotationCloudSyncQueue,
+  type AnnotationCloudSyncJob,
+} from '../lib/cloud-sync-queue'
 
 export default defineBackground(() => {
   type RuntimeMessage =
@@ -12,6 +19,17 @@ export default defineBackground(() => {
         type: 'XHS_FETCH_NOTE_COVER'
         sourceUrl?: string
       }
+    | {
+        type: 'XHS_QUEUE_ANNOTATION_SYNC'
+        job: Pick<AnnotationCloudSyncJob, 'id' | 'folder' | 'note' | 'snippet'>
+      }
+    | {
+        type: 'XHS_RETRY_ANNOTATION_SYNC'
+        jobId?: string
+      }
+    | {
+        type: 'XHS_PROCESS_ANNOTATION_SYNC_QUEUE'
+      }
 
   type FetchNoteCoverResponse =
     | {
@@ -22,6 +40,140 @@ export default defineBackground(() => {
         ok: false
         error: string
       }
+
+  let queueMutationChain: Promise<void> = Promise.resolve()
+  let queueProcessingPromise: Promise<void> | null = null
+
+  function mutateSyncQueue<T>(
+    mutation: (queue: AnnotationCloudSyncJob[]) => {
+      queue: AnnotationCloudSyncJob[]
+      value: T
+    },
+  ) {
+    const operation = queueMutationChain.then(async () => {
+      const queue = await getAnnotationCloudSyncQueue()
+      const result = mutation(queue)
+      await saveAnnotationCloudSyncQueue(result.queue)
+      return result.value
+    })
+
+    queueMutationChain = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
+  }
+
+  async function enqueueAnnotationSync(
+    input: Pick<AnnotationCloudSyncJob, 'id' | 'folder' | 'note' | 'snippet'>,
+  ) {
+    await mutateSyncQueue((queue) => ({
+      queue: [
+        ...queue.filter((job) => job.id !== input.id),
+        {
+          ...input,
+          status: 'pending',
+          attempts: 0,
+          lastError: '',
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      value: undefined,
+    }))
+  }
+
+  function claimNextAnnotationSync() {
+    return mutateSyncQueue<AnnotationCloudSyncJob | null>((queue) => {
+      const index = queue.findIndex((job) => job.status !== 'failed')
+      if (index < 0) return { queue, value: null }
+
+      const claimed = {
+        ...queue[index],
+        status: 'syncing' as const,
+        attempts: queue[index].attempts + 1,
+        updatedAt: new Date().toISOString(),
+      }
+      const nextQueue = [...queue]
+      nextQueue[index] = claimed
+      return { queue: nextQueue, value: claimed }
+    })
+  }
+
+  async function completeAnnotationSync(jobId: string) {
+    await mutateSyncQueue((queue) => ({
+      queue: queue.filter((job) => job.id !== jobId),
+      value: undefined,
+    }))
+  }
+
+  async function failAnnotationSync(jobId: string, error: string) {
+    await mutateSyncQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: 'failed' as const,
+              lastError: error,
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+  }
+
+  async function processAnnotationSyncQueue() {
+    while (true) {
+      const job = await claimNextAnnotationSync()
+      if (!job) return
+
+      const token = await getStoredCloudAccessToken()
+      if (!token) {
+        await failAnnotationSync(job.id, '云端登录已过期，请在插件中重新登录。')
+        continue
+      }
+
+      try {
+        await syncAnnotationToCloud(token, job)
+        await completeAnnotationSync(job.id)
+      } catch (error) {
+        await failAnnotationSync(
+          job.id,
+          error instanceof Error ? error.message : '网络异常，请稍后重试。',
+        )
+      }
+    }
+  }
+
+  function startAnnotationSyncQueue() {
+    if (queueProcessingPromise) return queueProcessingPromise
+    queueProcessingPromise = processAnnotationSyncQueue().finally(() => {
+      queueProcessingPromise = null
+      void getAnnotationCloudSyncQueue().then((queue) => {
+        if (queue.some((job) => job.status !== 'failed')) {
+          void startAnnotationSyncQueue()
+        }
+      }).catch(() => undefined)
+    })
+    return queueProcessingPromise
+  }
+
+  async function retryAnnotationSync(jobId?: string) {
+    await mutateSyncQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.status === 'failed' && (!jobId || job.id === jobId)
+          ? {
+              ...job,
+              status: 'pending' as const,
+              lastError: '',
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+    void startAnnotationSyncQueue()
+  }
 
   function cleanText(text: string | null | undefined) {
     return (text ?? '').replace(/\s+/g, ' ').trim()
@@ -200,13 +352,55 @@ export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener(() => {
     console.info('Lumos AI Writer extension installed')
     void enableSidePanelBehavior()
+    void retryAnnotationSync()
   })
 
   chrome.runtime.onStartup?.addListener(() => {
     void enableSidePanelBehavior()
+    void retryAnnotationSync()
   })
 
   chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+    if (message.type === 'XHS_QUEUE_ANNOTATION_SYNC' && 'job' in message) {
+      void enqueueAnnotationSync(message.job)
+        .then(() => {
+          sendResponse({ ok: true })
+          void startAnnotationSyncQueue()
+        })
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法加入同步队列。',
+          })
+        })
+      return true
+    }
+
+    if (message.type === 'XHS_RETRY_ANNOTATION_SYNC') {
+      const jobId = 'jobId' in message ? message.jobId : undefined
+      void retryAnnotationSync(jobId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法重试云端同步。',
+          })
+        })
+      return true
+    }
+
+    if (message.type === 'XHS_PROCESS_ANNOTATION_SYNC_QUEUE') {
+      void startAnnotationSyncQueue()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法处理云端同步队列。',
+          })
+        })
+      return true
+    }
+
     if (message.type === 'XHS_OPEN_SIDE_PANEL') {
       void openSidePanel(sender.tab?.id).then((ok) => {
         sendResponse({ ok })
@@ -220,4 +414,6 @@ export default defineBackground(() => {
       return true
     }
   })
+
+  void startAnnotationSyncQueue()
 })

@@ -22,6 +22,11 @@ import {
   saveNotes,
   saveSnippets,
 } from '../../lib/storage'
+import {
+  ANNOTATION_SYNC_QUEUE_STORAGE_KEY,
+  getAnnotationCloudSyncQueue,
+  type AnnotationCloudSyncJob,
+} from '../../lib/cloud-sync-queue'
 import { Input } from '../../components/ui/input'
 import {
   Select,
@@ -39,7 +44,6 @@ import {
   signOutFromCloud,
   type CloudAuthState,
 } from '../../lib/cloud-auth'
-import { syncAnnotationToCloud } from '../../lib/cloud-api'
 
 const defaultFolders = createDefaultFolders()
 const UNTITLED_NOTE_TITLE = '无标题'
@@ -62,6 +66,12 @@ type ExtractState = {
 }
 
 type PanelView = 'capture' | 'result'
+
+type AnnotationCloudSyncState = {
+  status: 'idle' | 'syncing' | 'synced' | 'failed'
+  jobId: string | null
+  error: string
+}
 
 type NoteDraft = {
   title: string
@@ -173,7 +183,13 @@ export function SidepanelApp() {
   const [cloudFeedback, setCloudFeedback] = useState('')
   const [isCloudSigningIn, setIsCloudSigningIn] = useState(false)
   const [isCloudSyncing, setIsCloudSyncing] = useState(false)
+  const [failedCloudSyncCount, setFailedCloudSyncCount] = useState(0)
   const [isAnnotationSaving, setIsAnnotationSaving] = useState(false)
+  const [annotationCloudSync, setAnnotationCloudSync] = useState<AnnotationCloudSyncState>({
+    status: 'idle',
+    jobId: null,
+    error: '',
+  })
   const [extractState, setExtractState] = useState<ExtractState>({
     status: 'idle',
     note: null,
@@ -185,6 +201,10 @@ export function SidepanelApp() {
   const latestExtractRequestRef = useRef(0)
   const lastExtractedNoteUrlRef = useRef('')
   const isSavingAnnotationRef = useRef(false)
+  const activeCloudSyncJobIdRef = useRef<string | null>(null)
+  const activeCloudSyncJobRef = useRef<
+    Pick<AnnotationCloudSyncJob, 'id' | 'folder' | 'note' | 'snippet'> | null
+  >(null)
 
   async function loadFolders() {
     const normalizedFolders = await getSavedFolders()
@@ -324,6 +344,14 @@ export function SidepanelApp() {
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return
 
+    void getAnnotationCloudSyncQueue().then((queue) => {
+      const failedCount = queue.filter((job) => job.status === 'failed').length
+      setFailedCloudSyncCount(failedCount)
+      if (failedCount > 0) {
+        setCloudFeedback(`${failedCount} 条内容等待重新同步。`)
+      }
+    })
+
     function handleStorageChange(
       changes: Record<string, chrome.storage.StorageChange>,
       areaName: string,
@@ -349,6 +377,43 @@ export function SidepanelApp() {
         void loadAnnotationData()
         if (hasNewPendingSelection) {
           void handleExtract()
+        }
+      }
+
+      if (changes[ANNOTATION_SYNC_QUEUE_STORAGE_KEY]) {
+        const jobId = activeCloudSyncJobIdRef.current
+        const oldQueue =
+          (changes[ANNOTATION_SYNC_QUEUE_STORAGE_KEY].oldValue as
+            | AnnotationCloudSyncJob[]
+            | undefined) ?? []
+        const newQueue =
+          (changes[ANNOTATION_SYNC_QUEUE_STORAGE_KEY].newValue as
+            | AnnotationCloudSyncJob[]
+            | undefined) ?? []
+        const previousJob = oldQueue.find((job) => job.id === jobId)
+        const currentJob = newQueue.find((job) => job.id === jobId)
+        const failedCount = newQueue.filter((job) => job.status === 'failed').length
+        setFailedCloudSyncCount(failedCount)
+
+        if (currentJob?.status === 'failed') {
+          setIsCloudSyncing(false)
+          setAnnotationCloudSync({
+            status: 'failed',
+            jobId: currentJob.id,
+            error: currentJob.lastError,
+          })
+          setCloudFeedback(`云端同步失败：${currentJob.lastError}`)
+        } else if (currentJob) {
+          setIsCloudSyncing(true)
+          setAnnotationCloudSync({ status: 'syncing', jobId: currentJob.id, error: '' })
+        } else if (previousJob) {
+          setIsCloudSyncing(false)
+          setAnnotationCloudSync({ status: 'synced', jobId: previousJob.id, error: '' })
+          setCloudFeedback('已同步到云端。')
+        }
+
+        if (failedCount > 0 && currentJob?.status !== 'failed') {
+          setCloudFeedback(`${failedCount} 条内容等待重新同步。`)
         }
       }
     }
@@ -528,6 +593,7 @@ export function SidepanelApp() {
       setCloudAuthState(nextAuthState)
       setCloudPassword('')
       setCloudFeedback('云端已连接。')
+      void chrome.runtime.sendMessage({ type: 'XHS_RETRY_ANNOTATION_SYNC' })
     } catch (error) {
       setCloudFeedback(`登录失败：${getErrorMessage(error)}`)
     } finally {
@@ -540,6 +606,26 @@ export function SidepanelApp() {
     setCloudAuthState({ status: 'unauthenticated', user: null })
     setCloudPassword('')
     setCloudFeedback('已退出云端同步。')
+  }
+
+  async function refreshCloudTokenForSync() {
+    try {
+      const token = await getValidCloudAccessToken()
+      if (!token) {
+        setIsCloudSyncing(false)
+        setCloudAuthState({ status: 'unauthenticated', user: null })
+        setCloudFeedback('云端登录已过期，请重新登录。')
+        return false
+      }
+
+      const nextAuthState = await getCloudAuthState()
+      setCloudAuthState(nextAuthState)
+      return true
+    } catch (error) {
+      setIsCloudSyncing(false)
+      setCloudFeedback(`云端连接异常：${getErrorMessage(error)}`)
+      return false
+    }
   }
 
   async function handleSaveTagName() {
@@ -671,44 +757,91 @@ export function SidepanelApp() {
       setTagNameDraft(nextTagName)
       setIsEditingTagName(false)
       const localSavedMessage = `已保存到「${activeFolder?.name || '文案库'}」。`
+      setAnnotationFeedback(localSavedMessage)
 
       if (cloudAuthState.status !== 'authenticated') {
-        setAnnotationFeedback(localSavedMessage)
+        activeCloudSyncJobIdRef.current = null
+        setAnnotationCloudSync({ status: 'idle', jobId: null, error: '' })
         return
       }
 
-      setIsCloudSyncing(true)
-      setAnnotationFeedback(`${localSavedMessage} 正在同步...`)
-
-      try {
-        const token = await getValidCloudAccessToken()
-        if (!token) {
-          setCloudAuthState({ status: 'unauthenticated', user: null })
-          setCloudFeedback('云端登录已过期，请重新登录。')
-          setAnnotationFeedback(`${localSavedMessage} 云端登录已过期，请重新登录。`)
-          return
-        }
-
-        await syncAnnotationToCloud(token, {
-          folder: activeFolder ?? null,
-          note: nextNote,
-          snippet: record,
-        })
-        setCloudFeedback('已同步到云端。')
-        setAnnotationFeedback(`${localSavedMessage} 已同步到云端。`)
-      } catch (error) {
-        const message = getErrorMessage(error)
-        setCloudFeedback(`云端同步失败：${message}`)
-        setAnnotationFeedback(`${localSavedMessage} 云端同步失败：${message}`)
-      } finally {
-        setIsCloudSyncing(false)
+      const syncJob = {
+        id: record.id,
+        folder: activeFolder ?? null,
+        note: nextNote,
+        snippet: record,
       }
+      activeCloudSyncJobIdRef.current = record.id
+      activeCloudSyncJobRef.current = syncJob
+      setIsCloudSyncing(true)
+      setAnnotationCloudSync({ status: 'syncing', jobId: record.id, error: '' })
+      void chrome.runtime
+        .sendMessage({ type: 'XHS_QUEUE_ANNOTATION_SYNC', job: syncJob })
+        .then((response) => {
+          if (response?.ok) return
+          const message = response?.error || '无法启动云端同步。'
+          setIsCloudSyncing(false)
+          setAnnotationCloudSync({ status: 'failed', jobId: record.id, error: message })
+          setCloudFeedback(`云端同步失败：${message}`)
+        })
+        .catch((error) => {
+          const message = getErrorMessage(error)
+          setIsCloudSyncing(false)
+          setAnnotationCloudSync({ status: 'failed', jobId: record.id, error: message })
+          setCloudFeedback(`云端同步失败：${message}`)
+        })
+      void refreshCloudTokenForSync().then((ready) => {
+        if (!ready) return
+        void chrome.runtime.sendMessage({
+          type: 'XHS_RETRY_ANNOTATION_SYNC',
+          jobId: record.id,
+        })
+      })
     } finally {
       setIsAnnotationSaving(false)
       window.setTimeout(() => {
         isSavingAnnotationRef.current = false
       }, 300)
     }
+  }
+
+  function handleRetryAnnotationSync() {
+    const syncJob = activeCloudSyncJobRef.current
+    if (!annotationCloudSync.jobId || !syncJob) return
+    setIsCloudSyncing(true)
+    setAnnotationCloudSync((current) => ({ ...current, status: 'syncing', error: '' }))
+    setCloudFeedback('正在重新同步...')
+    void refreshCloudTokenForSync().then((ready) => {
+      if (!ready) return
+      void chrome.runtime
+        .sendMessage({ type: 'XHS_QUEUE_ANNOTATION_SYNC', job: syncJob })
+        .then((response) => {
+          if (response?.ok) return
+          throw new Error(response?.error || '无法重新加入同步队列。')
+        })
+        .catch((error) => {
+          const message = getErrorMessage(error)
+          setIsCloudSyncing(false)
+          setAnnotationCloudSync((current) => ({ ...current, status: 'failed', error: message }))
+          setCloudFeedback(`云端同步失败：${message}`)
+        })
+      })
+  }
+
+  function handleRetryAllAnnotationSyncs() {
+    setCloudFeedback('正在重新同步...')
+    void refreshCloudTokenForSync().then((ready) => {
+      if (!ready) return
+      void chrome.runtime
+        .sendMessage({ type: 'XHS_RETRY_ANNOTATION_SYNC' })
+        .then((response) => {
+          if (response?.ok) return
+          throw new Error(response?.error || '无法重试云端同步。')
+        })
+        .catch((error) => {
+          setCloudFeedback(`云端同步失败：${getErrorMessage(error)}`)
+        })
+      })
   }
 
   async function handleCancelAnnotation() {
@@ -881,9 +1014,20 @@ export function SidepanelApp() {
           </form>
         )}
         {cloudFeedback ? (
-          <p className={cloudFeedbackIsError ? 'cloud-feedback error' : 'cloud-feedback'}>
-            {cloudFeedback}
-          </p>
+          <div className="cloud-feedback-row">
+            <p className={cloudFeedbackIsError ? 'cloud-feedback error' : 'cloud-feedback'}>
+              {cloudFeedback}
+            </p>
+            {failedCloudSyncCount > 0 && cloudAuthState.status === 'authenticated' ? (
+              <button
+                className="cloud-sync-retry-button"
+                type="button"
+                onClick={handleRetryAllAnnotationSyncs}
+              >
+                重试
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </section>
     )
@@ -1268,7 +1412,7 @@ export function SidepanelApp() {
                 }}
               >
                 <span className="annotation-save-button-label">
-                  {isAnnotationSaving ? (isCloudSyncing ? '同步中...' : '保存中...') : '保存标注'}
+                  {isAnnotationSaving ? '保存中...' : '保存标注'}
                 </span>
                 {annotationStatus === 'saved' ? (
                   <span className="annotation-save-badge" aria-hidden="true">
@@ -1281,7 +1425,25 @@ export function SidepanelApp() {
                 {annotationStatus === 'saved' ? '已保存' : ''}
               </span>
             </div>
-            {annotationFeedback ? <p className="feedback annotation-feedback">{annotationFeedback}</p> : null}
+            {annotationFeedback ? (
+              <div className="feedback annotation-feedback" role="status" aria-live="polite">
+                <span>{annotationFeedback}</span>
+                {annotationCloudSync.status === 'syncing' ? (
+                  <span className="annotation-cloud-state syncing">正在同步到云端...</span>
+                ) : null}
+                {annotationCloudSync.status === 'synced' ? (
+                  <span className="annotation-cloud-state synced">已同步到云端。</span>
+                ) : null}
+                {annotationCloudSync.status === 'failed' ? (
+                  <span className="annotation-cloud-state failed">
+                    云端同步失败，本机内容已保留。
+                    <button type="button" onClick={handleRetryAnnotationSync}>
+                      重试
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </>
         ) : (
           <div className="annotation-empty">

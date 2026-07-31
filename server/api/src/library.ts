@@ -10,6 +10,7 @@ import {
   type NoteLearningStatus,
   type NoteQualityFlag,
   type SnippetDto,
+  type SyncAnnotationRequest,
   type TrashFolderGroup,
   type UpdateFolderRequest,
   type UpdateNoteLearningStatusRequest,
@@ -861,6 +862,7 @@ export async function createSnippet(
   const { data, error } = await supabase
     .from('snippets')
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       user_id: user.id,
       note_id: note?.id ?? null,
       selected_text: input.selectedText,
@@ -873,9 +875,73 @@ export async function createSnippet(
     .select(snippetSelectColumns)
     .single()
 
+  if (error?.code === '23505' && input.id) {
+    const existingResult = await supabase
+      .from('snippets')
+      .select(snippetSelectColumns)
+      .eq('user_id', user.id)
+      .eq('id', input.id)
+      .maybeSingle()
+
+    assertNoDatabaseError(existingResult.error)
+    const existingSnippet = existingResult.data as SnippetRow | null
+    if (existingSnippet) {
+      let existingNote: NoteLookupRow | null = null
+      if (existingSnippet.note_id) {
+        const noteResult = await supabase
+          .from('notes')
+          .select('id,source_url,title,author_name,deleted_at')
+          .eq('user_id', user.id)
+          .eq('id', existingSnippet.note_id)
+          .maybeSingle()
+
+        assertNoDatabaseError(noteResult.error)
+        existingNote = noteResult.data as NoteLookupRow | null
+      }
+      return toSnippetDto(existingSnippet, existingNote)
+    }
+  }
+
   assertNoDatabaseError(error)
 
   return toSnippetDto(data as SnippetRow, note)
+}
+
+export async function syncAnnotation(
+  config: AppConfig,
+  user: User,
+  input: SyncAnnotationRequest,
+) {
+  const supabase = getAdminClient(config)
+  const folderResult = await supabase
+    .from('folders')
+    .select('id,name,updated_at')
+    .eq('user_id', user.id)
+    .eq('name', input.folderName)
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  assertNoDatabaseError(folderResult.error)
+  const existingFolder = folderResult.data as FolderRow | null
+  const folder = existingFolder
+    ? { id: existingFolder.id, name: existingFolder.name }
+    : await createFolder(config, user, { name: input.folderName })
+  const note = await upsertNote(config, user, {
+    ...input.note,
+    folderId: folder.id,
+  })
+  const snippet = await createSnippet(config, user, {
+    ...input.snippet,
+    noteId: note.id,
+  })
+
+  return {
+    folder: { id: folder.id, name: folder.name },
+    note,
+    snippet,
+  }
 }
 
 export async function updateSnippet(
