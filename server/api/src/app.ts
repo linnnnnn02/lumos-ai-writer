@@ -124,6 +124,7 @@ const localCorsOrigins = [
   'http://localhost:4173',
   'http://127.0.0.1:4173',
 ]
+const chromeExtensionOriginPattern = /^chrome-extension:\/\/[a-p]{32}$/
 
 function getOAuthProviders(rawProviders: string): OAuthProvider[] {
   return rawProviders
@@ -145,7 +146,9 @@ function normalizeOrigin(value: string) {
 function normalizeCorsOrigin(value: string) {
   const trimmedValue = value.trim().replace(/\/+$/, '')
   if (!trimmedValue) return null
-  if (trimmedValue.startsWith('chrome-extension://')) return trimmedValue
+  if (trimmedValue.startsWith('chrome-extension://')) {
+    return chromeExtensionOriginPattern.test(trimmedValue) ? trimmedValue : null
+  }
   return normalizeOrigin(trimmedValue)
 }
 
@@ -171,6 +174,12 @@ function getAllowedCorsOrigin(origin: string, config: ApiVariables['config'] | n
   ])
 
   if (allowedOrigins.has(normalizedOrigin)) return origin
+  if (
+    config?.CORS_ALLOW_CHROME_EXTENSIONS &&
+    chromeExtensionOriginPattern.test(normalizedOrigin)
+  ) {
+    return origin
+  }
   if (isLocalDev && normalizedOrigin.startsWith('chrome-extension://')) return origin
 
   return null

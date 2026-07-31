@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck Cloudflare Pages Function
         run: pnpm typecheck:pages
 
+      - name: Test API CORS policy
+        run: pnpm test:cors
+
       - name: Lint
         run: pnpm lint
 

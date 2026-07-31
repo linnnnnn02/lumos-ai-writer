@@ -15,6 +15,7 @@
     "eval:reader-preview": "tsx scripts/eval-reader-preview-skill.ts",
     "eval:ai-pilot": "tsx scripts/eval-ai-pilot.ts",
     "eval:skills": "pnpm eval:analysis && pnpm eval:writer-model && pnpm eval:draft && pnpm eval:rewrite && pnpm eval:reader-preview && pnpm eval:ai-pilot",
+    "test:cors": "tsx scripts/test-cors.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
