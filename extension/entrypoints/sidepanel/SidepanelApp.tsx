@@ -151,6 +151,15 @@ async function getActiveTab() {
   return tab
 }
 
+async function requestCloudTrashRefresh() {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return
+  try {
+    await chrome.runtime.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+  } catch {
+    // Local capture remains available when cloud refresh is temporarily unavailable.
+  }
+}
+
 export function SidepanelApp() {
   const [folders, setFolders] = useState<SavedFolderRecord[]>(defaultFolders)
   const [savedNotes, setSavedNotes] = useState<SavedNoteRecord[]>([])
@@ -317,6 +326,11 @@ export function SidepanelApp() {
   }, [])
 
   useEffect(() => {
+    if (cloudAuthState.status !== 'authenticated') return
+    void requestCloudTrashRefresh()
+  }, [cloudAuthState.status])
+
+  useEffect(() => {
     let isMounted = true
 
     void getCloudAuthState()
@@ -450,6 +464,7 @@ export function SidepanelApp() {
 
     function handleTabActivated() {
       scheduleExtract(250)
+      void requestCloudTrashRefresh()
     }
 
     function handleTabUpdated(tabId: number, changeInfo: TabChangeInfo) {

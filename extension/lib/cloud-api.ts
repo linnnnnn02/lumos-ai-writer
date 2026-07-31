@@ -1,4 +1,5 @@
 import type {
+  ListTrashResponse,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
@@ -62,4 +63,8 @@ export async function syncAnnotationToCloud(
       },
     },
   })
+}
+
+export async function getCloudTrash(token: string) {
+  return requestCloudJson<ListTrashResponse>('/v1/trash', token)
 }

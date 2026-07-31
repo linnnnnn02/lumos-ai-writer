@@ -665,6 +665,38 @@ export function OptionsApp() {
 
   useEffect(() => {
     void loadData()
+    if (typeof chrome === 'undefined') return
+    void chrome.runtime
+      ?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      typeof document === 'undefined' ||
+      typeof chrome === 'undefined'
+    ) {
+      return
+    }
+
+    function requestCloudTrashRefresh() {
+      void chrome.runtime
+        ?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
+        .catch(() => undefined)
+    }
+
+    function refreshWhenVisible() {
+      if (document.visibilityState !== 'visible') return
+      requestCloudTrashRefresh()
+    }
+
+    window.addEventListener('focus', requestCloudTrashRefresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('focus', requestCloudTrashRefresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [])
 
   useEffect(() => {

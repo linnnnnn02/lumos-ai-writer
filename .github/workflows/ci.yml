@@ -39,6 +39,9 @@ jobs:
       - name: Test annotation cloud sync
         run: pnpm test:annotation-sync
 
+      - name: Test cloud trash reconciliation
+        run: pnpm test:cloud-trash-reconcile
+
       - name: Lint
         run: pnpm lint
 
