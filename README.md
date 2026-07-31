@@ -251,6 +251,10 @@ pnpm dev:api
 pnpm dev:extension
 ```
 
+开发命令默认连接 `http://localhost:8788/api`。正式构建默认连接
+`https://lumos-ai-writer.pages.dev/api`，也可以通过
+`WXT_PUBLIC_API_BASE_URL` 覆盖；扩展清单已同时允许本地与线上 API 域名。
+
 生成插件产物后，在 Chrome 扩展程序页面打开“开发者模式”，加载 WXT 输出的 `extension/.output/chrome-mv3` 目录。
 
 如果 Chrome 里同时存在旧插件和新插件，建议禁用或删除旧的 `XHS AI Studio`，只保留 `Lumos AI Writer`，避免保存到旧本地库或点错入口。

@@ -38,3 +38,6 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Verify extension production target
+        run: pnpm check:extension-artifact

@@ -1,5 +1,10 @@
 import { defineConfig } from 'wxt'
 
+const localApiOrigin = 'http://localhost:8788'
+const defaultProductionApiBaseUrl = 'https://lumos-ai-writer.pages.dev/api'
+const productionApiBaseUrl = process.env.WXT_PUBLIC_API_BASE_URL || defaultProductionApiBaseUrl
+const productionApiOrigin = new URL(productionApiBaseUrl).origin
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
@@ -8,12 +13,13 @@ export default defineConfig({
     permissions: ['storage', 'tabs', 'activeTab', 'scripting', 'sidePanel'],
     host_permissions: [
       'https://www.xiaohongshu.com/*',
-      'http://localhost:8788/*',
+      `${localApiOrigin}/*`,
+      `${productionApiOrigin}/*`,
       'https://*.supabase.co/*',
     ],
     content_security_policy: {
       extension_pages:
-        "script-src 'self' 'wasm-unsafe-eval' http://localhost:3000 http://localhost:3001; connect-src 'self' http://localhost:8788 https://*.supabase.co; object-src 'self';",
+        `script-src 'self' 'wasm-unsafe-eval' http://localhost:3000 http://localhost:3001; connect-src 'self' ${localApiOrigin} ${productionApiOrigin} https://*.supabase.co; object-src 'self';`,
       sandbox:
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000 http://localhost:3001; sandbox allow-scripts allow-forms allow-popups allow-modals; child-src 'self';",
     },

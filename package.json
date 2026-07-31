@@ -17,6 +17,7 @@
     "build:pages": "pnpm --filter web build",
     "typecheck:pages": "pnpm --filter @lumos-ai/api exec tsc --noEmit -p ../../tsconfig.cloudflare.json",
     "check:deploy": "pnpm typecheck && pnpm typecheck:pages && pnpm lint && pnpm build:pages",
+    "check:extension-artifact": "node scripts/check-extension-artifact.mjs",
     "check:p0": "node scripts/check-p0.mjs",
     "eval:skills": "pnpm --filter @lumos-ai/api eval:skills",
     "smoke:p0": "node scripts/smoke-p0.mjs",
