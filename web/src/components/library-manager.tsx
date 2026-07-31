@@ -24,7 +24,7 @@ import {
   X,
 } from '@/components/ui/icon'
 import { Badge } from '@/components/ui/badge'
-import { AuthStatus } from '@/components/auth-status'
+import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -92,6 +92,7 @@ type TagTab = {
 }
 
 type LibraryManagerProps = {
+  authCloudSummary?: AuthCloudSummary
   error?: string
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
@@ -455,6 +456,7 @@ function clampSidebarWidth(width: number) {
 }
 
 export function LibraryManager({
+  authCloudSummary,
   error = '',
   folders,
   isRefreshing = false,
@@ -1244,7 +1246,7 @@ export function LibraryManager({
                 {isRefreshing ? '正在同步' : `${refreshedTimeLabel} 已同步`}
               </span>
             ) : null}
-            <AuthStatus />
+            <AuthStatus cloudSummary={authCloudSummary} />
             <Button variant="secondary" size="sm" onClick={onRefresh} disabled={isSyncing}>
               {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
               {isRefreshing ? '同步中' : '刷新'}
