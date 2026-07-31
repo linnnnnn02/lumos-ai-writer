@@ -86,7 +86,7 @@ import { LearnWorkspace } from '@/components/learn-workspace'
 import { ConversationIntake } from '@/components/conversation-intake'
 import { LibraryManager } from '@/components/library-manager'
 import { DraftVersionHistory } from '@/components/draft-version-history'
-import { AuthStatus } from '@/components/auth-status'
+import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
@@ -1869,6 +1869,25 @@ function App() {
   const libraryTrashGroups = isUsingCloudLibrary ? cloudLibrary.trashGroups : []
   const libraryStatus = cloudLibrary.status === 'guest' ? 'demo' : cloudLibrary.status
   const libraryError = isUsingCloudLibrary ? cloudLibrary.error : ''
+  const hasCloudLibraryData = cloudLibrary.status === 'ready' || Boolean(cloudLibrary.refreshedAt)
+  const authCloudSummary: AuthCloudSummary | undefined = isUsingCloudLibrary
+    ? {
+        status:
+          cloudLibrary.status === 'ready'
+            ? 'ready'
+            : cloudLibrary.status === 'error'
+              ? 'error'
+              : 'checking',
+        user: cloudLibrary.user,
+        counts: hasCloudLibraryData
+          ? {
+              folders: cloudLibrary.folders.length,
+              notes: cloudLibrary.notes.length,
+              snippets: cloudLibrary.snippets.length,
+            }
+          : null,
+      }
+    : undefined
   const learningReadyNotes = useMemo(
     () => libraryNotes.filter(isNoteReadyForLearning),
     [libraryNotes],
@@ -6580,7 +6599,7 @@ function App() {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-3">
                 {renderWorkspaceSaveIndicator()}
-                <AuthStatus />
+                <AuthStatus cloudSummary={authCloudSummary} />
               </div>
             </div>
 
@@ -6871,6 +6890,7 @@ function App() {
   function renderLibrary() {
     return (
       <LibraryManager
+        authCloudSummary={authCloudSummary}
         error={libraryError}
         folders={libraryFolders}
         isRefreshing={cloudLibrary.isRefreshing}

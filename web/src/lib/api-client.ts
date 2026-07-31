@@ -36,6 +36,8 @@ import type {
 } from '@lumos-ai/shared'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+const retriableReadStatuses = new Set([500, 502, 503, 504])
+const readRetryDelayMs = 250
 
 class ApiClientError extends Error {
   status: number
@@ -55,25 +57,48 @@ async function requestJson<T>(
     body?: unknown
   } = {},
 ): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: options.method,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  })
-  const data = await response.json()
+  const method = options.method ?? 'GET'
 
-  if (!response.ok) {
-    const message =
-      typeof data?.error?.message === 'string'
-        ? data.error.message
-        : `API request failed with status ${response.status}`
-    throw new ApiClientError(message, response.status)
+  async function execute(attempt: number): Promise<T> {
+    try {
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        method,
+        headers: {
+          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      })
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        if (method === 'GET' && attempt === 0 && retriableReadStatuses.has(response.status)) {
+          await new Promise((resolve) => window.setTimeout(resolve, readRetryDelayMs))
+          return execute(attempt + 1)
+        }
+
+        const message =
+          typeof data?.error?.message === 'string'
+            ? data.error.message
+            : `API request failed with status ${response.status}`
+        throw new ApiClientError(message, response.status)
+      }
+
+      if (data === null) {
+        throw new Error('API returned an invalid JSON response.')
+      }
+
+      return data as T
+    } catch (error) {
+      if (method === 'GET' && attempt === 0 && !(error instanceof ApiClientError)) {
+        await new Promise((resolve) => window.setTimeout(resolve, readRetryDelayMs))
+        return execute(attempt + 1)
+      }
+      throw error
+    }
   }
 
-  return data as T
+  return execute(0)
 }
 
 export function getApiHealth() {

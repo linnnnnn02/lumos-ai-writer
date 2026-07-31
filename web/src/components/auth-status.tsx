@@ -15,7 +15,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { getCurrentUser, getFolders, getNotes, getSnippets } from '@/lib/api-client'
 import { useAuth } from '@/lib/auth-context'
 
 type AuthView =
@@ -29,16 +28,19 @@ type AuthView =
   | 'password-updated'
   | 'recovery-error'
 
-type BackendStatus = 'idle' | 'checking' | 'ready' | 'error'
-
-type CloudCounts = {
-  folders: number
-  notes: number
-  snippets: number
+export type AuthCloudSummary = {
+  status: 'idle' | 'checking' | 'ready' | 'error'
+  user: CurrentUser | null
+  counts: {
+    folders: number
+    notes: number
+    snippets: number
+  } | null
 }
 
 type AuthStatusProps = {
   className?: string
+  cloudSummary?: AuthCloudSummary
 }
 
 type PasswordFieldProps = {
@@ -155,7 +157,7 @@ function PasswordField({
   )
 }
 
-export function AuthStatus({ className }: AuthStatusProps) {
+export function AuthStatus({ className, cloudSummary }: AuthStatusProps) {
   const {
     status: authStatus,
     client,
@@ -168,9 +170,6 @@ export function AuthStatus({ className }: AuthStatusProps) {
     cancelPasswordRecovery,
     signOut,
   } = useAuth()
-  const [backendUser, setBackendUser] = useState<CurrentUser | null>(null)
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>('idle')
-  const [cloudCounts, setCloudCounts] = useState<CloudCounts | null>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [localView, setView] = useState<AuthView>('signin')
   const [email, setEmail] = useState('')
@@ -184,10 +183,10 @@ export function AuthStatus({ className }: AuthStatusProps) {
   const [isSigningOut, setIsSigningOut] = useState(false)
   const [cooldownSeconds, setCooldownSeconds] = useState(0)
 
-  const displayName = useMemo(
-    () => getAuthDisplayName(backendUser, session),
-    [backendUser, session],
-  )
+  const backendUser = cloudSummary?.user ?? null
+  const backendStatus = cloudSummary?.status ?? (session ? 'ready' : 'idle')
+  const cloudCounts = cloudSummary?.counts ?? null
+  const displayName = useMemo(() => getAuthDisplayName(backendUser, session), [backendUser, session])
   const avatarUrl = backendUser?.avatarUrl || getSessionAvatarUrl(session) || '/icon.svg'
   const authConfigured = Boolean(config?.authConfigured && client)
   const oauthProviders = config?.oauthProviders ?? []
@@ -221,45 +220,6 @@ export function AuthStatus({ className }: AuthStatusProps) {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [cooldownSeconds])
-
-  useEffect(() => {
-    if (!session?.access_token) return
-
-    const accessToken = session.access_token
-    let cancelled = false
-
-    async function verifyBackend() {
-      setBackendStatus('checking')
-      setCloudCounts(null)
-      try {
-        const [me, folders, notes, snippets] = await Promise.all([
-          getCurrentUser(accessToken),
-          getFolders(accessToken),
-          getNotes(accessToken),
-          getSnippets(accessToken),
-        ])
-        if (cancelled) return
-        setBackendUser(me.user)
-        setCloudCounts({
-          folders: folders.folders.length,
-          notes: notes.notes.length,
-          snippets: snippets.snippets.length,
-        })
-        setBackendStatus('ready')
-      } catch (error) {
-        if (cancelled) return
-        setBackendStatus('error')
-        setErrorMessage(
-          getFriendlyAuthError(error instanceof Error ? error.message : '云端连接失败'),
-        )
-      }
-    }
-
-    void verifyBackend()
-    return () => {
-      cancelled = true
-    }
-  }, [session?.access_token])
 
   function resetFields() {
     setPassword('')

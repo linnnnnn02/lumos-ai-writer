@@ -67,6 +67,7 @@ export function useCloudLibrary(): CloudLibraryState {
   })
   const accessTokenRef = useRef('')
   const requestIdRef = useRef(0)
+  const activeLoadCountRef = useRef(0)
 
   useEffect(() => {
     let isMounted = true
@@ -75,15 +76,16 @@ export function useCloudLibrary(): CloudLibraryState {
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
       accessTokenRef.current = accessToken
+      activeLoadCountRef.current += 1
 
       setState((current) => {
-        const isBackgroundRefresh = current.status === 'ready'
+        const hasCachedLibrary = Boolean(current.refreshedAt)
         return {
           ...current,
-          status: isBackgroundRefresh ? 'ready' : 'loading',
-          ...(isBackgroundRefresh ? {} : emptyLibrary),
+          status: hasCachedLibrary ? 'ready' : 'loading',
+          ...(hasCachedLibrary ? {} : emptyLibrary),
           error: '',
-          isRefreshing: isBackgroundRefresh,
+          isRefreshing: hasCachedLibrary,
           refresh,
         }
       })
@@ -115,7 +117,7 @@ export function useCloudLibrary(): CloudLibraryState {
         if (!isMounted || requestId !== requestIdRef.current) return
 
         setState((current) => {
-          const hasCachedLibrary = current.status === 'ready' && Boolean(current.refreshedAt)
+          const hasCachedLibrary = Boolean(current.refreshedAt)
           return {
             ...current,
             status: hasCachedLibrary ? 'ready' : 'error',
@@ -125,6 +127,8 @@ export function useCloudLibrary(): CloudLibraryState {
             refresh,
           }
         })
+      } finally {
+        activeLoadCountRef.current = Math.max(0, activeLoadCountRef.current - 1)
       }
     }
 
@@ -145,9 +149,10 @@ export function useCloudLibrary(): CloudLibraryState {
     let activationRefreshTimer = 0
 
     function scheduleActivationRefresh() {
-      if (!accessTokenRef.current) return
+      if (!accessTokenRef.current || activeLoadCountRef.current > 0) return
       window.clearTimeout(activationRefreshTimer)
       activationRefreshTimer = window.setTimeout(() => {
+        if (activeLoadCountRef.current > 0) return
         void loadLibrary(accessTokenRef.current)
       }, 120)
     }
