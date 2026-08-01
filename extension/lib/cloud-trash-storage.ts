@@ -27,7 +27,7 @@ type CloudLibrarySnapshot = {
 }
 
 type PendingCloudLibraryOperation = {
-  action: 'delete' | 'restore'
+  action: 'delete' | 'restore' | 'rename'
   target: {
     type: 'folder' | 'note'
     localId: string
@@ -78,6 +78,7 @@ function buildReconciliationProtection(
   }
 
   pendingOperations.forEach((operation) => {
+    if (operation.action === 'rename') return
     const key = `${operation.action === 'delete' ? 'deleting' : 'restoring'}${
       operation.target.type === 'folder' ? 'FolderIds' : 'NoteIds'
     }` as keyof CloudTrashReconciliationProtection

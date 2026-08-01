@@ -64,6 +64,7 @@ export interface SavedNoteRecord extends ExtractedNoteRecord {
   folderName: string
   filename: string
   savedAt: string
+  updatedAt?: string
   learningStatus?: NoteLearningStatus
   qualityFlags?: NoteQualityFlag[]
 }

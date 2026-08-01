@@ -10,7 +10,7 @@ import { normalizeLibraryNoteUrl } from './cloud-trash-reconcile'
 export const CLOUD_LIBRARY_OPERATION_QUEUE_STORAGE_KEY = 'cloudLibraryOperationQueue'
 export const CLOUD_RESOURCE_IDENTITIES_STORAGE_KEY = 'cloudResourceIdentities'
 
-export type CloudLibraryOperationAction = 'delete' | 'restore'
+export type CloudLibraryOperationAction = 'delete' | 'restore' | 'rename'
 
 export type CloudLibraryOperationTarget =
   | {
@@ -19,12 +19,14 @@ export type CloudLibraryOperationTarget =
       cloudId?: string
       name: string
       noteSourceUrls: string[]
+      renameTo?: string
     }
   | {
       type: 'note'
       localId: string
       cloudId?: string
       sourceUrl: string
+      renameTo?: string
     }
 
 export type CloudLibraryOperationJob = {
@@ -68,6 +70,27 @@ export function createCloudNoteOperationTarget(
     localId: note.id,
     cloudId: note.cloudId,
     sourceUrl: note.sourceUrl,
+  }
+}
+
+export function createCloudFolderRenameTarget(
+  folder: SavedFolderRecord,
+  notes: SavedNoteRecord[],
+  renameTo: string,
+): CloudLibraryOperationTarget {
+  return {
+    ...createCloudFolderOperationTarget(folder, notes),
+    renameTo,
+  }
+}
+
+export function createCloudNoteRenameTarget(
+  note: SavedNoteRecord,
+  renameTo: string,
+): CloudLibraryOperationTarget {
+  return {
+    ...createCloudNoteOperationTarget(note),
+    renameTo,
   }
 }
 

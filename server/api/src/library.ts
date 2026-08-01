@@ -13,6 +13,7 @@ import {
   type SyncAnnotationRequest,
   type TrashFolderGroup,
   type UpdateFolderRequest,
+  type UpdateNoteRequest,
   type UpdateNoteLearningStatusRequest,
   type UpdateSnippetRequest,
   type UpsertNoteRequest,
@@ -158,6 +159,7 @@ function toNoteDto(note: NoteRow, folderName = ''): NoteDto {
     coverImageUrl: note.cover_image_url ?? '',
     contentText: note.content_text ?? '',
     savedAt: note.created_at || note.updated_at,
+    updatedAt: note.updated_at,
     learningStatus,
     qualityFlags,
   }
@@ -600,6 +602,41 @@ export async function listNotes(config: AppConfig, user: User): Promise<NoteDto[
   return ((noteResult.data ?? []) as NoteRow[]).map((note) =>
     toNoteDto(note, note.folder_id ? (folderNames.get(note.folder_id) ?? '') : ''),
   )
+}
+
+export async function updateNote(
+  config: AppConfig,
+  user: User,
+  noteId: string,
+  input: UpdateNoteRequest,
+): Promise<NoteDto> {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('notes')
+    .update(input)
+    .eq('user_id', user.id)
+    .eq('id', noteId)
+    .is('deleted_at', null)
+    .select(noteSelectColumns)
+    .maybeSingle()
+
+  assertNoDatabaseError(error)
+  if (!data) throw new Error('Note not found.')
+
+  const note = data as NoteRow
+  let folderName = ''
+  if (note.folder_id) {
+    const folderResult = await supabase
+      .from('folders')
+      .select('id,name')
+      .eq('user_id', user.id)
+      .eq('id', note.folder_id)
+      .maybeSingle()
+    assertNoDatabaseError(folderResult.error)
+    folderName = ((folderResult.data as FolderNameRow | null) ?? null)?.name ?? ''
+  }
+
+  return toNoteDto(note, folderName)
 }
 
 export async function updateNoteLearningStatus(

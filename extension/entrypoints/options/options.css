@@ -760,6 +760,18 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.folder-rename-form,
+.note-rename-form {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.folder-rename-input {
+  width: min(360px, 52vw);
+}
+
 .library-context-controls {
   display: inline-flex;
   justify-content: flex-end;
@@ -825,6 +837,33 @@ textarea {
   font-size: var(--ui-control-font-sm);
   line-height: var(--ui-leading-control);
   padding: 0 var(--ui-control-inset-x-sm);
+}
+
+.folder-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+}
+
+.quiet-folder-button {
+  min-height: var(--ui-control-height-sm);
+  border: 0;
+  border-radius: var(--ui-field-radius);
+  background: transparent;
+  color: var(--manager-text-soft);
+  font-size: var(--ui-control-font-sm);
+  line-height: var(--ui-leading-control);
+  padding: 0 var(--ui-control-inset-x-sm);
+}
+
+.quiet-folder-button:hover {
+  background: var(--manager-surface-muted);
+  color: var(--manager-text);
+}
+
+.quiet-folder-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .danger-folder-button:hover {
@@ -1364,6 +1403,16 @@ textarea {
   color: #bf5a34;
 }
 
+.note-card-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+}
+
+.note-card-action-group button:not(.note-card-delete-action):hover {
+  color: var(--manager-accent-deep);
+}
+
 .trash-note-card-actions {
   justify-content: flex-end;
   position: relative;
@@ -1500,6 +1549,26 @@ textarea {
   letter-spacing: -0.01em;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.note-detail-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.note-detail-title-row h2 {
+  min-width: 0;
+}
+
+.note-detail-rename {
+  flex: 0 0 auto;
+  color: var(--manager-text-soft);
+}
+
+.note-rename-input {
+  width: min(440px, 48vw);
 }
 
 .note-detail-close {
