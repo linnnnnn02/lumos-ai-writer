@@ -45,6 +45,9 @@ jobs:
       - name: Test extension cloud identity matching
         run: pnpm test:cloud-library-identity
 
+      - name: Test extension cloud library operations
+        run: pnpm test:cloud-library-operations
+
       - name: Test cloud trash reconciliation
         run: pnpm test:cloud-trash-reconcile
 

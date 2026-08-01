@@ -613,6 +613,7 @@ export function SidepanelApp() {
       setCloudPassword('')
       setCloudFeedback('云端已连接。')
       void chrome.runtime.sendMessage({ type: 'XHS_RETRY_ANNOTATION_SYNC' })
+      void chrome.runtime.sendMessage({ type: 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS' })
     } catch (error) {
       setCloudFeedback(`登录失败：${getErrorMessage(error)}`)
     } finally {
