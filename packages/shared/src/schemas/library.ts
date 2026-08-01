@@ -24,6 +24,7 @@ export const noteDtoSchema = z.object({
   coverImageUrl: z.string().optional(),
   contentText: z.string(),
   savedAt: z.string(),
+  updatedAt: z.string().optional(),
   learningStatus: noteLearningStatusSchema.default('ready'),
   qualityFlags: z.array(noteQualityFlagSchema).default([]),
 })
@@ -89,6 +90,20 @@ export const upsertNoteRequestSchema = z.object({
 })
 
 export const upsertNoteResponseSchema = z.object({
+  ok: z.literal(true),
+  note: noteDtoSchema,
+})
+
+export const updateNoteRequestSchema = z
+  .object({
+    filename: z.string().trim().min(1).max(160).optional(),
+    title: z.string().trim().min(1).max(240).optional(),
+  })
+  .refine((input) => input.filename !== undefined || input.title !== undefined, {
+    message: 'At least one note field is required.',
+  })
+
+export const updateNoteResponseSchema = z.object({
   ok: z.literal(true),
   note: noteDtoSchema,
 })
@@ -180,6 +195,8 @@ export type UpdateFolderRequest = z.infer<typeof updateFolderRequestSchema>
 export type UpdateFolderResponse = z.infer<typeof updateFolderResponseSchema>
 export type UpsertNoteRequest = z.infer<typeof upsertNoteRequestSchema>
 export type UpsertNoteResponse = z.infer<typeof upsertNoteResponseSchema>
+export type UpdateNoteRequest = z.infer<typeof updateNoteRequestSchema>
+export type UpdateNoteResponse = z.infer<typeof updateNoteResponseSchema>
 export type UpdateNoteLearningStatusRequest = z.infer<
   typeof updateNoteLearningStatusRequestSchema
 >

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import type { FolderDto, NoteDto, TrashFolderGroup } from '../packages/shared/src/index'
 import {
   createCloudFolderOperationTarget,
+  createCloudFolderRenameTarget,
   createCloudNoteOperationTarget,
+  createCloudNoteRenameTarget,
   resolveCloudLibraryOperationCloudId,
 } from '../extension/lib/cloud-library-operation-queue'
 import { syncCloudLibraryOperation } from '../extension/lib/cloud-api'
@@ -164,6 +166,48 @@ assert.equal(
   'known-cloud-id',
 )
 
+assert.deepEqual(
+  createCloudFolderRenameTarget(
+    {
+      id: 'local-folder',
+      cloudId: 'cloud-folder',
+      name: 'Old folder name',
+      noteCount: 0,
+      updatedAt: '2026-07-31T00:00:00.000Z',
+    },
+    [],
+    'New folder name',
+  ),
+  {
+    type: 'folder',
+    localId: 'local-folder',
+    cloudId: 'cloud-folder',
+    name: 'Old folder name',
+    noteSourceUrls: [],
+    renameTo: 'New folder name',
+  },
+)
+
+assert.equal(
+  createCloudNoteRenameTarget(
+    {
+      id: 'local-note',
+      cloudId: 'cloud-note',
+      folderId: 'local-folder',
+      folderName: 'Local folder',
+      filename: 'Old note name',
+      title: 'Original title',
+      authorName: 'Author',
+      sourceUrl: 'https://example.com/note',
+      coverImageUrl: '',
+      contentText: '',
+      savedAt: '2026-07-31T00:00:00.000Z',
+    },
+    'New note name',
+  ).renameTo,
+  'New note name',
+)
+
 async function testCloudRequests() {
   const requests: Array<{ url: string; init?: RequestInit }> = []
   const originalFetch = globalThis.fetch
@@ -183,6 +227,18 @@ async function testCloudRequests() {
       resourceType: 'folder',
       cloudId: 'cloud-folder',
     })
+    await syncCloudLibraryOperation('test-token', {
+      action: 'rename',
+      resourceType: 'folder',
+      cloudId: 'cloud-folder',
+      name: 'Renamed folder',
+    })
+    await syncCloudLibraryOperation('test-token', {
+      action: 'rename',
+      resourceType: 'note',
+      cloudId: 'cloud-note',
+      filename: 'Renamed note',
+    })
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -192,8 +248,12 @@ async function testCloudRequests() {
     [
       ['https://lumos-ai-writer.pages.dev/api/v1/notes/cloud-note', 'DELETE'],
       ['https://lumos-ai-writer.pages.dev/api/v1/folders/cloud-folder/restore', 'POST'],
+      ['https://lumos-ai-writer.pages.dev/api/v1/folders/cloud-folder', 'PATCH'],
+      ['https://lumos-ai-writer.pages.dev/api/v1/notes/cloud-note', 'PATCH'],
     ],
   )
+  assert.deepEqual(JSON.parse(String(requests[2].init?.body)), { name: 'Renamed folder' })
+  assert.deepEqual(JSON.parse(String(requests[3].init?.body)), { filename: 'Renamed note' })
   assert.equal(
     (requests[0].init?.headers as Record<string, string>).Authorization,
     'Bearer test-token',

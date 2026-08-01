@@ -108,14 +108,33 @@ export default defineBackground(() => {
         }
       }
 
-      const [trash, library, operationQueue, user] = await Promise.all([
+      const [trash, library, operationQueue, annotationQueue, user] = await Promise.all([
         getCloudTrash(token),
         getCloudLibrary(token).catch(() => null),
         getCloudLibraryOperationQueue(),
+        getAnnotationCloudSyncQueue(),
         getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY),
       ])
       if (library) {
-        await applyCloudLibraryIdentitySnapshot(library)
+        await applyCloudLibraryIdentitySnapshot(library, {
+          pendingOperations: [
+            ...operationQueue.filter((job) => job.userId === user?.id),
+            ...annotationQueue.flatMap((job) => [
+              ...(job.folder
+                ? [
+                    {
+                      action: 'rename' as const,
+                      target: { type: 'folder' as const, localId: job.folder.id },
+                    },
+                  ]
+                : []),
+              {
+                action: 'rename' as const,
+                target: { type: 'note' as const, localId: job.note.id },
+              },
+            ]),
+          ],
+        })
       }
       const result = await applyCloudTrashSnapshot(trash.groups, {
         library,
@@ -423,11 +442,34 @@ export default defineBackground(() => {
 
         await rememberCloudResourceId(job.resourceKey, cloudId)
         await updateCloudLibraryOperationIdentity(job.id, cloudId)
-        await syncCloudLibraryOperation(token, {
-          action: job.action,
-          resourceType: job.target.type,
-          cloudId,
-        })
+        if (job.action === 'rename') {
+          const renameTo = job.target.renameTo?.trim()
+          if (!renameTo) {
+            await failCloudLibraryOperation(job.id, '重命名内容为空，已停止同步。')
+            continue
+          }
+          if (job.target.type === 'folder') {
+            await syncCloudLibraryOperation(token, {
+              action: 'rename',
+              resourceType: 'folder',
+              cloudId,
+              name: renameTo,
+            })
+          } else {
+            await syncCloudLibraryOperation(token, {
+              action: 'rename',
+              resourceType: 'note',
+              cloudId,
+              filename: renameTo,
+            })
+          }
+        } else {
+          await syncCloudLibraryOperation(token, {
+            action: job.action,
+            resourceType: job.target.type,
+            cloudId,
+          })
+        }
         await completeCloudLibraryOperation(job.id)
       } catch (error) {
         await deferCloudLibraryOperation(

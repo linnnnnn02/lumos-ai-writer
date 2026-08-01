@@ -7,6 +7,8 @@ import type {
   SavedNoteRecord,
   SavedSnippetRecord,
   SyncAnnotationResponse,
+  UpdateFolderResponse,
+  UpdateNoteResponse,
 } from '@lumos-ai/shared'
 import { getCloudApiBaseUrl } from './cloud-config'
 
@@ -84,15 +86,40 @@ export async function getCloudLibrary(token: string) {
   }
 }
 
+export type SyncCloudLibraryOperationInput =
+  | {
+      action: 'delete' | 'restore'
+      resourceType: 'folder' | 'note'
+      cloudId: string
+    }
+  | {
+      action: 'rename'
+      resourceType: 'folder'
+      cloudId: string
+      name: string
+    }
+  | {
+      action: 'rename'
+      resourceType: 'note'
+      cloudId: string
+      filename: string
+    }
+
 export async function syncCloudLibraryOperation(
   token: string,
-  input: {
-    action: 'delete' | 'restore'
-    resourceType: 'folder' | 'note'
-    cloudId: string
-  },
+  input: SyncCloudLibraryOperationInput,
 ) {
   const resourcePath = input.resourceType === 'folder' ? 'folders' : 'notes'
+  if (input.action === 'rename') {
+    const body =
+      input.resourceType === 'folder' ? { name: input.name } : { filename: input.filename }
+    return requestCloudJson<UpdateFolderResponse | UpdateNoteResponse>(
+      `/v1/${resourcePath}/${input.cloudId}`,
+      token,
+      { method: 'PATCH', body },
+    )
+  }
+
   const actionPath = input.action === 'restore' ? '/restore' : ''
   return requestCloudJson<DeleteResourceResponse>(
     `/v1/${resourcePath}/${input.cloudId}${actionPath}`,

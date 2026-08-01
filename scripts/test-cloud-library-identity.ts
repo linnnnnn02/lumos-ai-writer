@@ -5,7 +5,10 @@ import type {
   SavedFolderRecord,
   SavedNoteRecord,
 } from '../packages/shared/src/index'
-import { buildCloudLibraryIdentityPlan } from '../extension/lib/cloud-library-identity'
+import {
+  applyCloudLibraryIdentitySnapshot,
+  buildCloudLibraryIdentityPlan,
+} from '../extension/lib/cloud-library-identity'
 
 function cloudFolder(id: string, name: string): FolderDto {
   return {
@@ -28,6 +31,7 @@ function cloudNote(id: string, folderId: string, sourceUrl: string): NoteDto {
     coverImageUrl: '',
     contentText: '',
     savedAt: new Date(0).toISOString(),
+    updatedAt: new Date(1).toISOString(),
     learningStatus: 'ready',
     qualityFlags: [],
   }
@@ -112,4 +116,106 @@ assert.deepEqual(plan.folders, [
   { localId: 'empty-folder', cloudId: 'cloud-empty' },
 ])
 
-console.info('Cloud library identity checks passed.')
+async function testCloudNameReconciliation() {
+  const storageState: Record<string, unknown> = {
+    savedFolders: [
+      localFolder('local-folder', 'Local folder', 'cloud-folder'),
+    ],
+    savedNotes: [
+      {
+        ...localNote('local-note', 'local-folder', 'https://example.com/note', 'cloud-note'),
+        filename: 'Local filename',
+        title: 'Local title',
+      },
+    ],
+    savedSnippets: [
+      {
+        id: 'local-snippet',
+        noteUrl: 'https://example.com/note',
+        noteTitle: 'Local title',
+        noteAuthorName: 'Author',
+        selectedText: 'Selected text',
+        reasonText: 'Reason',
+        colorTagName: 'Tag',
+      },
+    ],
+  }
+
+  ;(globalThis as typeof globalThis & { chrome: unknown }).chrome = {
+    storage: {
+      local: {
+        async get(keys: string[]) {
+          return Object.fromEntries(keys.map((key) => [key, storageState[key]]))
+        },
+        async set(values: Record<string, unknown>) {
+          Object.assign(storageState, values)
+        },
+      },
+    },
+  }
+
+  const renamedCloud = {
+    folders: [cloudFolder('cloud-folder', 'Cloud renamed folder')],
+    notes: [
+      {
+        ...cloudNote('cloud-note', 'cloud-folder', 'https://example.com/note'),
+        folderName: 'Cloud renamed folder',
+        filename: 'Cloud renamed filename',
+        title: 'Cloud renamed title',
+      },
+    ],
+  }
+  const result = await applyCloudLibraryIdentitySnapshot(renamedCloud)
+  assert.deepEqual(result, {
+    updatedFolderCount: 1,
+    updatedNoteCount: 1,
+    updatedSnippetCount: 1,
+  })
+  assert.equal((storageState.savedFolders as SavedFolderRecord[])[0].name, 'Cloud renamed folder')
+  assert.deepEqual(
+    (storageState.savedNotes as SavedNoteRecord[]).map((note) => [
+      note.filename,
+      note.title,
+      note.folderName,
+    ]),
+    [['Cloud renamed filename', 'Cloud renamed title', 'Cloud renamed folder']],
+  )
+  assert.equal(
+    (storageState.savedSnippets as Array<{ noteTitle: string }>)[0].noteTitle,
+    'Cloud renamed title',
+  )
+
+  storageState.savedFolders = [
+    { ...localFolder('local-folder', 'Pending local folder', 'cloud-folder'), updatedAt: new Date(2).toISOString() },
+  ]
+  storageState.savedNotes = [
+    {
+      ...localNote('local-note', 'local-folder', 'https://example.com/note', 'cloud-note'),
+      folderName: 'Pending local folder',
+      filename: 'Pending local filename',
+      title: 'Local title',
+      updatedAt: new Date(2).toISOString(),
+    },
+  ]
+  await applyCloudLibraryIdentitySnapshot(renamedCloud, {
+    pendingOperations: [
+      { action: 'rename', target: { type: 'folder', localId: 'local-folder' } },
+      { action: 'rename', target: { type: 'note', localId: 'local-note' } },
+    ],
+  })
+  assert.equal((storageState.savedFolders as SavedFolderRecord[])[0].name, 'Pending local folder')
+  assert.deepEqual(
+    (storageState.savedNotes as SavedNoteRecord[]).map((note) => [
+      note.filename,
+      note.title,
+      note.folderName,
+    ]),
+    [['Pending local filename', 'Local title', 'Pending local folder']],
+  )
+
+  delete (globalThis as typeof globalThis & { chrome?: unknown }).chrome
+}
+
+void testCloudNameReconciliation().then(() => {
+  console.info('Cloud library identity checks passed.')
+})

@@ -55,7 +55,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { FolderIcon } from '../../components/ui/folder-icon'
 import {
   createCloudFolderOperationTarget,
+  createCloudFolderRenameTarget,
   createCloudNoteOperationTarget,
+  createCloudNoteRenameTarget,
   type CloudLibraryOperationAction,
   type CloudLibraryOperationTarget,
 } from '../../lib/cloud-library-operation-queue'
@@ -634,6 +636,8 @@ export function OptionsApp() {
   const [activeTagId, setActiveTagId] = useState('all')
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  const [renamingFolderId, setRenamingFolderId] = useState('')
+  const [folderRenameDraft, setFolderRenameDraft] = useState('')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [detailNoteId, setDetailNoteId] = useState('')
   const [detailTrashEntryId, setDetailTrashEntryId] = useState('')
@@ -644,6 +648,8 @@ export function OptionsApp() {
   const [colorTagNames, setColorTagNames] = useState<Record<string, string>>({})
   const [editingTagName, setEditingTagName] = useState<EditingTagNameDraft | null>(null)
   const [detailFeedback, setDetailFeedback] = useState('')
+  const [isRenamingDetailNote, setIsRenamingDetailNote] = useState(false)
+  const [noteRenameDraft, setNoteRenameDraft] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === 'undefined') return SIDEBAR_WIDTH_DEFAULT
 
@@ -1215,6 +1221,42 @@ export function OptionsApp() {
     await loadData()
   }
 
+  function startFolderRename() {
+    if (!activeFolder) return
+    setRenamingFolderId(activeFolder.id)
+    setFolderRenameDraft(activeFolder.name)
+  }
+
+  async function handleRenameFolder(event?: SyntheticEvent) {
+    event?.preventDefault()
+    const folder = folders.find((entry) => entry.id === renamingFolderId)
+    const name = folderRenameDraft.replace(/\s+/g, ' ').trim()
+    if (!folder || !name) return
+    if (name === folder.name) {
+      setRenamingFolderId('')
+      return
+    }
+
+    await queueCloudLibraryOperation(
+      'rename',
+      createCloudFolderRenameTarget(folder, notes, name),
+    )
+    const updatedAt = new Date().toISOString()
+    await saveFolders(
+      folders.map((entry) =>
+        entry.id === folder.id ? { ...entry, name, updatedAt } : entry,
+      ),
+    )
+    await saveNotes(
+      notes.map((note) =>
+        note.folderId === folder.id ? { ...note, folderName: name } : note,
+      ),
+    )
+    setRenamingFolderId('')
+    setFolderRenameDraft('')
+    await loadData()
+  }
+
   function requestDeleteFolder() {
     if (!activeFolderId || !activeFolder) return
     setConfirmAction({
@@ -1241,6 +1283,8 @@ export function OptionsApp() {
     setReaderSelection(null)
     setDetailFeedback('')
     setEditingTagName(null)
+    setIsRenamingDetailNote(false)
+    setNoteRenameDraft('')
   }
 
   function openTrashNoteDetail(entry: TrashNoteEntry) {
@@ -1252,6 +1296,8 @@ export function OptionsApp() {
     setReaderSelection(null)
     setDetailFeedback('')
     setEditingTagName(null)
+    setIsRenamingDetailNote(false)
+    setNoteRenameDraft('')
   }
 
   function closeNoteDetail() {
@@ -1262,6 +1308,39 @@ export function OptionsApp() {
     setReaderSelection(null)
     setDetailFeedback('')
     setEditingTagName(null)
+    setIsRenamingDetailNote(false)
+    setNoteRenameDraft('')
+  }
+
+  function startNoteRename(note: SavedNoteRecord) {
+    if (detailNoteId !== note.id) openNoteDetail(note)
+    setNoteRenameDraft(getDisplayNoteTitle(note))
+    setIsRenamingDetailNote(true)
+  }
+
+  async function handleRenameNote(event?: SyntheticEvent) {
+    event?.preventDefault()
+    if (!detailNote || detailTrashEntry) return
+    const filename = noteRenameDraft.replace(/\s+/g, ' ').trim()
+    if (!filename) return
+    if (filename === detailNote.filename) {
+      setIsRenamingDetailNote(false)
+      return
+    }
+
+    await queueCloudLibraryOperation(
+      'rename',
+      createCloudNoteRenameTarget(detailNote, filename),
+    )
+    const updatedAt = new Date().toISOString()
+    await saveNotes(
+      notes.map((note) =>
+        note.id === detailNote.id ? { ...note, filename, updatedAt } : note,
+      ),
+    )
+    setIsRenamingDetailNote(false)
+    setNoteRenameDraft('')
+    await loadData()
   }
 
   function updateSnippetDraft(id: string, patch: Partial<SnippetDraft>) {
@@ -1947,9 +2026,41 @@ export function OptionsApp() {
             <section className="library-context" aria-label="当前文件夹">
               <div className="library-context-copy">
                 <span>当前文件夹</span>
-                <h2 title={activeFolder?.name || '未选择文件夹'}>
-                  {activeFolder?.name || '未选择文件夹'}
-                </h2>
+                {activeFolder && renamingFolderId === activeFolder.id ? (
+                  <form className="folder-rename-form" onSubmit={handleRenameFolder}>
+                    <Input
+                      autoFocus
+                      className="folder-rename-input compact"
+                      value={folderRenameDraft}
+                      maxLength={80}
+                      aria-label="新的文件夹名称"
+                      onChange={(event) => setFolderRenameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape') return
+                        setRenamingFolderId('')
+                        setFolderRenameDraft('')
+                      }}
+                    />
+                    <Button size="sm" variant="soft" type="submit">
+                      保存
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => {
+                        setRenamingFolderId('')
+                        setFolderRenameDraft('')
+                      }}
+                    >
+                      取消
+                    </Button>
+                  </form>
+                ) : (
+                  <h2 title={activeFolder?.name || '未选择文件夹'}>
+                    {activeFolder?.name || '未选择文件夹'}
+                  </h2>
+                )}
               </div>
               <div className="library-context-controls">{renderSortControl()}</div>
             </section>
@@ -1973,9 +2084,23 @@ export function OptionsApp() {
                 ))}
               </div>
 
-              <button className="danger-folder-button" type="button" onClick={requestDeleteFolder}>
-                删除文件夹
-              </button>
+              <div className="folder-action-group">
+                <button
+                  className="quiet-folder-button"
+                  type="button"
+                  disabled={!activeFolder}
+                  onClick={startFolderRename}
+                >
+                  重命名
+                </button>
+                <button
+                  className="danger-folder-button"
+                  type="button"
+                  onClick={requestDeleteFolder}
+                >
+                  删除文件夹
+                </button>
+              </div>
             </section>
 
             {filteredNotes.length > 0 ? (
@@ -1997,12 +2122,18 @@ export function OptionsApp() {
                         >
                           打开原笔记
                         </a>
-                        <button
-                          type="button"
-                          onClick={() => requestDeleteNote(note)}
-                        >
-                          删除
-                        </button>
+                        <span className="note-card-action-group">
+                          <button type="button" onClick={() => startNoteRename(note)}>
+                            重命名
+                          </button>
+                          <button
+                            className="note-card-delete-action"
+                            type="button"
+                            onClick={() => requestDeleteNote(note)}
+                          >
+                            删除
+                          </button>
+                        </span>
                       </>
                     ),
                   })
@@ -2144,11 +2275,56 @@ export function OptionsApp() {
             className="note-detail-dialog"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="note-detail-title"
+            aria-label={`${getDisplayNoteTitle(detailNote)}详情`}
           >
             <header className="note-detail-header">
               <div className="note-detail-heading">
-                <h2 id="note-detail-title">{getDisplayNoteTitle(detailNote)}</h2>
+                {isRenamingDetailNote && !detailTrashEntry ? (
+                  <form className="note-rename-form" onSubmit={handleRenameNote}>
+                    <Input
+                      autoFocus
+                      className="note-rename-input compact"
+                      value={noteRenameDraft}
+                      maxLength={160}
+                      aria-label="新的文案名称"
+                      onChange={(event) => setNoteRenameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape') return
+                        setIsRenamingDetailNote(false)
+                        setNoteRenameDraft('')
+                      }}
+                    />
+                    <Button size="sm" variant="soft" type="submit">
+                      保存
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => {
+                        setIsRenamingDetailNote(false)
+                        setNoteRenameDraft('')
+                      }}
+                    >
+                      取消
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="note-detail-title-row">
+                    <h2 id="note-detail-title">{getDisplayNoteTitle(detailNote)}</h2>
+                    {!detailTrashEntry ? (
+                      <Button
+                        className="note-detail-rename"
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => startNoteRename(detailNote)}
+                      >
+                        重命名
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               <Button

@@ -719,6 +719,7 @@ export function SidepanelApp() {
         existingNote?.contentText ||
         '',
       savedAt: now,
+      updatedAt: now,
     }
     const nextNotes = existingNote
       ? savedNotes.map((note) => (normalizeNoteUrl(note.sourceUrl) === targetUrl ? nextNote : note))
