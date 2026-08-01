@@ -53,6 +53,12 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { FolderIcon } from '../../components/ui/folder-icon'
+import {
+  createCloudFolderOperationTarget,
+  createCloudNoteOperationTarget,
+  type CloudLibraryOperationAction,
+  type CloudLibraryOperationTarget,
+} from '../../lib/cloud-library-operation-queue'
 
 type SortMode = 'newest' | 'oldest' | 'title'
 type AppView = 'library' | 'trash'
@@ -160,6 +166,22 @@ const UNTITLED_NOTE_TITLE = '无标题'
 const COLOR_PRESETS = ['#64748B', '#4D78F2', '#2A9D8F', '#8B5CF6', '#E9C46A', '#E56B6F']
 const CREATION_PAGE_URL = 'https://lumos-ai-writer.pages.dev/'
 const TRASH_RETENTION_DAYS = 7
+
+async function queueCloudLibraryOperation(
+  action: CloudLibraryOperationAction,
+  target: CloudLibraryOperationTarget,
+) {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'XHS_QUEUE_CLOUD_LIBRARY_OPERATION',
+      action,
+      target,
+    })
+  } catch {
+    // Local trash remains usable when cloud synchronization is unavailable.
+  }
+}
 
 const colorNameMap: Record<string, string> = {
   '#64748B': '灰色',
@@ -1616,6 +1638,15 @@ export function OptionsApp() {
   }
 
   async function handleRestoreTrashItem(itemId: string) {
+    const item = trashItems.find((trashItem) => trashItem.id === itemId)
+    if (item?.type === 'folder') {
+      await queueCloudLibraryOperation(
+        'restore',
+        createCloudFolderOperationTarget(item.folder, item.notes),
+      )
+    } else if (item?.type === 'note') {
+      await queueCloudLibraryOperation('restore', createCloudNoteOperationTarget(item.note))
+    }
     await restoreTrashItem(itemId)
     await loadData()
   }
@@ -1626,6 +1657,7 @@ export function OptionsApp() {
       return
     }
 
+    await queueCloudLibraryOperation('restore', createCloudNoteOperationTarget(entry.note))
     await restoreTrashFolderNote(entry.trashItemId, entry.note.id)
     setActiveTrashGroupId(`note-folder-${entry.note.folderId || 'unknown'}`)
     await loadData()
@@ -1724,12 +1756,23 @@ export function OptionsApp() {
     if (!confirmAction) return
 
     if (confirmAction.type === 'folder') {
+      const folder = folders.find((entry) => entry.id === confirmAction.id)
+      if (folder) {
+        await queueCloudLibraryOperation(
+          'delete',
+          createCloudFolderOperationTarget(folder, notes),
+        )
+      }
       await deleteSavedFolderCascade(confirmAction.id)
       setActiveFolderId((current) => {
         const nextFolders = folders.filter((folder) => folder.id !== current)
         return nextFolders[0]?.id || ''
       })
     } else if (confirmAction.type === 'note') {
+      const note = notes.find((entry) => entry.id === confirmAction.id)
+      if (note) {
+        await queueCloudLibraryOperation('delete', createCloudNoteOperationTarget(note))
+      }
       await deleteSavedNoteCascade(confirmAction.id)
     } else if (confirmAction.type === 'trash-item') {
       await handleDeleteTrashItemPermanently(confirmAction.id)

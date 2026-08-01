@@ -21,6 +21,7 @@
     "test:cors": "pnpm --filter @lumos-ai/api test:cors",
     "test:annotation-sync": "pnpm --filter @lumos-ai/api test:annotation-sync",
     "test:cloud-library-identity": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-library-identity.ts",
+    "test:cloud-library-operations": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-library-operations.ts",
     "test:cloud-session-refresh": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-session-refresh.ts",
     "test:cloud-trash-reconcile": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-trash-reconcile.ts",
     "check:p0": "node scripts/check-p0.mjs",

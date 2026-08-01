@@ -2,6 +2,7 @@ import type {
   ListFoldersResponse,
   ListNotesResponse,
   ListTrashResponse,
+  DeleteResourceResponse,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
@@ -81,4 +82,21 @@ export async function getCloudLibrary(token: string) {
     folders: folderResponse.folders,
     notes: noteResponse.notes,
   }
+}
+
+export async function syncCloudLibraryOperation(
+  token: string,
+  input: {
+    action: 'delete' | 'restore'
+    resourceType: 'folder' | 'note'
+    cloudId: string
+  },
+) {
+  const resourcePath = input.resourceType === 'folder' ? 'folders' : 'notes'
+  const actionPath = input.action === 'restore' ? '/restore' : ''
+  return requestCloudJson<DeleteResourceResponse>(
+    `/v1/${resourcePath}/${input.cloudId}${actionPath}`,
+    token,
+    { method: input.action === 'restore' ? 'POST' : 'DELETE' },
+  )
 }

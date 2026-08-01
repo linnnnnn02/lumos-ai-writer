@@ -312,18 +312,31 @@ export async function deleteFolder(
   folderId: string,
 ): Promise<void> {
   const supabase = getAdminClient(config)
-  const deletedAt = new Date().toISOString()
-  const { data, error } = await supabase
+  const existingResult = await supabase
     .from('folders')
-    .update({ deleted_at: deletedAt })
+    .select('id,deleted_at')
     .eq('user_id', user.id)
     .eq('id', folderId)
-    .is('deleted_at', null)
-    .select('id')
     .maybeSingle()
 
-  assertNoDatabaseError(error)
-  assertSingleMutation(data, 'Folder')
+  assertNoDatabaseError(existingResult.error)
+  const existing = existingResult.data as { id: string; deleted_at: string | null } | null
+  if (!existing) throw new Error('Folder not found.')
+
+  const deletedAt = existing.deleted_at ?? new Date().toISOString()
+  if (!existing.deleted_at) {
+    const { data, error } = await supabase
+      .from('folders')
+      .update({ deleted_at: deletedAt })
+      .eq('user_id', user.id)
+      .eq('id', folderId)
+      .is('deleted_at', null)
+      .select('id')
+      .maybeSingle()
+
+    assertNoDatabaseError(error)
+    assertSingleMutation(data, 'Folder')
+  }
 
   const noteIds = await getNoteIdsForFolder(supabase, user, folderId)
   if (noteIds.length > 0) {
@@ -345,17 +358,30 @@ export async function restoreFolder(
   folderId: string,
 ): Promise<void> {
   const supabase = getAdminClient(config)
-  const { data, error } = await supabase
+  const existingResult = await supabase
     .from('folders')
-    .update({ deleted_at: null })
+    .select('id,deleted_at')
     .eq('user_id', user.id)
     .eq('id', folderId)
-    .not('deleted_at', 'is', null)
-    .select('id')
     .maybeSingle()
 
-  assertNoDatabaseError(error)
-  assertSingleMutation(data, 'Folder')
+  assertNoDatabaseError(existingResult.error)
+  const existing = existingResult.data as { id: string; deleted_at: string | null } | null
+  if (!existing) throw new Error('Folder not found.')
+
+  if (existing.deleted_at) {
+    const { data, error } = await supabase
+      .from('folders')
+      .update({ deleted_at: null })
+      .eq('user_id', user.id)
+      .eq('id', folderId)
+      .not('deleted_at', 'is', null)
+      .select('id')
+      .maybeSingle()
+
+    assertNoDatabaseError(error)
+    assertSingleMutation(data, 'Folder')
+  }
 
   const noteIds = await getNoteIdsForFolder(supabase, user, folderId)
   if (noteIds.length === 0) return
@@ -605,20 +631,30 @@ export async function deleteNote(
   noteId: string,
 ): Promise<void> {
   const supabase = getAdminClient(config)
-  const deletedAt = new Date().toISOString()
-  const noteResult = await supabase
+  const existingResult = await supabase
     .from('notes')
-    .update({ deleted_at: deletedAt })
+    .select('id,deleted_at')
     .eq('user_id', user.id)
     .eq('id', noteId)
-    .is('deleted_at', null)
-    .select('id')
     .maybeSingle()
 
-  assertNoDatabaseError(noteResult.error)
+  assertNoDatabaseError(existingResult.error)
+  const existing = existingResult.data as { id: string; deleted_at: string | null } | null
+  if (!existing) throw new Error('Note not found.')
 
-  if (!noteResult.data) {
-    throw new Error('Note not found.')
+  const deletedAt = existing.deleted_at ?? new Date().toISOString()
+  if (!existing.deleted_at) {
+    const noteResult = await supabase
+      .from('notes')
+      .update({ deleted_at: deletedAt })
+      .eq('user_id', user.id)
+      .eq('id', noteId)
+      .is('deleted_at', null)
+      .select('id')
+      .maybeSingle()
+
+    assertNoDatabaseError(noteResult.error)
+    assertSingleMutation(noteResult.data, 'Note')
   }
 
   const snippetResult = await supabase
@@ -639,14 +675,17 @@ export async function restoreNote(
   const supabase = getAdminClient(config)
   const noteResult = await supabase
     .from('notes')
-    .select('id,folder_id')
+    .select('id,folder_id,deleted_at')
     .eq('user_id', user.id)
     .eq('id', noteId)
-    .not('deleted_at', 'is', null)
     .maybeSingle()
 
   assertNoDatabaseError(noteResult.error)
-  const note = noteResult.data as { id: string; folder_id: string | null } | null
+  const note = noteResult.data as {
+    id: string
+    folder_id: string | null
+    deleted_at: string | null
+  } | null
   assertSingleMutation(note, 'Note')
 
   if (note?.folder_id) {

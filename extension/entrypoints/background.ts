@@ -1,10 +1,31 @@
 import { defineBackground } from 'wxt/utils/define-background'
-import { getCloudLibrary, getCloudTrash, syncAnnotationToCloud } from '../lib/cloud-api'
+import type { CurrentUser } from '@lumos-ai/shared'
+import {
+  getCloudLibrary,
+  getCloudTrash,
+  syncAnnotationToCloud,
+  syncCloudLibraryOperation,
+} from '../lib/cloud-api'
 import {
   applyCloudAnnotationIdentity,
   applyCloudLibraryIdentitySnapshot,
 } from '../lib/cloud-library-identity'
-import { getValidCloudAccessToken } from '../lib/cloud-session'
+import {
+  CLOUD_USER_STORAGE_KEY,
+  getCloudStorageValue,
+  getValidCloudAccessToken,
+} from '../lib/cloud-session'
+import {
+  getCloudLibraryOperationQueue,
+  getCloudLibraryResourceKey,
+  getRememberedCloudResourceId,
+  rememberCloudResourceId,
+  resolveCloudLibraryOperationCloudId,
+  saveCloudLibraryOperationQueue,
+  type CloudLibraryOperationAction,
+  type CloudLibraryOperationJob,
+  type CloudLibraryOperationTarget,
+} from '../lib/cloud-library-operation-queue'
 import {
   getAnnotationCloudSyncQueue,
   saveAnnotationCloudSyncQueue,
@@ -38,6 +59,17 @@ export default defineBackground(() => {
     | {
         type: 'XHS_REFRESH_CLOUD_TRASH'
       }
+    | {
+        type: 'XHS_QUEUE_CLOUD_LIBRARY_OPERATION'
+        action: CloudLibraryOperationAction
+        target: CloudLibraryOperationTarget
+      }
+    | {
+        type: 'XHS_PROCESS_CLOUD_LIBRARY_OPERATION_QUEUE'
+      }
+    | {
+        type: 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS'
+      }
 
   type FetchNoteCoverResponse =
     | {
@@ -51,6 +83,8 @@ export default defineBackground(() => {
 
   let queueMutationChain: Promise<void> = Promise.resolve()
   let queueProcessingPromise: Promise<void> | null = null
+  let cloudLibraryOperationMutationChain: Promise<void> = Promise.resolve()
+  let cloudLibraryOperationProcessingPromise: Promise<void> | null = null
   let cloudTrashRefreshPromise: Promise<{
     authenticated: boolean
     deletedFolderCount: number
@@ -219,6 +253,213 @@ export default defineBackground(() => {
       value: undefined,
     }))
     void startAnnotationSyncQueue()
+  }
+
+  function mutateCloudLibraryOperationQueue<T>(
+    mutation: (queue: CloudLibraryOperationJob[]) => {
+      queue: CloudLibraryOperationJob[]
+      value: T
+    },
+  ) {
+    const operation = cloudLibraryOperationMutationChain.then(async () => {
+      const queue = await getCloudLibraryOperationQueue()
+      const result = mutation(queue)
+      await saveCloudLibraryOperationQueue(result.queue)
+      return result.value
+    })
+
+    cloudLibraryOperationMutationChain = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
+  }
+
+  async function enqueueCloudLibraryOperation(
+    action: CloudLibraryOperationAction,
+    target: CloudLibraryOperationTarget,
+  ) {
+    const user = await getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY)
+    if (!user?.id) return false
+
+    const resourceKey = getCloudLibraryResourceKey(user.id, target)
+    const rememberedCloudId = await getRememberedCloudResourceId(resourceKey)
+    const job: CloudLibraryOperationJob = {
+      id: crypto.randomUUID(),
+      resourceKey,
+      userId: user.id,
+      action,
+      target: {
+        ...target,
+        cloudId: target.cloudId ?? rememberedCloudId ?? undefined,
+      },
+      status: 'pending',
+      attempts: 0,
+      lastError: '',
+      updatedAt: new Date().toISOString(),
+    }
+
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: [...queue.filter((entry) => entry.resourceKey !== resourceKey), job],
+      value: undefined,
+    }))
+    return true
+  }
+
+  function claimNextCloudLibraryOperation() {
+    return mutateCloudLibraryOperationQueue<CloudLibraryOperationJob | null>((queue) => {
+      const index = queue.findIndex((job) => job.status !== 'failed')
+      if (index < 0) return { queue, value: null }
+
+      const claimed: CloudLibraryOperationJob = {
+        ...queue[index],
+        status: 'syncing',
+        attempts: queue[index].attempts + 1,
+        updatedAt: new Date().toISOString(),
+      }
+      const nextQueue = [...queue]
+      nextQueue[index] = claimed
+      return { queue: nextQueue, value: claimed }
+    })
+  }
+
+  async function completeCloudLibraryOperation(jobId: string) {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.filter((job) => job.id !== jobId),
+      value: undefined,
+    }))
+  }
+
+  async function updateCloudLibraryOperationIdentity(jobId: string, cloudId: string) {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              target: { ...job.target, cloudId },
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+  }
+
+  async function deferCloudLibraryOperation(jobId: string, error: string) {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: 'failed' as const,
+              lastError: error,
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+  }
+
+  async function failCloudLibraryOperation(jobId: string, error: string) {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: 'failed' as const,
+              lastError: error,
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+  }
+
+  async function processCloudLibraryOperationQueue() {
+    while (true) {
+      const job = await claimNextCloudLibraryOperation()
+      if (!job) return
+
+      const user = await getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY)
+      const token = await getValidCloudAccessToken()
+      if (!user?.id || !token) {
+        await deferCloudLibraryOperation(job.id, '云端登录已过期，请重新登录。')
+        return
+      }
+      if (user.id !== job.userId) {
+        await failCloudLibraryOperation(job.id, '登录账号已变更，未执行跨账号同步。')
+        continue
+      }
+
+      try {
+        let cloudId: string | null | undefined =
+          job.target.cloudId ?? (await getRememberedCloudResourceId(job.resourceKey))
+        if (!cloudId) {
+          const [library, trash] = await Promise.all([
+            getCloudLibrary(token),
+            getCloudTrash(token),
+          ])
+          cloudId = resolveCloudLibraryOperationCloudId(job.target, {
+            ...library,
+            trashGroups: trash.groups,
+          })
+        }
+
+        if (!cloudId) {
+          await failCloudLibraryOperation(job.id, '无法唯一匹配云端对象，已停止同步。')
+          continue
+        }
+
+        await rememberCloudResourceId(job.resourceKey, cloudId)
+        await updateCloudLibraryOperationIdentity(job.id, cloudId)
+        await syncCloudLibraryOperation(token, {
+          action: job.action,
+          resourceType: job.target.type,
+          cloudId,
+        })
+        await completeCloudLibraryOperation(job.id)
+      } catch (error) {
+        await deferCloudLibraryOperation(
+          job.id,
+          error instanceof Error ? error.message : '网络异常，请稍后重试。',
+        )
+        return
+      }
+    }
+  }
+
+  function startCloudLibraryOperationQueue() {
+    if (cloudLibraryOperationProcessingPromise) return cloudLibraryOperationProcessingPromise
+    cloudLibraryOperationProcessingPromise = processCloudLibraryOperationQueue().finally(() => {
+      cloudLibraryOperationProcessingPromise = null
+      void getCloudLibraryOperationQueue()
+        .then((queue) => {
+          if (queue.some((job) => job.status !== 'failed')) {
+            void startCloudLibraryOperationQueue()
+          }
+        })
+        .catch(() => undefined)
+    })
+    return cloudLibraryOperationProcessingPromise
+  }
+
+  async function retryCloudLibraryOperations() {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.status === 'failed'
+          ? {
+              ...job,
+              status: 'pending' as const,
+              lastError: '',
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+    void startCloudLibraryOperationQueue()
   }
 
   function cleanText(text: string | null | undefined) {
@@ -399,12 +640,14 @@ export default defineBackground(() => {
     console.info('Lumos AI Writer extension installed')
     void enableSidePanelBehavior()
     void retryAnnotationSync()
+    void retryCloudLibraryOperations()
     void refreshCloudTrash().catch(() => undefined)
   })
 
   chrome.runtime.onStartup?.addListener(() => {
     void enableSidePanelBehavior()
     void retryAnnotationSync()
+    void retryCloudLibraryOperations()
     void refreshCloudTrash().catch(() => undefined)
   })
 
@@ -451,11 +694,57 @@ export default defineBackground(() => {
 
     if (message.type === 'XHS_REFRESH_CLOUD_TRASH') {
       void refreshCloudTrash()
-        .then((result) => sendResponse({ ok: true, ...result }))
+        .then((result) => {
+          sendResponse({ ok: true, ...result })
+          void retryCloudLibraryOperations()
+        })
         .catch((error) => {
           sendResponse({
             ok: false,
             error: error instanceof Error ? error.message : '无法读取云端回收站。',
+          })
+        })
+      return true
+    }
+
+    if (
+      message.type === 'XHS_QUEUE_CLOUD_LIBRARY_OPERATION' &&
+      'action' in message &&
+      'target' in message
+    ) {
+      void enqueueCloudLibraryOperation(message.action, message.target)
+        .then((queued) => {
+          sendResponse({ ok: true, queued })
+          if (queued) void startCloudLibraryOperationQueue()
+        })
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法加入云端操作队列。',
+          })
+        })
+      return true
+    }
+
+    if (message.type === 'XHS_PROCESS_CLOUD_LIBRARY_OPERATION_QUEUE') {
+      void startCloudLibraryOperationQueue()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法处理云端操作队列。',
+          })
+        })
+      return true
+    }
+
+    if (message.type === 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS') {
+      void retryCloudLibraryOperations()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法重试云端操作。',
           })
         })
       return true
@@ -476,5 +765,6 @@ export default defineBackground(() => {
   })
 
   void startAnnotationSyncQueue()
+  void startCloudLibraryOperationQueue()
   void refreshCloudTrash().catch(() => undefined)
 })
