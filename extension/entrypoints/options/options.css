@@ -46,6 +46,7 @@
   --manager-shadow-card: 0 14px 34px rgba(15, 23, 42, 0.055);
   --manager-shadow-hover: 0 12px 30px rgba(15, 23, 42, 0.07);
   --manager-shadow: 0 14px 38px rgba(15, 23, 42, 0.055);
+  --manager-shadow-popover: 0 16px 36px rgba(15, 23, 42, 0.12);
   --ui-space-1: 4px;
   --ui-space-1-5: 6px;
   --ui-space-2: 8px;
@@ -101,6 +102,7 @@
   --ui-radius-control: 10px;
   --ui-radius-card: 12px;
   --ui-radius-panel: 12px;
+  --ui-radius-popover: 10px;
   --ui-radius-dialog: 14px;
   --ui-field-radius: var(--ui-radius-control);
   --ui-panel-gap: 16px;
@@ -760,6 +762,75 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.folder-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ui-space-1);
+}
+
+.folder-title-row h2 {
+  min-width: 0;
+}
+
+.folder-title-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.folder-title-menu-trigger {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  color: var(--manager-text-soft);
+}
+
+.folder-title-menu-trigger:hover,
+.folder-title-menu-trigger[aria-expanded='true'] {
+  background: var(--manager-surface-muted);
+  color: var(--manager-text);
+}
+
+.folder-title-menu-content {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + var(--ui-space-1));
+  right: 0;
+  display: grid;
+  width: 148px;
+  gap: var(--ui-space-1);
+  border: 1px solid rgba(31, 22, 17, 0.08);
+  border-radius: var(--ui-radius-popover);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--manager-shadow-popover);
+  padding: var(--ui-space-1);
+  animation: manager-popover-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+.folder-title-menu-content button {
+  min-height: var(--ui-control-height-sm);
+  border: 0;
+  border-radius: var(--ui-radius-item);
+  background: transparent;
+  color: var(--manager-text-muted);
+  padding: 0 var(--ui-control-inset-x-sm);
+  text-align: left;
+}
+
+.folder-title-menu-content button:hover {
+  background: var(--manager-surface-muted);
+  color: var(--manager-text);
+}
+
+.folder-title-menu-content button.danger {
+  color: #bf5a34;
+}
+
+.folder-title-menu-content button.danger:hover {
+  background: rgba(214, 90, 60, 0.1);
+}
+
 .folder-rename-form,
 .note-rename-form {
   display: flex;
@@ -837,33 +908,6 @@ textarea {
   font-size: var(--ui-control-font-sm);
   line-height: var(--ui-leading-control);
   padding: 0 var(--ui-control-inset-x-sm);
-}
-
-.folder-action-group {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-space-1);
-}
-
-.quiet-folder-button {
-  min-height: var(--ui-control-height-sm);
-  border: 0;
-  border-radius: var(--ui-field-radius);
-  background: transparent;
-  color: var(--manager-text-soft);
-  font-size: var(--ui-control-font-sm);
-  line-height: var(--ui-leading-control);
-  padding: 0 var(--ui-control-inset-x-sm);
-}
-
-.quiet-folder-button:hover {
-  background: var(--manager-surface-muted);
-  color: var(--manager-text);
-}
-
-.quiet-folder-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .danger-folder-button:hover {
