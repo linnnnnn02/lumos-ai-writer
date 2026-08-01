@@ -638,6 +638,7 @@ export function OptionsApp() {
   const [newFolderName, setNewFolderName] = useState('')
   const [renamingFolderId, setRenamingFolderId] = useState('')
   const [folderRenameDraft, setFolderRenameDraft] = useState('')
+  const [isFolderActionMenuOpen, setIsFolderActionMenuOpen] = useState(false)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const [detailNoteId, setDetailNoteId] = useState('')
   const [detailTrashEntryId, setDetailTrashEntryId] = useState('')
@@ -784,6 +785,22 @@ export function OptionsApp() {
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [activeTrashMenuId])
+
+  useEffect(() => {
+    if (!isFolderActionMenuOpen || typeof document === 'undefined') return
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Element && event.target.closest('.folder-title-menu')) return
+      setIsFolderActionMenuOpen(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [isFolderActionMenuOpen])
+
+  useEffect(() => {
+    setIsFolderActionMenuOpen(false)
+  }, [activeFolderId])
 
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
     const shell = event.currentTarget.closest('.manager-shell')
@@ -1223,6 +1240,7 @@ export function OptionsApp() {
 
   function startFolderRename() {
     if (!activeFolder) return
+    setIsFolderActionMenuOpen(false)
     setRenamingFolderId(activeFolder.id)
     setFolderRenameDraft(activeFolder.name)
   }
@@ -2057,9 +2075,50 @@ export function OptionsApp() {
                     </Button>
                   </form>
                 ) : (
-                  <h2 title={activeFolder?.name || '未选择文件夹'}>
-                    {activeFolder?.name || '未选择文件夹'}
-                  </h2>
+                  <div className="folder-title-row">
+                    <h2 title={activeFolder?.name || '未选择文件夹'}>
+                      {activeFolder?.name || '未选择文件夹'}
+                    </h2>
+                    {activeFolder ? (
+                      <div
+                        className="folder-title-menu"
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setIsFolderActionMenuOpen(false)
+                        }}
+                      >
+                        <Button
+                          className="folder-title-menu-trigger"
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label="文件夹操作"
+                          aria-expanded={isFolderActionMenuOpen}
+                          title="文件夹操作"
+                          onClick={() => setIsFolderActionMenuOpen((current) => !current)}
+                        >
+                          <MoreHorizontal aria-hidden="true" />
+                        </Button>
+                        {isFolderActionMenuOpen ? (
+                          <div className="folder-title-menu-content" role="menu">
+                            <button type="button" role="menuitem" onClick={startFolderRename}>
+                              重命名
+                            </button>
+                            <button
+                              className="danger"
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setIsFolderActionMenuOpen(false)
+                                requestDeleteFolder()
+                              }}
+                            >
+                              删除文件夹
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 )}
               </div>
               <div className="library-context-controls">{renderSortControl()}</div>
@@ -2084,23 +2143,6 @@ export function OptionsApp() {
                 ))}
               </div>
 
-              <div className="folder-action-group">
-                <button
-                  className="quiet-folder-button"
-                  type="button"
-                  disabled={!activeFolder}
-                  onClick={startFolderRename}
-                >
-                  重命名
-                </button>
-                <button
-                  className="danger-folder-button"
-                  type="button"
-                  onClick={requestDeleteFolder}
-                >
-                  删除文件夹
-                </button>
-              </div>
             </section>
 
             {filteredNotes.length > 0 ? (
