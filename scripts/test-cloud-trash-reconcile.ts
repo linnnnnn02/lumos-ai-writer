@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
-import type { SavedFolderRecord, SavedNoteRecord, TrashFolderGroup } from '@lumos-ai/shared'
-import { buildCloudTrashDeletionPlan } from '../extension/lib/cloud-trash-reconcile'
+import type {
+  FolderDto,
+  NoteDto,
+  SavedFolderRecord,
+  SavedNoteRecord,
+  TrashFolderGroup,
+} from '@lumos-ai/shared'
+import {
+  buildCloudTrashDeletionPlan,
+  buildCloudTrashRestorationPlan,
+} from '../extension/lib/cloud-trash-reconcile'
 import { applyCloudTrashSnapshot } from '../extension/lib/cloud-trash-storage'
 
 const folders: SavedFolderRecord[] = [
@@ -80,6 +89,43 @@ function createTrashGroup(input: {
   }
 }
 
+function createActiveCloudNote(
+  note: SavedNoteRecord,
+  cloudId: string,
+  folderId: string,
+  folderName: string,
+): NoteDto {
+  return {
+    ...note,
+    id: cloudId,
+    folderId,
+    folderName,
+    sourceUrl: `${note.sourceUrl.split('?')[0]}?token=active`,
+    learningStatus: 'ready',
+    qualityFlags: [],
+  }
+}
+
+const activeCloudFolders: FolderDto[] = [
+  {
+    id: 'cloud-test-folder',
+    name: '验收-已恢复',
+    noteCount: 2,
+    updatedAt: '2026-08-01T10:00:00.000Z',
+  },
+  {
+    id: 'cloud-real-folder',
+    name: '勋章文案',
+    noteCount: 1,
+    updatedAt: '2026-08-01T09:00:00.000Z',
+  },
+]
+const activeCloudNotes: NoteDto[] = [
+  createActiveCloudNote(notes[0], 'cloud-note-1', 'cloud-test-folder', '验收-已恢复'),
+  createActiveCloudNote(notes[1], 'cloud-note-2', 'cloud-test-folder', '验收-已恢复'),
+  createActiveCloudNote(notes[2], 'cloud-note-real', 'cloud-real-folder', '勋章文案'),
+]
+
 const deletedFolderPlan = buildCloudTrashDeletionPlan({
   folders,
   notes,
@@ -142,6 +188,88 @@ const localOnlyNotePlan = buildCloudTrashDeletionPlan({
 })
 assert.deepEqual(localOnlyNotePlan, { folderIds: [], noteIds: ['local-note-1'] })
 
+const restoredFolderPlan = buildCloudTrashRestorationPlan({
+  trashItems: [
+    {
+      id: 'trash-folder-test',
+      type: 'folder',
+      folder: folders[0],
+      notes: notes.slice(0, 2),
+    },
+  ],
+  folders: activeCloudFolders,
+  notes: activeCloudNotes,
+  groups: [],
+})
+assert.deepEqual(restoredFolderPlan, {
+  restorations: [
+    {
+      itemId: 'trash-folder-test',
+      resourceType: 'folder',
+      cloudId: 'cloud-test-folder',
+    },
+  ],
+})
+
+const pendingDeletePlan = buildCloudTrashRestorationPlan({
+  trashItems: [
+    {
+      id: 'trash-folder-test',
+      type: 'folder',
+      folder: folders[0],
+      notes: notes.slice(0, 2),
+    },
+  ],
+  folders: activeCloudFolders,
+  notes: activeCloudNotes,
+  groups: [],
+  protection: { deletingFolderIds: ['local-test-folder'] },
+})
+assert.deepEqual(pendingDeletePlan, { restorations: [] })
+
+const restoredNotePlan = buildCloudTrashRestorationPlan({
+  trashItems: [
+    {
+      id: 'trash-note-real',
+      type: 'note',
+      note: notes[2],
+    },
+  ],
+  folders: activeCloudFolders,
+  notes: activeCloudNotes,
+  groups: [],
+})
+assert.deepEqual(restoredNotePlan, {
+  restorations: [
+    {
+      itemId: 'trash-note-real',
+      resourceType: 'note',
+      cloudId: 'cloud-note-real',
+    },
+  ],
+})
+
+const ambiguousRestoredNotePlan = buildCloudTrashRestorationPlan({
+  trashItems: [
+    {
+      id: 'trash-note-real',
+      type: 'note',
+      note: notes[2],
+    },
+  ],
+  folders: activeCloudFolders,
+  notes: [
+    ...activeCloudNotes,
+    {
+      ...activeCloudNotes[2],
+      id: 'cloud-note-real-duplicate',
+      folderId: 'cloud-test-folder',
+    },
+  ],
+  groups: [],
+})
+assert.deepEqual(ambiguousRestoredNotePlan, { restorations: [] })
+
 async function testStorageApplication() {
   const storageState: Record<string, unknown> = {
     savedFolders: structuredClone(folders),
@@ -181,7 +309,12 @@ async function testStorageApplication() {
     notes: notes.slice(0, 2),
   })
   const appliedResult = await applyCloudTrashSnapshot([cloudFolderTrash])
-  assert.deepEqual(appliedResult, { deletedFolderCount: 1, deletedNoteCount: 0 })
+  assert.deepEqual(appliedResult, {
+    deletedFolderCount: 1,
+    deletedNoteCount: 0,
+    restoredFolderCount: 0,
+    restoredNoteCount: 0,
+  })
   assert.deepEqual(
     (storageState.savedFolders as SavedFolderRecord[]).map((folder) => [
       folder.id,
@@ -205,7 +338,99 @@ async function testStorageApplication() {
   )
 
   const repeatedResult = await applyCloudTrashSnapshot([cloudFolderTrash])
-  assert.deepEqual(repeatedResult, { deletedFolderCount: 0, deletedNoteCount: 0 })
+  assert.deepEqual(repeatedResult, {
+    deletedFolderCount: 0,
+    deletedNoteCount: 0,
+    restoredFolderCount: 0,
+    restoredNoteCount: 0,
+  })
+  assert.equal((storageState.trashItems as unknown[]).length, 1)
+
+  const protectedDeleteResult = await applyCloudTrashSnapshot([], {
+    library: { folders: activeCloudFolders, notes: activeCloudNotes },
+    pendingOperations: [
+      {
+        action: 'delete',
+        target: { type: 'folder', localId: 'local-test-folder' },
+      },
+    ],
+  })
+  assert.deepEqual(protectedDeleteResult, {
+    deletedFolderCount: 0,
+    deletedNoteCount: 0,
+    restoredFolderCount: 0,
+    restoredNoteCount: 0,
+  })
+  assert.equal((storageState.trashItems as unknown[]).length, 1)
+
+  const restoredResult = await applyCloudTrashSnapshot([], {
+    library: { folders: activeCloudFolders, notes: activeCloudNotes },
+  })
+  assert.deepEqual(restoredResult, {
+    deletedFolderCount: 0,
+    deletedNoteCount: 0,
+    restoredFolderCount: 1,
+    restoredNoteCount: 0,
+  })
+  assert.deepEqual(
+    (storageState.savedFolders as SavedFolderRecord[]).map((folder) => [
+      folder.id,
+      folder.cloudId,
+      folder.name,
+      folder.noteCount,
+    ]),
+    [
+      ['local-test-folder', 'cloud-test-folder', '验收-已恢复', 2],
+      ['local-real-folder', undefined, '勋章文案', 1],
+    ],
+  )
+  assert.equal((storageState.savedNotes as SavedNoteRecord[]).length, 3)
+  assert.equal((storageState.savedSnippets as unknown[]).length, 1)
+  assert.equal((storageState.trashItems as unknown[]).length, 0)
+
+  const protectedRestoreResult = await applyCloudTrashSnapshot([cloudFolderTrash], {
+    library: { folders: activeCloudFolders, notes: activeCloudNotes },
+    pendingOperations: [
+      {
+        action: 'restore',
+        target: { type: 'folder', localId: 'local-test-folder' },
+      },
+    ],
+  })
+  assert.deepEqual(protectedRestoreResult, {
+    deletedFolderCount: 0,
+    deletedNoteCount: 0,
+    restoredFolderCount: 0,
+    restoredNoteCount: 0,
+  })
+  assert.equal((storageState.savedNotes as SavedNoteRecord[]).length, 3)
+  assert.equal((storageState.trashItems as unknown[]).length, 0)
+
+  storageState.savedNotes = (storageState.savedNotes as SavedNoteRecord[]).filter(
+    (note) => note.id !== 'local-note-real',
+  )
+  storageState.trashItems = [
+    {
+      id: 'trash-note-incomplete-cloud-snapshot',
+      type: 'note',
+      deletedAt: new Date().toISOString(),
+      folder: folders[1],
+      note: notes[2],
+      snippets: [],
+    },
+  ]
+  const incompleteCloudSnapshotResult = await applyCloudTrashSnapshot([], {
+    library: {
+      folders: activeCloudFolders.filter((folder) => folder.id !== 'cloud-real-folder'),
+      notes: activeCloudNotes,
+    },
+  })
+  assert.deepEqual(incompleteCloudSnapshotResult, {
+    deletedFolderCount: 0,
+    deletedNoteCount: 0,
+    restoredFolderCount: 0,
+    restoredNoteCount: 0,
+  })
   assert.equal((storageState.trashItems as unknown[]).length, 1)
 
   delete (globalThis as typeof globalThis & { chrome?: unknown }).chrome

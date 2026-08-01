@@ -89,6 +89,8 @@ export default defineBackground(() => {
     authenticated: boolean
     deletedFolderCount: number
     deletedNoteCount: number
+    restoredFolderCount: number
+    restoredNoteCount: number
   }> | null = null
 
   function refreshCloudTrash() {
@@ -101,17 +103,24 @@ export default defineBackground(() => {
           authenticated: false,
           deletedFolderCount: 0,
           deletedNoteCount: 0,
+          restoredFolderCount: 0,
+          restoredNoteCount: 0,
         }
       }
 
-      const [trash, library] = await Promise.all([
+      const [trash, library, operationQueue, user] = await Promise.all([
         getCloudTrash(token),
         getCloudLibrary(token).catch(() => null),
+        getCloudLibraryOperationQueue(),
+        getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY),
       ])
       if (library) {
         await applyCloudLibraryIdentitySnapshot(library)
       }
-      const result = await applyCloudTrashSnapshot(trash.groups)
+      const result = await applyCloudTrashSnapshot(trash.groups, {
+        library,
+        pendingOperations: operationQueue.filter((job) => job.userId === user?.id),
+      })
       return {
         authenticated: true,
         ...result,
