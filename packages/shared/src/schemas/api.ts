@@ -4,6 +4,7 @@ export const apiErrorCodeSchema = z.enum([
   'unauthorized',
   'forbidden',
   'not_found',
+  'conflict',
   'validation_failed',
   'feature_disabled',
   'budget_exhausted',
@@ -20,6 +21,7 @@ export const apiErrorResponseSchema = z.object({
     code: apiErrorCodeSchema,
     message: z.string(),
     requestId: z.string().optional(),
+    details: z.unknown().optional(),
   }),
 })
 

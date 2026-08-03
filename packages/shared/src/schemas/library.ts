@@ -71,6 +71,7 @@ export const createFolderResponseSchema = z.object({
 
 export const updateFolderRequestSchema = z.object({
   name: z.string().trim().min(1).max(80),
+  expectedUpdatedAt: z.string().trim().min(1),
 })
 
 export const updateFolderResponseSchema = z.object({
@@ -98,6 +99,7 @@ export const updateNoteRequestSchema = z
   .object({
     filename: z.string().trim().min(1).max(160).optional(),
     title: z.string().trim().min(1).max(240).optional(),
+    expectedUpdatedAt: z.string().trim().min(1),
   })
   .refine((input) => input.filename !== undefined || input.title !== undefined, {
     message: 'At least one note field is required.',

@@ -28,13 +28,72 @@ async function requestCloudJson<T>(
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
-  const data = await response.json()
+  const data = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new Error(data?.error?.message || `云端请求失败：${response.status}`)
+    throw new CloudApiError(
+      data?.error?.message || `云端请求失败：${response.status}`,
+      response.status,
+      data?.error?.code,
+      data?.error?.details,
+    )
   }
 
   return data as T
+}
+
+export class CloudApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly details?: unknown,
+  ) {
+    super(message)
+    this.name = 'CloudApiError'
+  }
+}
+
+export type CloudLibraryConflictResource =
+  | {
+      type: 'folder'
+      id: string
+      name: string
+      updatedAt: string
+    }
+  | {
+      type: 'note'
+      id: string
+      filename: string
+      title: string
+      updatedAt: string
+    }
+
+export function getCloudLibraryConflictResource(error: unknown) {
+  if (!(error instanceof CloudApiError) || error.status !== 409 || error.code !== 'conflict') {
+    return null
+  }
+
+  const resource = (error.details as { resource?: unknown } | undefined)?.resource
+  if (!resource || typeof resource !== 'object') return null
+  const candidate = resource as Record<string, unknown>
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.updatedAt !== 'string'
+  ) {
+    return null
+  }
+  if (candidate.type === 'folder' && typeof candidate.name === 'string') {
+    return candidate as CloudLibraryConflictResource
+  }
+  if (
+    candidate.type === 'note' &&
+    typeof candidate.filename === 'string' &&
+    typeof candidate.title === 'string'
+  ) {
+    return candidate as CloudLibraryConflictResource
+  }
+  return null
 }
 
 export async function syncAnnotationToCloud(
@@ -97,12 +156,14 @@ export type SyncCloudLibraryOperationInput =
       resourceType: 'folder'
       cloudId: string
       name: string
+      expectedUpdatedAt: string
     }
   | {
       action: 'rename'
       resourceType: 'note'
       cloudId: string
       filename: string
+      expectedUpdatedAt: string
     }
 
 export async function syncCloudLibraryOperation(
@@ -112,7 +173,9 @@ export async function syncCloudLibraryOperation(
   const resourcePath = input.resourceType === 'folder' ? 'folders' : 'notes'
   if (input.action === 'rename') {
     const body =
-      input.resourceType === 'folder' ? { name: input.name } : { filename: input.filename }
+      input.resourceType === 'folder'
+        ? { name: input.name, expectedUpdatedAt: input.expectedUpdatedAt }
+        : { filename: input.filename, expectedUpdatedAt: input.expectedUpdatedAt }
     return requestCloudJson<UpdateFolderResponse | UpdateNoteResponse>(
       `/v1/${resourcePath}/${input.cloudId}`,
       token,

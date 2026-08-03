@@ -5,9 +5,14 @@ import {
   createCloudFolderRenameTarget,
   createCloudNoteOperationTarget,
   createCloudNoteRenameTarget,
+  isCloudLibraryOperationProcessable,
   resolveCloudLibraryOperationCloudId,
+  type CloudLibraryOperationJob,
 } from '../extension/lib/cloud-library-operation-queue'
-import { syncCloudLibraryOperation } from '../extension/lib/cloud-api'
+import {
+  getCloudLibraryConflictResource,
+  syncCloudLibraryOperation,
+} from '../extension/lib/cloud-api'
 
 function folder(id: string, name: string): FolderDto {
   return { id, name, noteCount: 0, updatedAt: '2026-07-31T00:00:00.000Z' }
@@ -61,6 +66,35 @@ const snapshot = {
   trashGroups: [deletedFolderGroup],
 }
 
+const conflictJob: CloudLibraryOperationJob = {
+  id: 'conflict-job',
+  resourceKey: 'user:note:local-note',
+  userId: 'user',
+  action: 'rename',
+  target: {
+    type: 'note',
+    localId: 'local-note',
+    cloudId: 'cloud-note',
+    filename: 'Old note',
+    sourceUrl: 'https://example.com/note',
+    renameTo: 'Local note',
+  },
+  status: 'conflict',
+  attempts: 1,
+  lastError: 'conflict',
+  conflict: {
+    cloudId: 'cloud-note',
+    resourceType: 'note',
+    cloudName: 'Cloud note',
+    cloudUpdatedAt: '2026-08-01T00:00:00.000Z',
+    localName: 'Local note',
+  },
+  updatedAt: '2026-08-01T00:00:00.000Z',
+}
+
+assert.equal(isCloudLibraryOperationProcessable(conflictJob), false)
+assert.equal(isCloudLibraryOperationProcessable({ ...conflictJob, status: 'pending' }), true)
+
 assert.equal(
   resolveCloudLibraryOperationCloudId(
     createCloudNoteOperationTarget({
@@ -85,6 +119,7 @@ assert.equal(
     {
       type: 'note',
       localId: 'local-deleted-note',
+      filename: 'Deleted note',
       sourceUrl: 'https://example.com/deleted?token=temporary',
     },
     snapshot,
@@ -126,6 +161,7 @@ assert.equal(
     {
       type: 'note',
       localId: 'ambiguous-note',
+      filename: 'Ambiguous note',
       sourceUrl: 'https://example.com/note',
     },
     {
@@ -159,6 +195,7 @@ assert.equal(
       type: 'note',
       localId: 'known-note',
       cloudId: 'known-cloud-id',
+      filename: 'Known note',
       sourceUrl: 'https://example.com/changed',
     },
     snapshot,
@@ -183,6 +220,7 @@ assert.deepEqual(
     localId: 'local-folder',
     cloudId: 'cloud-folder',
     name: 'Old folder name',
+    expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
     noteSourceUrls: [],
     renameTo: 'New folder name',
   },
@@ -202,6 +240,7 @@ assert.equal(
       coverImageUrl: '',
       contentText: '',
       savedAt: '2026-07-31T00:00:00.000Z',
+      updatedAt: '2026-07-31T00:00:00.000Z',
     },
     'New note name',
   ).renameTo,
@@ -213,9 +252,31 @@ async function testCloudRequests() {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input, init) => {
     requests.push({ url: String(input), init })
+    if (requests.length === 5) {
+      return Response.json(
+        {
+          ok: false,
+          error: {
+            code: 'conflict',
+            message: 'conflict',
+            details: {
+              resource: {
+                type: 'note',
+                id: 'cloud-note',
+                filename: 'Cloud renamed note',
+                title: 'Original title',
+                updatedAt: '2026-08-01T00:00:00.000Z',
+              },
+            },
+          },
+        },
+        { status: 409 },
+      )
+    }
     return Response.json({ ok: true })
   }
 
+  let conflictResource = null
   try {
     await syncCloudLibraryOperation('test-token', {
       action: 'delete',
@@ -232,19 +293,32 @@ async function testCloudRequests() {
       resourceType: 'folder',
       cloudId: 'cloud-folder',
       name: 'Renamed folder',
+      expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
     })
     await syncCloudLibraryOperation('test-token', {
       action: 'rename',
       resourceType: 'note',
       cloudId: 'cloud-note',
       filename: 'Renamed note',
+      expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
     })
+    try {
+      await syncCloudLibraryOperation('test-token', {
+        action: 'rename',
+        resourceType: 'note',
+        cloudId: 'cloud-note',
+        filename: 'Stale local note',
+        expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
+      })
+    } catch (error) {
+      conflictResource = getCloudLibraryConflictResource(error)
+    }
   } finally {
     globalThis.fetch = originalFetch
   }
 
   assert.deepEqual(
-    requests.map((request) => [request.url, request.init?.method]),
+    requests.slice(0, 4).map((request) => [request.url, request.init?.method]),
     [
       ['https://lumos-ai-writer.pages.dev/api/v1/notes/cloud-note', 'DELETE'],
       ['https://lumos-ai-writer.pages.dev/api/v1/folders/cloud-folder/restore', 'POST'],
@@ -252,12 +326,29 @@ async function testCloudRequests() {
       ['https://lumos-ai-writer.pages.dev/api/v1/notes/cloud-note', 'PATCH'],
     ],
   )
-  assert.deepEqual(JSON.parse(String(requests[2].init?.body)), { name: 'Renamed folder' })
-  assert.deepEqual(JSON.parse(String(requests[3].init?.body)), { filename: 'Renamed note' })
+  assert.deepEqual(JSON.parse(String(requests[2].init?.body)), {
+    name: 'Renamed folder',
+    expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
+  })
+  assert.deepEqual(JSON.parse(String(requests[3].init?.body)), {
+    filename: 'Renamed note',
+    expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
+  })
+  assert.deepEqual(JSON.parse(String(requests[4].init?.body)), {
+    filename: 'Stale local note',
+    expectedUpdatedAt: '2026-07-31T00:00:00.000Z',
+  })
   assert.equal(
     (requests[0].init?.headers as Record<string, string>).Authorization,
     'Bearer test-token',
   )
+  assert.deepEqual(conflictResource, {
+    type: 'note',
+    id: 'cloud-note',
+    filename: 'Cloud renamed note',
+    title: 'Original title',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  })
 }
 
 void testCloudRequests().then(() => {
