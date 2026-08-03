@@ -90,6 +90,27 @@ export function buildDemoAnalysis(input: AnalysisInput): AiAnalysisResult {
         `避免模板总结、硬广夸法和空泛提问。`,
       ],
     },
+    contentMode: {
+      targetMode: 'unclassified',
+      confidence: 'low',
+      rationale: '本地演示不调用内容模式分析，生成阶段按当前需求处理。',
+      referenceModes: [],
+      compatibleReferenceIds: [],
+      excludedReferences: [],
+      stableVoiceSignals: [],
+      modeSpecificGuidance: {
+        informationPriority: '按当前需求中的已知信息顺序推进。',
+        interactionPattern: '仅在当前任务明确需要时互动。',
+        styleBoundary: '不迁移与当前任务无关的参考结构。',
+      },
+    },
+    surfaceStyle: {
+      sentenceRhythm: '句长服从当前信息密度。',
+      paragraphShape: '按信息推进自然分段。',
+      punctuation: '使用自然中文标点。',
+      emotionalIntensity: '情绪强度服从当前需求。',
+      interactionStyle: '仅在需要时保留一个具体问题。',
+    },
     coreJudgement: hasReferenceEvidence
       ? '这组参考文案通常先把读者放进具体场景，让读者先做选择或产生疑问，再顺势补背景和关键信息。'
       : `本轮不套用具体参考文案，先围绕“${input.topic}”生成一版可编辑初稿。`,

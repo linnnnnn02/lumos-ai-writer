@@ -16,6 +16,97 @@ export const aiFeaturedSnippetSchema = z.object({
   reason: z.string(),
 })
 
+const defaultAiSurfaceStyle = {
+  sentenceRhythm: '句长自然变化，以完整表达当前事实为准',
+  paragraphShape: '按信息推进组织完整段落',
+  punctuation: '使用自然中文标点',
+  emotionalIntensity: '情绪强度服从当前需求',
+  interactionStyle: '仅在当前情境支持时互动',
+}
+
+export const aiSurfaceStyleSchema = z.object({
+  sentenceRhythm: z.string().min(1),
+  paragraphShape: z.string().min(1),
+  punctuation: z.string().min(1),
+  emotionalIntensity: z.string().min(1),
+  interactionStyle: z.string().min(1),
+})
+
+export const aiContentModeSchema = z.enum([
+  'unclassified',
+  'brand_story',
+  'product_education',
+  'campaign_interaction',
+  'event_announcement',
+  'social_moment',
+  'other',
+])
+
+export const draftContentModeSchema = z.enum([
+  'auto',
+  'brand_story',
+  'product_education',
+  'campaign_interaction',
+  'event_announcement',
+  'social_moment',
+  'other',
+])
+
+const defaultAiContentMode = {
+  targetMode: 'unclassified' as const,
+  confidence: 'low' as const,
+  rationale: '旧分析数据尚未分类内容模式',
+  referenceModes: [] as Array<{
+    noteId: string
+    mode: z.infer<typeof aiContentModeSchema>
+    compatibility: 'compatible' | 'stable_voice_only' | 'excluded'
+    reason: string
+  }>,
+  compatibleReferenceIds: [] as string[],
+  excludedReferences: [] as Array<{ noteId: string; reason: string }>,
+  stableVoiceSignals: [] as string[],
+  modeSpecificGuidance: {
+    informationPriority: '以当前 topic 和 brief 的事实顺序为准',
+    interactionPattern: '仅在当前任务需要时互动',
+    styleBoundary: '不迁移参考文案的具体内容任务',
+  },
+}
+
+export const aiContentModeResultSchema = z.object({
+  targetMode: aiContentModeSchema,
+  confidence: z.enum(['high', 'medium', 'low']),
+  rationale: z.string().trim().min(1).max(300),
+  referenceModes: z
+    .array(
+      z.object({
+        noteId: z.string().trim().min(1).max(120),
+        mode: aiContentModeSchema,
+        compatibility: z.enum([
+          'compatible',
+          'stable_voice_only',
+          'excluded',
+        ]),
+        reason: z.string().trim().min(1).max(240),
+      }),
+    )
+    .max(12),
+  compatibleReferenceIds: z.array(z.string().trim().min(1).max(120)).max(12),
+  excludedReferences: z
+    .array(
+      z.object({
+        noteId: z.string().trim().min(1).max(120),
+        reason: z.string().trim().min(1).max(240),
+      }),
+    )
+    .max(12),
+  stableVoiceSignals: z.array(z.string().trim().min(1).max(160)).max(5),
+  modeSpecificGuidance: z.object({
+    informationPriority: z.string().trim().min(1).max(240),
+    interactionPattern: z.string().trim().min(1).max(240),
+    styleBoundary: z.string().trim().min(1).max(240),
+  }),
+})
+
 export const aiAnalysisResultSchema = z.object({
   projectName: z.string(),
   aiLearningMethod: z.object({
@@ -23,6 +114,8 @@ export const aiAnalysisResultSchema = z.object({
     reusableMechanisms: z.array(z.string().min(1)).min(1).max(5),
     styleConstraints: z.array(z.string().min(1)).min(1).max(5),
   }),
+  contentMode: aiContentModeResultSchema.default(defaultAiContentMode),
+  surfaceStyle: aiSurfaceStyleSchema.default(defaultAiSurfaceStyle),
   coreJudgement: z.string().min(1),
   evidence: z.string().min(1),
   effectivePatterns: z.array(z.string().min(1)).min(3).max(5),
@@ -42,7 +135,7 @@ export const aiAnalysisResultSchema = z.object({
 
 export const aiDraftCopySchema = z.object({
   title: z.string().trim().min(1).max(120),
-  body: z.array(z.string().trim().min(1).max(1200)).min(3).max(12),
+  body: z.array(z.string().trim().min(1).max(1200)).min(1).max(12),
 })
 
 export const analyzeReferencesRequestSchema = z.object({
@@ -67,6 +160,21 @@ export const generateDraftRequestSchema = z.object({
   brief: z.object({
     mustInclude: z.string().trim().max(800),
     avoidTone: z.string().trim().max(800),
+    objective: z.string().trim().max(500).default(''),
+    sourceFacts: z.string().trim().max(1600).default(''),
+    instructions: z.string().trim().max(800).default(''),
+    allowConservativeDraft: z.boolean().default(false),
+    contentMode: draftContentModeSchema.default('auto'),
+    facts: z
+      .array(
+        z.object({
+          id: z.string().trim().min(1).max(80),
+          statement: z.string().trim().min(1).max(500),
+          required: z.boolean().default(true),
+        }),
+      )
+      .max(20)
+      .default([]),
   }),
 })
 
@@ -217,14 +325,41 @@ export const analyzeReferencesResponseSchema = z.object({
   usage: aiUsageSchema.nullable(),
 })
 
-export const generateDraftResponseSchema = z.object({
+export const draftMissingFactSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  label: z.string().trim().min(1).max(40),
+  question: z.string().trim().min(1).max(240),
+  reason: z.string().trim().min(1).max(240),
+  targetField: z.enum(['objective', 'source_facts', 'instructions']),
+})
+
+export const draftFactSufficiencyResultSchema = z.object({
+  summary: z.string().trim().min(1).max(300),
+  missingFacts: z.array(draftMissingFactSchema).min(1).max(3),
+  confirmedFacts: z.array(z.string().trim().min(1).max(300)).max(6),
+  canGenerateConservative: z.boolean(),
+})
+
+const generatedDraftResponseSchema = z.object({
   ok: z.literal(true),
+  status: z.literal('generated'),
   provider: z.literal('deepseek'),
   model: z.string(),
   skill: aiSkillMetadataSchema,
   draft: aiDraftCopySchema,
   usage: aiUsageSchema.nullable(),
 })
+
+const insufficientFactsDraftResponseSchema = z.object({
+  ok: z.literal(true),
+  status: z.literal('insufficient_facts'),
+  assessment: draftFactSufficiencyResultSchema,
+})
+
+export const generateDraftResponseSchema = z.discriminatedUnion('status', [
+  generatedDraftResponseSchema,
+  insufficientFactsDraftResponseSchema,
+])
 
 export const rewriteDraftResponseSchema = z.object({
   ok: z.literal(true),
@@ -247,6 +382,10 @@ export const previewDraftForReaderResponseSchema = z.object({
 export type AiFeaturedSnippet = z.infer<typeof aiFeaturedSnippetSchema>
 export type AiAnalysisResult = z.infer<typeof aiAnalysisResultSchema>
 export type AiDraftCopy = z.infer<typeof aiDraftCopySchema>
+export type DraftMissingFact = z.infer<typeof draftMissingFactSchema>
+export type DraftFactSufficiencyResult = z.infer<
+  typeof draftFactSufficiencyResultSchema
+>
 export type AiRewriteSuggestion = z.infer<typeof aiRewriteSuggestionSchema>
 export type AiRewriteResult = z.infer<typeof aiRewriteResultSchema>
 export type AiReaderPreviewAnnotation = z.infer<typeof aiReaderPreviewAnnotationSchema>

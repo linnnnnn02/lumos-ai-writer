@@ -12,6 +12,13 @@
       "不编造距离、速度和身体数据"
     ]
   },
+  "surfaceStyle": {
+    "sentenceRhythm": "以完整复盘句为主，关键变化可用较短句承接",
+    "paragraphShape": "每段推进一个时间节点，不为整齐强行拆成等长短行",
+    "punctuation": "以逗号和句号自然停顿，问号只留给真实互动",
+    "emotionalIntensity": "平实克制，不把一次通勤写成热血改变",
+    "interactionStyle": "结尾可问一个与读者真实担忧相关的问题"
+  },
   "coreJudgement": "先改写读者最担心的问题，再用每天发生的细节建立可信度。",
   "evidence": "用户两条标注分别强调反常识判断和时间变化，并明确偏好真人复盘式表达。",
   "effectivePatterns": [

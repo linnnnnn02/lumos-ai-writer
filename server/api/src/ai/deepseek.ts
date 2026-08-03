@@ -13,11 +13,18 @@ import {
   type PreviewDraftForReaderRequest,
   type WritingProfile,
 } from '@lumos-ai/shared'
-import { analysisSkillV1 } from '../skills/analysis-v1/index.js'
 import {
+  analysisSkillV1,
+  normalizeAnalysisContentMode,
+} from '../skills/analysis-v1/index.js'
+import {
+  buildDraftGroundingAuditUserPrompt,
   buildDraftRepairUserPrompt,
+  draftGroundingAuditSystemPrompt,
+  getDraftGroundingIssues,
   draftRepairSystemPrompt,
   draftSkillV1,
+  validateDraftGroundingAuditOutput,
   validateDraftSkillOutput,
 } from '../skills/draft-v1/index.js'
 import { prepareAiSkill } from '../skills/runtime.js'
@@ -438,10 +445,73 @@ export async function analyzeReferencesWithDeepSeek(
   )
 
   return {
-    analysis: parsed.value,
+    analysis: normalizeAnalysisContentMode(parsed.value, input),
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
     usage: parsed.usage,
+  }
+}
+
+async function auditDraftGroundingWithDeepSeek(
+  config: AppConfig,
+  input: GenerateDraftRequest,
+  candidateDraft: AiDraftCopy,
+  model: string,
+) {
+  if (
+    input.brief.sourceFacts.trim().length === 0 &&
+    input.brief.facts.length === 0 &&
+    !input.brief.allowConservativeDraft
+  ) {
+    return {
+      issues: [],
+      usage: null,
+    }
+  }
+
+  const data = await requestDeepSeekChatCompletion(config, {
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: draftGroundingAuditSystemPrompt,
+      },
+      {
+        role: 'user',
+        content: buildDraftGroundingAuditUserPrompt(input, candidateDraft),
+      },
+    ],
+    response_format: {
+      type: 'json_object',
+    },
+    thinking: {
+      type: 'disabled',
+    },
+    max_tokens: 1800,
+    temperature: 0,
+    stream: false,
+  })
+
+  if (data.error?.message) {
+    throw new DeepSeekUpstreamError(data.error.message, 502)
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new DeepSeekUpstreamError(
+      'DeepSeek returned an empty draft grounding audit.',
+      502,
+    )
+  }
+
+  const audit = validateDraftGroundingAuditOutput(
+    parseJsonContent(content),
+    candidateDraft,
+  )
+
+  return {
+    issues: getDraftGroundingIssues(audit),
+    usage: toUsage(data.usage),
   }
 }
 
@@ -516,37 +586,32 @@ export async function generateDraftWithDeepSeek(
     )
   }
 
-  try {
-    candidateDraft = validateDraftSkillOutput(candidateDraft, input.length)
-  } catch (initialValidationError) {
-    let combinedUsage = initialUsage
-    let lastValidationError: unknown = initialValidationError
+  let combinedUsage = initialUsage
+  let lastValidationError: unknown = new Error('Draft validation did not run.')
 
-    for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
-      let repairData: DeepSeekChatCompletionResponse
+  for (let repairAttempt = 0; repairAttempt <= 2; repairAttempt += 1) {
+    let groundingIssues: Awaited<
+      ReturnType<typeof auditDraftGroundingWithDeepSeek>
+    >['issues'] = []
+    let contractIsValid = false
+
+    try {
+      candidateDraft = validateDraftSkillOutput(candidateDraft, input.length, input)
+      contractIsValid = true
+    } catch (error) {
+      lastValidationError = error
+    }
+
+    if (contractIsValid) {
       try {
-        repairData = await requestDeepSeekChatCompletion(config, {
-          model: preparedSkill.model,
-          messages: [
-            {
-              role: 'system',
-              content: draftRepairSystemPrompt,
-            },
-            {
-              role: 'user',
-              content: buildDraftRepairUserPrompt(input, candidateDraft),
-            },
-          ],
-          response_format: {
-            type: 'json_object',
-          },
-          thinking: {
-            type: 'disabled',
-          },
-          max_tokens: preparedSkill.maxTokens,
-          temperature: 0.2,
-          stream: false,
-        })
+        const audit = await auditDraftGroundingWithDeepSeek(
+          config,
+          input,
+          candidateDraft,
+          preparedSkill.model,
+        )
+        combinedUsage = mergeAiUsage(combinedUsage, audit.usage)
+        groundingIssues = audit.issues
       } catch (error) {
         throw new DeepSeekOutputValidationError(
           error,
@@ -555,62 +620,95 @@ export async function generateDraftWithDeepSeek(
         )
       }
 
-      const repairUsage = toUsage(repairData.usage)
-      combinedUsage = mergeAiUsage(combinedUsage, repairUsage)
-      if (repairData.error?.message) {
-        throw new DeepSeekOutputValidationError(
-          new DeepSeekUpstreamError(repairData.error.message, 502),
-          combinedUsage,
-          preparedSkill.metadata.promptHash,
-        )
-      }
-      const repairContent = repairData.choices?.[0]?.message?.content
-      if (!repairContent) {
-        throw new DeepSeekOutputValidationError(
-          new Error('DeepSeek returned an empty repaired draft.'),
-          combinedUsage,
-          preparedSkill.metadata.promptHash,
-        )
-      }
-
-      try {
-        candidateDraft = preparedSkill.outputSchema.parse(
-          parseJsonContent(repairContent),
-        )
-      } catch (error) {
-        throw new DeepSeekOutputValidationError(
-          error,
-          combinedUsage,
-          preparedSkill.metadata.promptHash,
-        )
-      }
-
-      try {
-        candidateDraft = validateDraftSkillOutput(candidateDraft, input.length)
+      if (groundingIssues.length === 0) {
         return {
           draft: candidateDraft,
           skill: preparedSkill.metadata,
           model: preparedSkill.model,
           usage: combinedUsage,
         }
-      } catch (error) {
-        lastValidationError = error
       }
+
+      lastValidationError = new Error(
+        `Draft contains ${groundingIssues.length} unsupported or contradicted assertion(s): ${groundingIssues
+          .map((issue) => issue.quote)
+          .join(' | ')}`,
+      )
     }
 
-    throw new DeepSeekOutputValidationError(
-      lastValidationError,
-      combinedUsage,
-      preparedSkill.metadata.promptHash,
-    )
+    if (repairAttempt === 2) break
+
+    let repairData: DeepSeekChatCompletionResponse
+    try {
+      repairData = await requestDeepSeekChatCompletion(config, {
+        model: preparedSkill.model,
+        messages: [
+          {
+            role: 'system',
+            content: draftRepairSystemPrompt,
+          },
+          {
+            role: 'user',
+            content: buildDraftRepairUserPrompt(
+              input,
+              candidateDraft,
+              groundingIssues,
+            ),
+          },
+        ],
+        response_format: {
+          type: 'json_object',
+        },
+        thinking: {
+          type: 'disabled',
+        },
+        max_tokens: preparedSkill.maxTokens,
+        temperature: 0.2,
+        stream: false,
+      })
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    combinedUsage = mergeAiUsage(combinedUsage, toUsage(repairData.usage))
+    if (repairData.error?.message) {
+      throw new DeepSeekOutputValidationError(
+        new DeepSeekUpstreamError(repairData.error.message, 502),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+    const repairContent = repairData.choices?.[0]?.message?.content
+    if (!repairContent) {
+      throw new DeepSeekOutputValidationError(
+        new Error('DeepSeek returned an empty repaired draft.'),
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
+
+    try {
+      candidateDraft = preparedSkill.outputSchema.parse(
+        parseJsonContent(repairContent),
+      )
+    } catch (error) {
+      throw new DeepSeekOutputValidationError(
+        error,
+        combinedUsage,
+        preparedSkill.metadata.promptHash,
+      )
+    }
   }
 
-  return {
-    draft: candidateDraft,
-    skill: preparedSkill.metadata,
-    model: preparedSkill.model,
-    usage: initialUsage,
-  }
+  throw new DeepSeekOutputValidationError(
+    lastValidationError,
+    combinedUsage,
+    preparedSkill.metadata.promptHash,
+  )
 }
 
 export async function rewriteDraftWithDeepSeek(

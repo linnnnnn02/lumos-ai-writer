@@ -16,6 +16,7 @@
     "@lumos-ai/api": "workspace:*",
     "@lumos-ai/shared": "workspace:*",
     "@radix-ui/react-checkbox": "^1.3.3",
+    "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/supabase-js": "^2.105.4",
