@@ -41,12 +41,16 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 const retriableReadStatuses = new Set([500, 502, 503, 504])
 const readRetryDelayMs = 250
 
-class ApiClientError extends Error {
+export class ApiClientError extends Error {
+  code: string
+  details: unknown
   status: number
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code = '', details?: unknown) {
     super(message)
     this.name = 'ApiClientError'
+    this.code = code
+    this.details = details
     this.status = status
   }
 }
@@ -83,7 +87,12 @@ async function requestJson<T>(
           typeof data?.error?.message === 'string'
             ? data.error.message
             : `API request failed with status ${response.status}`
-        throw new ApiClientError(message, response.status)
+        throw new ApiClientError(
+          message,
+          response.status,
+          typeof data?.error?.code === 'string' ? data.error.code : '',
+          data?.error?.details,
+        )
       }
 
       if (data === null) {

@@ -30,6 +30,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { ApiClientError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 
 type LibraryStatus = 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
@@ -78,6 +79,9 @@ type EditingTagNameDraft = {
   tagName: string
 }
 
+type FolderConflictResource = Pick<SavedFolderRecord, 'id' | 'name' | 'updatedAt'>
+type NoteConflictResource = Pick<SavedNoteRecord, 'id' | 'filename' | 'title' | 'updatedAt'>
+
 type ConfirmAction =
   | { type: 'folder'; folder: SavedFolderRecord }
   | { type: 'note'; note: SavedNoteRecord }
@@ -111,13 +115,13 @@ type LibraryManagerProps = {
   onRefresh: () => Promise<void> | void
   onRestoreFolder: (folderId: string) => Promise<void>
   onRestoreNote: (noteId: string) => Promise<void>
-  onSaveNote: (note: SavedNoteRecord, draft: NoteDraft) => Promise<void>
+  onSaveNote: (note: SavedNoteRecord, draft: NoteDraft) => Promise<SavedNoteRecord>
   onSaveNoteSnippets: (
     note: SavedNoteRecord,
     drafts: SnippetDraft[],
     existingSnippets: SavedSnippetRecord[],
   ) => Promise<void>
-  onUpdateFolder: (folder: SavedFolderRecord, name: string) => Promise<void>
+  onUpdateFolder: (folder: SavedFolderRecord, name: string) => Promise<SavedFolderRecord>
   onUpdateNoteLearningStatus: (
     note: SavedNoteRecord,
     status: Extract<NoteLearningStatus, 'ready' | 'excluded'>,
@@ -324,6 +328,55 @@ function toNoteDraft(note: SavedNoteRecord): NoteDraft {
   }
 }
 
+function getConflictResource(error: unknown) {
+  if (!(error instanceof ApiClientError) || error.status !== 409 || error.code !== 'conflict') {
+    return null
+  }
+  if (!error.details || typeof error.details !== 'object' || !('resource' in error.details)) {
+    return null
+  }
+  return error.details.resource
+}
+
+function isFolderConflictResource(value: unknown): value is FolderConflictResource {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'id' in value &&
+      typeof value.id === 'string' &&
+      'name' in value &&
+      typeof value.name === 'string' &&
+      'updatedAt' in value &&
+      typeof value.updatedAt === 'string',
+  )
+}
+
+function isNoteConflictResource(value: unknown): value is NoteConflictResource {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'id' in value &&
+      typeof value.id === 'string' &&
+      'filename' in value &&
+      typeof value.filename === 'string' &&
+      'title' in value &&
+      typeof value.title === 'string' &&
+      'updatedAt' in value &&
+      typeof value.updatedAt === 'string',
+  )
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '操作失败，请稍后重试。'
+}
+
+function isSameOrNewerVersion(candidate: string, baseline: string) {
+  const candidateTime = new Date(candidate).getTime()
+  const baselineTime = new Date(baseline).getTime()
+  if (Number.isNaN(candidateTime) || Number.isNaN(baselineTime)) return candidate === baseline
+  return candidateTime >= baselineTime
+}
+
 function getHighlightWash(colorValue: string | undefined) {
   if (colorValue && /^#[0-9a-f]{6}$/i.test(colorValue)) return `${colorValue}26`
   return 'rgba(100, 116, 139, 0.14)'
@@ -486,11 +539,15 @@ export function LibraryManager({
   const [appView, setAppView] = React.useState<AppView>('library')
   const [confirmAction, setConfirmAction] = React.useState<ConfirmAction | null>(null)
   const [detailFeedback, setDetailFeedback] = React.useState('')
+  const [detailFeedbackIsError, setDetailFeedbackIsError] = React.useState(false)
   const [detailNote, setDetailNote] = React.useState<SavedNoteRecord | null>(null)
   const [detailTrashEntry, setDetailTrashEntry] = React.useState<TrashNoteEntry | null>(null)
   const [editingTagName, setEditingTagName] = React.useState<EditingTagNameDraft | null>(null)
   const [feedback, setFeedback] = React.useState('')
   const [folderDrafts, setFolderDrafts] = React.useState<Record<string, string>>({})
+  const [folderRecordOverrides, setFolderRecordOverrides] = React.useState<
+    Record<string, SavedFolderRecord>
+  >({})
   const [isCreatingFolder, setIsCreatingFolder] = React.useState(false)
   const [isMutating, setIsMutating] = React.useState(false)
   const [isResizingSidebar, setIsResizingSidebar] = React.useState(false)
@@ -527,10 +584,21 @@ export function LibraryManager({
     activeFolderId === ALL_FOLDERS || folders.some((folder) => folder.id === activeFolderId)
       ? activeFolderId
       : folders[0]?.id ?? ALL_FOLDERS
+  function getCurrentFolderRecord(folder: SavedFolderRecord) {
+    const override = folderRecordOverrides[folder.id]
+    return override && !isSameOrNewerVersion(folder.updatedAt, override.updatedAt)
+      ? override
+      : folder
+  }
   const activeFolder = React.useMemo(() => {
     if (effectiveActiveFolderId === ALL_FOLDERS) return null
-    return folders.find((folder) => folder.id === effectiveActiveFolderId) ?? null
-  }, [effectiveActiveFolderId, folders])
+    const folder = folders.find((candidate) => candidate.id === effectiveActiveFolderId) ?? null
+    if (!folder) return null
+    const override = folderRecordOverrides[folder.id]
+    return override && !isSameOrNewerVersion(folder.updatedAt, override.updatedAt)
+      ? override
+      : folder
+  }, [effectiveActiveFolderId, folderRecordOverrides, folders])
   const activeFolderDraft = activeFolder ? folderDrafts[activeFolder.id] ?? activeFolder.name : ''
 
   React.useEffect(() => {
@@ -696,6 +764,7 @@ export function LibraryManager({
     setActiveSnippetId('')
     setReaderSelection(null)
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
     setEditingTagName(null)
   }
 
@@ -707,6 +776,7 @@ export function LibraryManager({
     setActiveSnippetId(nextDrafts[0]?.id || '')
     setReaderSelection(null)
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
     setEditingTagName(null)
   }
 
@@ -718,6 +788,7 @@ export function LibraryManager({
     setActiveSnippetId(nextDrafts[0]?.id || '')
     setReaderSelection(null)
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
     setEditingTagName(null)
   }
 
@@ -732,7 +803,7 @@ export function LibraryManager({
       await action()
       setFeedback(successMessage)
     } catch (mutationError) {
-      setFeedback(mutationError instanceof Error ? mutationError.message : '操作失败，请稍后重试。')
+      setFeedback(getErrorMessage(mutationError))
     } finally {
       setIsMutating(false)
     }
@@ -755,19 +826,85 @@ export function LibraryManager({
     if (!activeFolder) return
     const name = activeFolderDraft.trim()
     if (!name || name === activeFolder.name) return
-    await runMutation(async () => {
-      await onUpdateFolder(activeFolder, name)
+    setIsMutating(true)
+    setFeedback('')
+    try {
+      const updatedFolder = await onUpdateFolder(activeFolder, name)
+      setFolderRecordOverrides((current) => ({
+        ...current,
+        [updatedFolder.id]: updatedFolder,
+      }))
       setFolderDrafts((current) => {
         const next = { ...current }
         delete next[activeFolder.id]
         return next
       })
-    }, '文件夹已重命名。')
+      setFeedback('文件夹已重命名。')
+    } catch (mutationError) {
+      const conflictResource = getConflictResource(mutationError)
+      if (
+        isFolderConflictResource(conflictResource) &&
+        conflictResource.id === activeFolder.id
+      ) {
+        const currentFolder = { ...activeFolder, ...conflictResource }
+        setFolderRecordOverrides((current) => ({
+          ...current,
+          [currentFolder.id]: currentFolder,
+        }))
+        setFolderDrafts((current) => {
+          const next = { ...current }
+          delete next[activeFolder.id]
+          return next
+        })
+      }
+      setFeedback(getErrorMessage(mutationError))
+    } finally {
+      setIsMutating(false)
+    }
   }
 
   async function handleSaveNote() {
     if (!selectedDetailNote || !noteDraft || detailTrashEntry) return
-    await runMutation(() => onSaveNote(selectedDetailNote, noteDraft), '笔记已保存。')
+    if (!canMutate) {
+      setDetailFeedback('登录后可管理云端文案库。')
+      setDetailFeedbackIsError(true)
+      return
+    }
+
+    setIsMutating(true)
+    setFeedback('')
+    setDetailFeedback('')
+    setDetailFeedbackIsError(false)
+    try {
+      const updatedNote = await onSaveNote(selectedDetailNote, noteDraft)
+      setDetailNote(updatedNote)
+      setNoteDrafts((current) => ({
+        ...current,
+        [updatedNote.id]: toNoteDraft(updatedNote),
+      }))
+      setDetailFeedback('笔记已保存。')
+    } catch (mutationError) {
+      const conflictResource = getConflictResource(mutationError)
+      if (
+        isNoteConflictResource(conflictResource) &&
+        conflictResource.id === selectedDetailNote.id
+      ) {
+        const currentNote = {
+          ...selectedDetailNote,
+          ...conflictResource,
+          coverImageUrl: selectedDetailNote.coverImageUrl ?? '',
+        }
+        setDetailNote(currentNote)
+        setNoteDrafts((current) => ({
+          ...current,
+          [currentNote.id]: toNoteDraft(currentNote),
+        }))
+      }
+      setDetailFeedback(getErrorMessage(mutationError))
+      setDetailFeedbackIsError(true)
+    } finally {
+      setIsMutating(false)
+    }
   }
 
   async function handleUpdateLearningStatus(
@@ -793,6 +930,7 @@ export function LibraryManager({
   function updateNoteDraft(noteId: string, nextDraft: NoteDraft) {
     setNoteDrafts((current) => ({ ...current, [noteId]: nextDraft }))
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
   }
 
   function updateSnippetDraft(id: string, patch: Partial<SnippetDraft>) {
@@ -800,6 +938,7 @@ export function LibraryManager({
       current.map((draft) => (draft.id === id ? { ...draft, ...patch } : draft)),
     )
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
   }
 
   function addSnippetDraft() {
@@ -818,6 +957,7 @@ export function LibraryManager({
     setActiveSnippetId(id)
     setReaderSelection(null)
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
   }
 
   function removeSnippetDraft(id: string) {
@@ -827,6 +967,7 @@ export function LibraryManager({
     setEditingTagName((current) => (current?.snippetId === id ? null : current))
     setReaderSelection(null)
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
   }
 
   function startTagNameEdit(draft: SnippetDraft) {
@@ -837,6 +978,7 @@ export function LibraryManager({
       tagName: tagNameByColor.get(draft.colorValue) || draft.colorTagName,
     })
     setDetailFeedback('')
+    setDetailFeedbackIsError(false)
   }
 
   function confirmTagNameEdit() {
@@ -852,6 +994,7 @@ export function LibraryManager({
     )
     setEditingTagName(null)
     setDetailFeedback('标签名已更新，保存后生效')
+    setDetailFeedbackIsError(false)
   }
 
   function updateReaderSelection() {
@@ -1154,27 +1297,30 @@ export function LibraryManager({
             <span>全部</span>
             <span className="text-xs font-bold text-[var(--soft-foreground)]">{notes.length}</span>
           </button>
-          {folders.map((folder) => (
-            <button
-              key={folder.id}
-              type="button"
-              className={cn(
-                'grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center rounded-[var(--ui-field-radius)] px-3 text-left text-sm transition',
-                appView === 'library' && folder.id === effectiveActiveFolderId
-                  ? 'bg-[rgba(103,199,255,0.1)] font-extrabold text-[var(--foreground)] shadow-[var(--shadow-muted)]'
-                  : 'text-[var(--muted-foreground)] hover:bg-white/70',
-              )}
-              onClick={() => {
-                setAppView('library')
-                setActiveFolderId(folder.id)
-              }}
-            >
-              <span className="truncate">{folder.name}</span>
-              <span className="text-xs font-bold text-[var(--soft-foreground)]">
-                {noteCountByFolderId.get(folder.id) ?? 0}
-              </span>
-            </button>
-          ))}
+          {folders.map((folder) => {
+            const displayFolder = getCurrentFolderRecord(folder)
+            return (
+              <button
+                key={folder.id}
+                type="button"
+                className={cn(
+                  'grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center rounded-[var(--ui-field-radius)] px-3 text-left text-sm transition',
+                  appView === 'library' && folder.id === effectiveActiveFolderId
+                    ? 'bg-[rgba(103,199,255,0.1)] font-extrabold text-[var(--foreground)] shadow-[var(--shadow-muted)]'
+                    : 'text-[var(--muted-foreground)] hover:bg-white/70',
+                )}
+                onClick={() => {
+                  setAppView('library')
+                  setActiveFolderId(folder.id)
+                }}
+              >
+                <span className="truncate">{displayFolder.name}</span>
+                <span className="text-xs font-bold text-[var(--soft-foreground)]">
+                  {noteCountByFolderId.get(folder.id) ?? 0}
+                </span>
+              </button>
+            )
+          })}
         </nav>
 
         <div data-library-trash-nav className="mt-3 border-t border-[var(--border)] pt-3">
@@ -1247,7 +1393,15 @@ export function LibraryManager({
               </span>
             ) : null}
             <AuthStatus cloudSummary={authCloudSummary} />
-            <Button variant="secondary" size="sm" onClick={onRefresh} disabled={isSyncing}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setFeedback('')
+                onRefresh()
+              }}
+              disabled={isSyncing}
+            >
               {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
               {isRefreshing ? '同步中' : '刷新'}
             </Button>
@@ -1880,7 +2034,15 @@ export function LibraryManager({
             </div>
 
             <footer className="flex flex-col items-stretch justify-between gap-[var(--ui-gap-group)] border-t border-[var(--border)] px-[var(--ui-inset-panel)] py-[var(--ui-inset-card)] sm:flex-row sm:items-center sm:gap-[var(--ui-gap-block)]">
-              <span className="text-sm font-bold text-[var(--muted-foreground)]" role="status">
+              <span
+                className={cn(
+                  'text-sm font-bold',
+                  detailFeedbackIsError
+                    ? 'text-[rgba(185,28,28,0.88)]'
+                    : 'text-[var(--muted-foreground)]',
+                )}
+                role="status"
+              >
                 {detailFeedback}
               </span>
               <div className="flex flex-wrap justify-end gap-[var(--ui-gap-control)]">
