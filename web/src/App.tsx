@@ -3719,10 +3719,11 @@ function App() {
   async function handleUpdateLibraryFolder(folder: SavedFolderRecord, name: string) {
     const accessToken = await getLibraryAccessToken()
     try {
-      await updateFolder(accessToken, folder.id, {
+      const response = await updateFolder(accessToken, folder.id, {
         name,
         expectedUpdatedAt: folder.updatedAt,
       })
+      return response.folder
     } finally {
       cloudLibrary.refresh()
     }
@@ -3759,23 +3760,25 @@ function App() {
 
     try {
       if (isNameOnlyUpdate && note.updatedAt) {
-        await updateNote(accessToken, note.id, {
+        const response = await updateNote(accessToken, note.id, {
           filename,
           title,
           expectedUpdatedAt: note.updatedAt,
         })
-      } else {
-        await upsertNote(accessToken, {
-          authorName: draft.authorName,
-          contentText: draft.contentText,
-          coverImageUrl: note.coverImageUrl ?? '',
-          filename,
-          folderId,
-          savedAt: note.savedAt,
-          sourceUrl: note.sourceUrl,
-          title,
-        })
+        return { ...response.note, coverImageUrl: response.note.coverImageUrl ?? '' }
       }
+
+      const response = await upsertNote(accessToken, {
+        authorName: draft.authorName,
+        contentText: draft.contentText,
+        coverImageUrl: note.coverImageUrl ?? '',
+        filename,
+        folderId,
+        savedAt: note.savedAt,
+        sourceUrl: note.sourceUrl,
+        title,
+      })
+      return { ...response.note, coverImageUrl: response.note.coverImageUrl ?? '' }
     } finally {
       cloudLibrary.refresh()
     }
