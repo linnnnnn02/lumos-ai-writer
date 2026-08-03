@@ -107,6 +107,7 @@ import {
   restoreFolder,
   restoreNote,
   updateFolder,
+  updateNote,
   updateNoteLearningStatus,
   updateSnippet,
   upsertNote,
@@ -3717,8 +3718,14 @@ function App() {
 
   async function handleUpdateLibraryFolder(folder: SavedFolderRecord, name: string) {
     const accessToken = await getLibraryAccessToken()
-    await updateFolder(accessToken, folder.id, { name })
-    cloudLibrary.refresh()
+    try {
+      await updateFolder(accessToken, folder.id, {
+        name,
+        expectedUpdatedAt: folder.updatedAt,
+      })
+    } finally {
+      cloudLibrary.refresh()
+    }
   }
 
   async function handleDeleteLibraryFolder(folder: SavedFolderRecord) {
@@ -3742,17 +3749,36 @@ function App() {
       ? draft.folderId
       : null
 
-    await upsertNote(accessToken, {
-      authorName: draft.authorName,
-      contentText: draft.contentText,
-      coverImageUrl: note.coverImageUrl ?? '',
-      filename: draft.filename || draft.title || note.filename,
-      folderId,
-      savedAt: note.savedAt,
-      sourceUrl: note.sourceUrl,
-      title: draft.title || draft.filename || note.title,
-    })
-    cloudLibrary.refresh()
+    const filename = draft.filename || draft.title || note.filename
+    const title = draft.title || draft.filename || note.title
+    const isNameOnlyUpdate =
+      Boolean(note.updatedAt) &&
+      draft.authorName === note.authorName &&
+      draft.contentText === note.contentText &&
+      folderId === (note.folderId || null)
+
+    try {
+      if (isNameOnlyUpdate && note.updatedAt) {
+        await updateNote(accessToken, note.id, {
+          filename,
+          title,
+          expectedUpdatedAt: note.updatedAt,
+        })
+      } else {
+        await upsertNote(accessToken, {
+          authorName: draft.authorName,
+          contentText: draft.contentText,
+          coverImageUrl: note.coverImageUrl ?? '',
+          filename,
+          folderId,
+          savedAt: note.savedAt,
+          sourceUrl: note.sourceUrl,
+          title,
+        })
+      }
+    } finally {
+      cloudLibrary.refresh()
+    }
   }
 
   async function handleDeleteLibraryNote(note: SavedNoteRecord) {

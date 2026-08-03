@@ -86,6 +86,7 @@ import {
   listNotes,
   listSnippets,
   listTrash,
+  LibraryVersionConflictError,
   recordAiRun,
   restoreFolder,
   restoreNote,
@@ -508,6 +509,14 @@ export function createApiApp() {
       return c.json(updateFolderResponseSchema.parse({ ok: true, folder }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof LibraryVersionConflictError) {
+        return jsonError(c, {
+          code: 'conflict',
+          message: '该名称已在另一台设备更新，请确认最新云端名称后再试。',
+          status: 409,
+          details: { resource: error.resource },
+        })
+      }
       if (getErrorMessage(error) === 'Folder not found.') {
         return jsonError(c, {
           code: 'not_found',
@@ -676,6 +685,14 @@ export function createApiApp() {
       return c.json(updateNoteResponseSchema.parse({ ok: true, note }))
     } catch (error) {
       if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof LibraryVersionConflictError) {
+        return jsonError(c, {
+          code: 'conflict',
+          message: '该名称已在另一台设备更新，请确认最新云端名称后再试。',
+          status: 409,
+          details: { resource: error.resource },
+        })
+      }
       if (getErrorMessage(error) === 'Note not found.') {
         return jsonError(c, {
           code: 'not_found',

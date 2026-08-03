@@ -18,6 +18,7 @@ export type CloudLibraryOperationTarget =
       localId: string
       cloudId?: string
       name: string
+      expectedUpdatedAt?: string
       noteSourceUrls: string[]
       renameTo?: string
     }
@@ -25,9 +26,19 @@ export type CloudLibraryOperationTarget =
       type: 'note'
       localId: string
       cloudId?: string
+      filename: string
+      expectedUpdatedAt?: string
       sourceUrl: string
       renameTo?: string
     }
+
+export type CloudLibraryOperationConflict = {
+  cloudId: string
+  resourceType: 'folder' | 'note'
+  cloudName: string
+  cloudUpdatedAt: string
+  localName: string
+}
 
 export type CloudLibraryOperationJob = {
   id: string
@@ -35,10 +46,15 @@ export type CloudLibraryOperationJob = {
   userId: string
   action: CloudLibraryOperationAction
   target: CloudLibraryOperationTarget
-  status: 'pending' | 'syncing' | 'failed'
+  status: 'pending' | 'syncing' | 'failed' | 'conflict'
   attempts: number
   lastError: string
+  conflict?: CloudLibraryOperationConflict
   updatedAt: string
+}
+
+export function isCloudLibraryOperationProcessable(job: CloudLibraryOperationJob) {
+  return job.status === 'pending' || job.status === 'syncing'
 }
 
 type CloudLibraryOperationSnapshot = {
@@ -56,6 +72,7 @@ export function createCloudFolderOperationTarget(
     localId: folder.id,
     cloudId: folder.cloudId,
     name: folder.name,
+    ...(folder.cloudId ? { expectedUpdatedAt: folder.updatedAt } : {}),
     noteSourceUrls: notes
       .filter((note) => note.folderId === folder.id)
       .map((note) => note.sourceUrl),
@@ -69,6 +86,8 @@ export function createCloudNoteOperationTarget(
     type: 'note',
     localId: note.id,
     cloudId: note.cloudId,
+    filename: note.filename,
+    ...(note.cloudId && note.updatedAt ? { expectedUpdatedAt: note.updatedAt } : {}),
     sourceUrl: note.sourceUrl,
   }
 }

@@ -103,6 +103,28 @@ export class SupabaseSchemaMissingError extends Error {
   }
 }
 
+export type LibraryVersionConflictResource =
+  | {
+      type: 'folder'
+      id: string
+      name: string
+      updatedAt: string
+    }
+  | {
+      type: 'note'
+      id: string
+      filename: string
+      title: string
+      updatedAt: string
+    }
+
+export class LibraryVersionConflictError extends Error {
+  constructor(readonly resource: LibraryVersionConflictResource) {
+    super('Library resource has changed since it was loaded.')
+    this.name = 'LibraryVersionConflictError'
+  }
+}
+
 function assertNoDatabaseError(error: DatabaseError | null) {
   if (!error) return
   if (
@@ -287,13 +309,30 @@ export async function updateFolder(
     .eq('user_id', user.id)
     .eq('id', folderId)
     .is('deleted_at', null)
+    .eq('updated_at', input.expectedUpdatedAt)
     .select('id,name,updated_at')
     .maybeSingle()
 
   assertNoDatabaseError(error)
 
   if (!data) {
-    throw new Error('Folder not found.')
+    const currentResult = await supabase
+      .from('folders')
+      .select('id,name,updated_at')
+      .eq('user_id', user.id)
+      .eq('id', folderId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    assertNoDatabaseError(currentResult.error)
+    const current = currentResult.data as FolderRow | null
+    if (!current) throw new Error('Folder not found.')
+    throw new LibraryVersionConflictError({
+      type: 'folder',
+      id: current.id,
+      name: current.name,
+      updatedAt: current.updated_at,
+    })
   }
 
   const noteResult = await supabase
@@ -611,17 +650,40 @@ export async function updateNote(
   input: UpdateNoteRequest,
 ): Promise<NoteDto> {
   const supabase = getAdminClient(config)
+  const { expectedUpdatedAt, ...updates } = input
   const { data, error } = await supabase
     .from('notes')
-    .update(input)
+    .update(updates)
     .eq('user_id', user.id)
     .eq('id', noteId)
     .is('deleted_at', null)
+    .eq('updated_at', expectedUpdatedAt)
     .select(noteSelectColumns)
     .maybeSingle()
 
   assertNoDatabaseError(error)
-  if (!data) throw new Error('Note not found.')
+  if (!data) {
+    const currentResult = await supabase
+      .from('notes')
+      .select('id,filename,title,updated_at')
+      .eq('user_id', user.id)
+      .eq('id', noteId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    assertNoDatabaseError(currentResult.error)
+    const current = currentResult.data as
+      | { id: string; filename: string; title: string; updated_at: string }
+      | null
+    if (!current) throw new Error('Note not found.')
+    throw new LibraryVersionConflictError({
+      type: 'note',
+      id: current.id,
+      filename: current.filename,
+      title: current.title,
+      updatedAt: current.updated_at,
+    })
+  }
 
   const note = data as NoteRow
   let folderName = ''

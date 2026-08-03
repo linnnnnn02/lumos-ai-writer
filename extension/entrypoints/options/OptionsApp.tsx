@@ -12,6 +12,7 @@ import {
 import { AiEditing, ArrowUpRight, MoreHorizontal, Waste } from '../../components/ui/icon'
 import { pinyin } from 'pinyin-pro'
 import {
+  type CurrentUser,
   normalizeNoteUrl,
   type SavedFolderRecord,
   type SavedNoteRecord,
@@ -54,13 +55,20 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { FolderIcon } from '../../components/ui/folder-icon'
 import {
+  CLOUD_LIBRARY_OPERATION_QUEUE_STORAGE_KEY,
   createCloudFolderOperationTarget,
   createCloudFolderRenameTarget,
   createCloudNoteOperationTarget,
   createCloudNoteRenameTarget,
+  getCloudLibraryOperationQueue,
   type CloudLibraryOperationAction,
+  type CloudLibraryOperationJob,
   type CloudLibraryOperationTarget,
 } from '../../lib/cloud-library-operation-queue'
+import {
+  CLOUD_USER_STORAGE_KEY,
+  getCloudStorageValue,
+} from '../../lib/cloud-session'
 
 type SortMode = 'newest' | 'oldest' | 'title'
 type AppView = 'library' | 'trash'
@@ -651,6 +659,12 @@ export function OptionsApp() {
   const [detailFeedback, setDetailFeedback] = useState('')
   const [isRenamingDetailNote, setIsRenamingDetailNote] = useState(false)
   const [noteRenameDraft, setNoteRenameDraft] = useState('')
+  const [renameConflicts, setRenameConflicts] = useState<CloudLibraryOperationJob[]>([])
+  const [resolvingConflict, setResolvingConflict] = useState<{
+    jobId: string
+    resolution: 'accept-cloud' | 'keep-local'
+  } | null>(null)
+  const [conflictFeedback, setConflictFeedback] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === 'undefined') return SIDEBAR_WIDTH_DEFAULT
 
@@ -692,14 +706,27 @@ export function OptionsApp() {
     })
   }
 
+  async function loadRenameConflicts() {
+    if (typeof chrome === 'undefined') return
+    const [queue, user] = await Promise.all([
+      getCloudLibraryOperationQueue(),
+      getCloudStorageValue<CurrentUser>(CLOUD_USER_STORAGE_KEY),
+    ])
+    setRenameConflicts(
+      queue.filter(
+        (job) => job.userId === user?.id && job.status === 'conflict' && job.conflict,
+      ),
+    )
+  }
+
   useEffect(() => {
     void (async () => {
-      await loadData()
+      await Promise.all([loadData(), loadRenameConflicts()])
       if (typeof chrome === 'undefined') return
 
       try {
         await chrome.runtime?.sendMessage({ type: 'XHS_REFRESH_CLOUD_TRASH' })
-        await loadData()
+        await Promise.all([loadData(), loadRenameConflicts()])
       } catch {
         // The local library stays available when cloud refresh is temporarily unavailable.
       }
@@ -764,9 +791,13 @@ export function OptionsApp() {
         changes.savedNotes ||
         changes.savedSnippets ||
         changes[COLOR_TAG_NAMES_STORAGE_KEY] ||
-        changes[TRASH_STORAGE_KEY]
+        changes[TRASH_STORAGE_KEY] ||
+        changes[CLOUD_LIBRARY_OPERATION_QUEUE_STORAGE_KEY]
       ) {
         void loadData()
+      }
+      if (changes[CLOUD_LIBRARY_OPERATION_QUEUE_STORAGE_KEY]) {
+        void loadRenameConflicts()
       }
     }
 
@@ -801,6 +832,30 @@ export function OptionsApp() {
   useEffect(() => {
     setIsFolderActionMenuOpen(false)
   }, [activeFolderId])
+
+  async function handleResolveRenameConflict(
+    jobId: string,
+    resolution: 'accept-cloud' | 'keep-local',
+  ) {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return
+    setResolvingConflict({ jobId, resolution })
+    setConflictFeedback('')
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'XHS_RESOLVE_CLOUD_LIBRARY_CONFLICT',
+        jobId,
+        resolution,
+      })
+      if (!response?.ok || !response.resolved) {
+        throw new Error(response?.error || '这个冲突已失效，请刷新后再试。')
+      }
+      await Promise.all([loadData(), loadRenameConflicts()])
+    } catch (error) {
+      setConflictFeedback(error instanceof Error ? error.message : '名称冲突处理失败，请稍后重试。')
+    } finally {
+      setResolvingConflict(null)
+    }
+  }
 
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
     const shell = event.currentTarget.closest('.manager-shell')
@@ -2038,6 +2093,53 @@ export function OptionsApp() {
             <span className="search-icon" aria-hidden="true" />
           </div>
         </header>
+
+        {renameConflicts.length > 0 ? (
+          <section className="rename-conflict-list" aria-label="待处理的名称冲突">
+            {renameConflicts.map((job) => {
+              const conflict = job.conflict
+              if (!conflict) return null
+              const isResolving = resolvingConflict?.jobId === job.id
+              return (
+                <div className="rename-conflict-notice" key={job.id} role="status">
+                  <div className="rename-conflict-copy">
+                    <strong>另一台设备修改了{conflict.resourceType === 'folder' ? '文件夹' : '笔记'}名称</strong>
+                    <span>
+                      云端为“{conflict.cloudName}”，本机想改为“{conflict.localName}”。
+                    </span>
+                  </div>
+                  <div className="rename-conflict-actions">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="soft"
+                      disabled={Boolean(resolvingConflict)}
+                      onClick={() => void handleResolveRenameConflict(job.id, 'accept-cloud')}
+                    >
+                      {isResolving && resolvingConflict.resolution === 'accept-cloud'
+                        ? '处理中...'
+                        : '保留云端'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(resolvingConflict)}
+                      onClick={() => void handleResolveRenameConflict(job.id, 'keep-local')}
+                    >
+                      {isResolving && resolvingConflict.resolution === 'keep-local'
+                        ? '处理中...'
+                        : '使用本机名称'}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+            {conflictFeedback ? (
+              <p className="rename-conflict-feedback" role="alert">{conflictFeedback}</p>
+            ) : null}
+          </section>
+        ) : null}
 
         {appView === 'library' ? (
           <>

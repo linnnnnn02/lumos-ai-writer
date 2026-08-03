@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/utils/define-background'
 import type { CurrentUser } from '@lumos-ai/shared'
 import {
   getCloudLibrary,
+  getCloudLibraryConflictResource,
   getCloudTrash,
   syncAnnotationToCloud,
   syncCloudLibraryOperation,
@@ -19,10 +20,12 @@ import {
   getCloudLibraryOperationQueue,
   getCloudLibraryResourceKey,
   getRememberedCloudResourceId,
+  isCloudLibraryOperationProcessable,
   rememberCloudResourceId,
   resolveCloudLibraryOperationCloudId,
   saveCloudLibraryOperationQueue,
   type CloudLibraryOperationAction,
+  type CloudLibraryOperationConflict,
   type CloudLibraryOperationJob,
   type CloudLibraryOperationTarget,
 } from '../lib/cloud-library-operation-queue'
@@ -69,6 +72,11 @@ export default defineBackground(() => {
       }
     | {
         type: 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS'
+      }
+    | {
+        type: 'XHS_RESOLVE_CLOUD_LIBRARY_CONFLICT'
+        jobId: string
+        resolution: 'accept-cloud' | 'keep-local'
       }
 
   type FetchNoteCoverResponse =
@@ -118,7 +126,9 @@ export default defineBackground(() => {
       if (library) {
         await applyCloudLibraryIdentitySnapshot(library, {
           pendingOperations: [
-            ...operationQueue.filter((job) => job.userId === user?.id),
+            ...operationQueue.filter(
+              (job) => job.userId === user?.id && job.status !== 'conflict',
+            ),
             ...annotationQueue.flatMap((job) => [
               ...(job.folder
                 ? [
@@ -138,7 +148,9 @@ export default defineBackground(() => {
       }
       const result = await applyCloudTrashSnapshot(trash.groups, {
         library,
-        pendingOperations: operationQueue.filter((job) => job.userId === user?.id),
+        pendingOperations: operationQueue.filter(
+          (job) => job.userId === user?.id && job.status !== 'conflict',
+        ),
       })
       return {
         authenticated: true,
@@ -336,7 +348,7 @@ export default defineBackground(() => {
 
   function claimNextCloudLibraryOperation() {
     return mutateCloudLibraryOperationQueue<CloudLibraryOperationJob | null>((queue) => {
-      const index = queue.findIndex((job) => job.status !== 'failed')
+      const index = queue.findIndex(isCloudLibraryOperationProcessable)
       if (index < 0) return { queue, value: null }
 
       const claimed: CloudLibraryOperationJob = {
@@ -405,6 +417,114 @@ export default defineBackground(() => {
     }))
   }
 
+  async function conflictCloudLibraryOperation(
+    jobId: string,
+    conflict: CloudLibraryOperationConflict,
+  ) {
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: 'conflict' as const,
+              conflict,
+              lastError: '名称已在另一台设备更新，请选择要保留的版本。',
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      ),
+      value: undefined,
+    }))
+  }
+
+  async function resolveCloudLibraryConflict(
+    jobId: string,
+    resolution: 'accept-cloud' | 'keep-local',
+  ) {
+    const job = (await getCloudLibraryOperationQueue()).find(
+      (entry) => entry.id === jobId && entry.status === 'conflict',
+    )
+    if (!job?.conflict) return false
+
+    if (resolution === 'accept-cloud') {
+      await completeCloudLibraryOperation(jobId)
+      await refreshCloudTrash()
+      return true
+    }
+
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((entry) =>
+        entry.id === jobId
+          ? {
+              ...entry,
+              target: {
+                ...entry.target,
+                expectedUpdatedAt: job.conflict?.cloudUpdatedAt,
+              },
+              status: 'pending' as const,
+              conflict: undefined,
+              lastError: '',
+              updatedAt: new Date().toISOString(),
+            }
+          : entry,
+      ),
+      value: undefined,
+    }))
+    await startCloudLibraryOperationQueue()
+    return true
+  }
+
+  async function ensureRenameBaseVersion(
+    job: CloudLibraryOperationJob,
+    cloudId: string,
+    token: string,
+  ) {
+    if (job.target.expectedUpdatedAt) return job.target.expectedUpdatedAt
+
+    const library = await getCloudLibrary(token)
+    const currentFolder =
+      job.target.type === 'folder'
+        ? library.folders.find((folder) => folder.id === cloudId)
+        : undefined
+    const currentNote =
+      job.target.type === 'note'
+        ? library.notes.find((note) => note.id === cloudId)
+        : undefined
+    const cloudName = currentFolder?.name ?? currentNote?.filename
+    const cloudUpdatedAt = currentFolder?.updatedAt ?? currentNote?.updatedAt
+    if (!cloudName || !cloudUpdatedAt) {
+      await failCloudLibraryOperation(job.id, '无法确认云端名称版本，已停止同步。')
+      return null
+    }
+
+    const originalName = job.target.type === 'folder' ? job.target.name : job.target.filename
+    if (cloudName !== originalName) {
+      await conflictCloudLibraryOperation(job.id, {
+        cloudId,
+        resourceType: job.target.type,
+        cloudName,
+        cloudUpdatedAt,
+        localName: job.target.renameTo?.trim() || originalName,
+      })
+      await refreshCloudTrash().catch(() => undefined)
+      return null
+    }
+
+    await mutateCloudLibraryOperationQueue((queue) => ({
+      queue: queue.map((entry) =>
+        entry.id === job.id
+          ? {
+              ...entry,
+              target: { ...entry.target, expectedUpdatedAt: cloudUpdatedAt },
+              updatedAt: new Date().toISOString(),
+            }
+          : entry,
+      ),
+      value: undefined,
+    }))
+    return cloudUpdatedAt
+  }
+
   async function processCloudLibraryOperationQueue() {
     while (true) {
       const job = await claimNextCloudLibraryOperation()
@@ -448,12 +568,15 @@ export default defineBackground(() => {
             await failCloudLibraryOperation(job.id, '重命名内容为空，已停止同步。')
             continue
           }
+          const expectedUpdatedAt = await ensureRenameBaseVersion(job, cloudId, token)
+          if (!expectedUpdatedAt) continue
           if (job.target.type === 'folder') {
             await syncCloudLibraryOperation(token, {
               action: 'rename',
               resourceType: 'folder',
               cloudId,
               name: renameTo,
+              expectedUpdatedAt,
             })
           } else {
             await syncCloudLibraryOperation(token, {
@@ -461,6 +584,7 @@ export default defineBackground(() => {
               resourceType: 'note',
               cloudId,
               filename: renameTo,
+              expectedUpdatedAt,
             })
           }
         } else {
@@ -471,7 +595,20 @@ export default defineBackground(() => {
           })
         }
         await completeCloudLibraryOperation(job.id)
+        if (job.action === 'rename') await refreshCloudTrash().catch(() => undefined)
       } catch (error) {
+        const resource = getCloudLibraryConflictResource(error)
+        if (resource && resource.type === job.target.type) {
+          await conflictCloudLibraryOperation(job.id, {
+            cloudId: resource.id,
+            resourceType: resource.type,
+            cloudName: resource.type === 'folder' ? resource.name : resource.filename,
+            cloudUpdatedAt: resource.updatedAt,
+            localName: job.target.renameTo?.trim() || '',
+          })
+          await refreshCloudTrash().catch(() => undefined)
+          continue
+        }
         await deferCloudLibraryOperation(
           job.id,
           error instanceof Error ? error.message : '网络异常，请稍后重试。',
@@ -487,7 +624,7 @@ export default defineBackground(() => {
       cloudLibraryOperationProcessingPromise = null
       void getCloudLibraryOperationQueue()
         .then((queue) => {
-          if (queue.some((job) => job.status !== 'failed')) {
+          if (queue.some(isCloudLibraryOperationProcessable)) {
             void startCloudLibraryOperationQueue()
           }
         })
@@ -796,6 +933,22 @@ export default defineBackground(() => {
           sendResponse({
             ok: false,
             error: error instanceof Error ? error.message : '无法重试云端操作。',
+          })
+        })
+      return true
+    }
+
+    if (
+      message.type === 'XHS_RESOLVE_CLOUD_LIBRARY_CONFLICT' &&
+      'jobId' in message &&
+      'resolution' in message
+    ) {
+      void resolveCloudLibraryConflict(message.jobId, message.resolution)
+        .then((resolved) => sendResponse({ ok: true, resolved }))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : '无法处理名称冲突。',
           })
         })
       return true

@@ -591,6 +591,54 @@ textarea {
   min-height: 64px;
 }
 
+.rename-conflict-list {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: var(--ui-space-2) 0 var(--ui-space-3);
+}
+
+.rename-conflict-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-space-4);
+  border: 1px solid rgba(180, 126, 48, 0.2);
+  border-radius: var(--ui-field-radius);
+  background: rgba(255, 248, 230, 0.72);
+  padding: var(--ui-space-3) var(--ui-space-4);
+}
+
+.rename-conflict-copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-space-1);
+}
+
+.rename-conflict-copy strong {
+  color: var(--manager-text);
+  font-size: var(--ui-text-control);
+  line-height: 1.4;
+}
+
+.rename-conflict-copy span,
+.rename-conflict-feedback {
+  margin: 0;
+  color: var(--manager-text-muted);
+  font-size: var(--ui-text-meta);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rename-conflict-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+
+.rename-conflict-feedback {
+  color: #a84f32;
+}
+
 .search-shell {
   position: relative;
   width: min(640px, 100%);
@@ -2189,6 +2237,7 @@ textarea {
   .library-header,
   .library-context,
   .library-subbar,
+  .rename-conflict-notice,
   .trash-subbar {
     grid-template-columns: 1fr;
     justify-content: stretch;
@@ -2196,6 +2245,10 @@ textarea {
 
   .library-context-controls {
     justify-content: flex-start;
+  }
+
+  .rename-conflict-actions {
+    flex-wrap: wrap;
   }
 
   .trash-context-controls {
