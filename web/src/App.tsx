@@ -18,6 +18,7 @@ import type {
   AiRewriteSuggestion,
   AiReaderPreviewResult,
   AiUsage,
+  AppliedWritingProfileContext,
   CreateFeedbackMemoryRequest,
   FeedbackMemoryDto,
   NoteLearningStatus,
@@ -34,6 +35,7 @@ import type {
   WorkspaceProjectDto,
 } from '@lumos-ai/shared'
 import {
+  appliedWritingProfileContextSchema,
   aiReaderPreviewResultSchema,
   isNoteReadyForLearning,
   normalizeNoteUrl,
@@ -131,6 +133,7 @@ import { buildDemoAnalysis } from './lib/analysis'
 import {
   ensureBaseDraftVersion,
   evolveDraftVersions,
+  getAppliedWritingPreferenceIds,
   isSameDraftCopy,
   normalizeDraftVersions,
   type DraftCopy as InitialDraftCopy,
@@ -283,6 +286,7 @@ type RewriteChatMessage = {
     }
   >
   recommendedIndex?: number
+  appliedWritingProfile?: AppliedWritingProfileContext
 }
 
 function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
@@ -893,13 +897,23 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       const draft = conversation.draft
         ? { title: conversation.draft.title, body: conversation.draft.body }
         : null
+      const draftVersionPreferenceSnapshots = isObject(state.draftVersionPreferenceSnapshots)
+        ? state.draftVersionPreferenceSnapshots
+        : {}
       const draftVersions = normalizeDraftVersions(
         (conversation.drafts ?? []).length > 0
           ? conversation.drafts
           : conversation.draft
             ? [conversation.draft]
             : [],
-      )
+      ).map((version) => {
+        const snapshot = appliedWritingProfileContextSchema.safeParse(
+          draftVersionPreferenceSnapshots[version.id],
+        )
+        return snapshot.success
+          ? { ...version, appliedWritingProfile: snapshot.data }
+          : version
+      })
       if (draftVersions.length > 0) {
         draftVersionsByConversation[conversation.id] = draftVersions
       }
@@ -1024,6 +1038,13 @@ function buildWorkspaceSyncPayload(input: {
       conversations: project.conversations.map((conversation) => {
         const versions = input.draftVersionsByConversation[conversation.id] ?? []
         const currentDraft = input.draftCopyByConversation[conversation.id]
+        const draftVersionPreferenceSnapshots = Object.fromEntries(
+          versions.flatMap((version) =>
+            version.appliedWritingProfile
+              ? [[version.id, version.appliedWritingProfile] as const]
+              : [],
+          ),
+        )
         const currentVersion =
           versions.find(
             (version) =>
@@ -1054,6 +1075,9 @@ function buildWorkspaceSyncPayload(input: {
                   currentDraftVersionId: input.draftReadyByConversation[conversation.id]
                     ? currentVersion?.id ?? null
                     : null,
+                  ...(Object.keys(draftVersionPreferenceSnapshots).length > 0
+                    ? { draftVersionPreferenceSnapshots }
+                    : {}),
                 }
               : {}),
             ...(input.analysisByConversation[conversation.id]
@@ -3082,6 +3106,15 @@ function App() {
   const activeDraftVersions = draftVersionsByConversation[activeConversation.id] ?? []
   const activeCurrentDraftVersionId =
     currentDraftVersionIdByConversation[activeConversation.id] ?? ''
+  const activeDraftVersion =
+    activeDraftVersions.find((version) => version.id === activeCurrentDraftVersionId) ??
+    [...activeDraftVersions]
+      .reverse()
+      .find((version) => isSameDraftCopy(version, initialDraftCopy)) ??
+    activeDraftVersions[activeDraftVersions.length - 1]
+  const activeAppliedPreferenceIds = getAppliedWritingPreferenceIds(
+    activeDraftVersion?.appliedWritingProfile,
+  )
 
   const creationBrief = useMemo(
     () => ({
@@ -3271,7 +3304,11 @@ function App() {
     conversationId: string,
     nextDraft: InitialDraftCopy,
     source: string,
-    options: { coalesce?: boolean; force?: boolean } = {},
+    options: {
+      coalesce?: boolean
+      force?: boolean
+      appliedWritingProfile?: AppliedWritingProfileContext | null
+    } = {},
   ) {
     const nextVersions = evolveDraftVersions({
       versions: draftVersionsRef.current[conversationId] ?? [],
@@ -3280,6 +3317,7 @@ function App() {
       baseDraft: draftCopyByConversation[conversationId],
       coalesce: options.coalesce,
       force: options.force,
+      appliedWritingProfile: options.appliedWritingProfile,
     })
     const currentVersion = nextVersions[nextVersions.length - 1]
     const nextVersionsByConversation = {
@@ -3309,7 +3347,10 @@ function App() {
       body: [...version.body],
     }
 
-    recordDraftSnapshot(activeConversation.id, restoredDraft, 'restored', { force: true })
+    recordDraftSnapshot(activeConversation.id, restoredDraft, 'restored', {
+      force: true,
+      appliedWritingProfile: version.appliedWritingProfile ?? null,
+    })
     markDraftEdited()
     clearRewriteSelection()
     setDraftDragSelection(null)
@@ -4660,6 +4701,10 @@ function App() {
 
     try {
       let nextDraft = generatedInitialDraftCopy
+      let appliedWritingProfile: AppliedWritingProfileContext = {
+        account: null,
+        project: null,
+      }
 
       if (isUsingCloudLibrary) {
         if (selectedNotes.length > 0 && cloudLibrary.status !== 'ready') {
@@ -4694,6 +4739,7 @@ function App() {
           return false
         }
         nextDraft = response.draft
+        appliedWritingProfile = response.appliedWritingProfile
         setDraftFactGapByConversation((current) => {
           const next = { ...current }
           delete next[conversationId]
@@ -4709,7 +4755,7 @@ function App() {
         conversationId,
         nextDraft,
         isUsingCloudLibrary ? 'ai_generation' : 'demo_generation',
-        { force: true },
+        { force: true, appliedWritingProfile },
       )
       setDraftBridgeMessagesByConversation((current) => {
         const next = { ...current }
@@ -4996,6 +5042,7 @@ function App() {
         fieldId,
         beforeText: previousValue,
         afterText: normalizedValue,
+        draftAppliedPreferenceIds: activeAppliedPreferenceIds,
         step: 'rewrite',
       },
       source: 'manual_editor',
@@ -6002,6 +6049,7 @@ function App() {
       fieldId: string
       instruction: string
     },
+    appliedWritingProfile: AppliedWritingProfileContext,
   ): RewriteChatMessage {
     return {
       id: crypto.randomUUID(),
@@ -6016,6 +6064,7 @@ function App() {
         status: 'available',
       })),
       recommendedIndex: rewrite.recommendedIndex,
+      appliedWritingProfile,
     }
   }
 
@@ -6062,6 +6111,7 @@ function App() {
         selectedText: selection,
         draftTitle: initialDraftCopy.title,
         selectedFieldId: fieldId,
+        draftAppliedPreferenceIds: activeAppliedPreferenceIds,
         step: 'rewrite',
       },
     })
@@ -6069,6 +6119,10 @@ function App() {
     try {
       let result: AiRewriteResult
       let usage: AiUsage | null = null
+      let appliedWritingProfile: AppliedWritingProfileContext = {
+        account: null,
+        project: null,
+      }
 
       if (cloudWorkspaceStatus === 'guest') {
         result = buildFallbackSelectionRewrite({
@@ -6099,6 +6153,7 @@ function App() {
         })
         result = response.rewrite
         usage = response.usage
+        appliedWritingProfile = response.appliedWritingProfile
       }
 
       setRewriteUsageByConversation((current) => ({
@@ -6109,7 +6164,7 @@ function App() {
         selection,
         fieldId,
         instruction: question,
-      })
+      }, appliedWritingProfile)
       setRewriteMessagesByConversation((current) => ({
         ...current,
         [conversationId]: [...(current[conversationId] ?? []), assistantMessage],
@@ -6157,7 +6212,10 @@ function App() {
       previousValue.slice(selectedIndex + message.selectedText.length),
     ].join('')
     const nextDraft = setDraftFieldValue(initialDraftCopy, message.fieldId, nextValue)
-    recordDraftSnapshot(activeConversation.id, nextDraft, 'ai_rewrite', { coalesce: true })
+    recordDraftSnapshot(activeConversation.id, nextDraft, 'ai_rewrite', {
+      coalesce: true,
+      appliedWritingProfile: message.appliedWritingProfile ?? null,
+    })
     markDraftEdited()
     setRewriteMessagesByConversation((current) => ({
       ...current,
@@ -6188,6 +6246,10 @@ function App() {
         afterText: suggestion.text,
         instruction: message.instruction ?? '',
         label: suggestion.label,
+        draftAppliedPreferenceIds: activeAppliedPreferenceIds,
+        appliedPreferenceIds: getAppliedWritingPreferenceIds(
+          message.appliedWritingProfile,
+        ),
         step: 'rewrite',
       },
       source: 'rewrite_suggestion',
@@ -6399,6 +6461,7 @@ function App() {
         content: formatDraftCopyForClipboard(initialDraftCopy),
         context: {
           targetAudience: effectiveReaderAudience,
+          draftAppliedPreferenceIds: activeAppliedPreferenceIds,
           step: 'reader',
         },
       })

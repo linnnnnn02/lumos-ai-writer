@@ -457,6 +457,7 @@ assert.doesNotThrow(() =>
     model: prepared.model,
     skill: prepared.metadata,
     rewrite: expectedOutput,
+    appliedWritingProfile: { account: null, project: null },
     usage: null,
   }),
 )

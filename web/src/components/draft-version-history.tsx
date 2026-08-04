@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, History, X } from '@/components/ui/icon'
+import { CheckCircle2, History, Sparkles, X } from '@/components/ui/icon'
 import type { DraftVersionRecord } from '@/lib/draft-versions'
 
 type DraftVersionHistoryProps = {
@@ -50,6 +50,16 @@ export function DraftVersionHistory({
     orderedVersions.find((version) => version.id === selectedVersionId) ??
     orderedVersions.find((version) => version.id === currentVersionId) ??
     orderedVersions[0]
+  const appliedProfileGroups = selectedVersion?.appliedWritingProfile
+    ? [
+        { label: '长期偏好', profile: selectedVersion.appliedWritingProfile.account },
+        { label: '项目偏好', profile: selectedVersion.appliedWritingProfile.project },
+      ].filter((group) => group.profile && group.profile.preferences.length > 0)
+    : []
+  const appliedPreferenceCount = appliedProfileGroups.reduce(
+    (total, group) => total + (group.profile?.preferences.length ?? 0),
+    0,
+  )
 
   useEffect(() => {
     if (!isOpen) return
@@ -198,6 +208,61 @@ export function DraftVersionHistory({
                   {selectedVersion.id === currentVersionId ? '正在使用' : '恢复为新版本'}
                 </Button>
               </div>
+
+              {selectedVersion.appliedWritingProfile ? (
+                appliedPreferenceCount > 0 ? (
+                  <details className="group shrink-0 border-b border-[rgba(15,23,42,0.06)] px-5 py-3 sm:px-7">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--foreground)] marker:hidden">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+                        <span>这版生成时参考了 {appliedPreferenceCount} 条表达规则</span>
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-[var(--soft-foreground)] group-open:hidden">
+                        查看依据
+                      </span>
+                      <span className="hidden shrink-0 text-xs font-medium text-[var(--soft-foreground)] group-open:inline">
+                        收起
+                      </span>
+                    </summary>
+                    <div className="mt-3 max-h-48 overflow-y-auto border-t border-[rgba(15,23,42,0.05)] pt-3">
+                      <p className="text-xs leading-5 text-[var(--soft-foreground)]">
+                        这里记录的是生成时提供给 AI 的规则，不代表成文中的每一句都已执行。
+                      </p>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                        {appliedProfileGroups.map((group) => (
+                          <section key={group.label}>
+                            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--muted-foreground)]">
+                              <span>{group.label}</span>
+                              <span className="font-normal text-[var(--soft-foreground)]">
+                                档案版本 {group.profile?.version}
+                              </span>
+                            </div>
+                            <ul className="mt-2 grid gap-2">
+                              {group.profile?.preferences.map((preference) => (
+                                <li
+                                  key={`${group.label}-${preference.id}`}
+                                  className="text-sm leading-6 text-[var(--foreground)]"
+                                >
+                                  {preference.statement}
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                ) : (
+                  <div className="flex shrink-0 items-center gap-2 border-b border-[rgba(15,23,42,0.06)] px-5 py-3 text-xs text-[var(--soft-foreground)] sm:px-7">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    这版生成时没有带入表达档案规则。
+                  </div>
+                )
+              ) : (
+                <div className="shrink-0 border-b border-[rgba(15,23,42,0.06)] px-5 py-3 text-xs text-[var(--soft-foreground)] sm:px-7">
+                  此版本生成时尚未记录表达依据，系统不会用当前档案倒填历史。
+                </div>
+              )}
 
               <article className="min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-10 sm:py-8">
                 <div className="mx-auto max-w-[48rem]">

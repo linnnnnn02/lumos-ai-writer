@@ -1,3 +1,8 @@
+import {
+  appliedWritingProfileContextSchema,
+  type AppliedWritingProfileContext,
+} from '@lumos-ai/shared'
+
 export type DraftCopy = {
   title: string
   body: string[]
@@ -9,6 +14,7 @@ export type DraftVersionRecord = DraftCopy & {
   source: string
   createdAt: string
   updatedAt: string
+  appliedWritingProfile?: AppliedWritingProfileContext
 }
 
 export function isSameDraftCopy(first: DraftCopy, second: DraftCopy) {
@@ -16,6 +22,17 @@ export function isSameDraftCopy(first: DraftCopy, second: DraftCopy) {
     first.title === second.title &&
     first.body.length === second.body.length &&
     first.body.every((paragraph, index) => paragraph === second.body[index])
+  )
+}
+
+export function getAppliedWritingPreferenceIds(
+  context: AppliedWritingProfileContext | null | undefined,
+) {
+  return Array.from(
+    new Set([
+      ...(context?.account?.preferences.map((preference) => preference.id) ?? []),
+      ...(context?.project?.preferences.map((preference) => preference.id) ?? []),
+    ]),
   )
 }
 
@@ -33,7 +50,9 @@ export function isDraftVersionRecord(value: unknown): value is DraftVersionRecor
     candidate.body.every((paragraph) => typeof paragraph === 'string') &&
     typeof candidate.source === 'string' &&
     typeof candidate.createdAt === 'string' &&
-    typeof candidate.updatedAt === 'string'
+    typeof candidate.updatedAt === 'string' &&
+    (candidate.appliedWritingProfile === undefined ||
+      appliedWritingProfileContextSchema.safeParse(candidate.appliedWritingProfile).success)
   )
 }
 
@@ -54,6 +73,7 @@ function createDraftVersion(
   source: string,
   version: number,
   timestamp = new Date().toISOString(),
+  appliedWritingProfile?: AppliedWritingProfileContext,
 ): DraftVersionRecord {
   return {
     id: crypto.randomUUID(),
@@ -63,6 +83,7 @@ function createDraftVersion(
     source,
     createdAt: timestamp,
     updatedAt: timestamp,
+    ...(appliedWritingProfile ? { appliedWritingProfile } : {}),
   }
 }
 
@@ -82,10 +103,15 @@ export function evolveDraftVersions(input: {
   baseDraft?: DraftCopy
   coalesce?: boolean
   force?: boolean
+  appliedWritingProfile?: AppliedWritingProfileContext | null
 }) {
   const timestamp = new Date().toISOString()
   let versions = ensureBaseDraftVersion(input.versions, input.baseDraft, timestamp)
   const latest = versions[versions.length - 1]
+  const appliedWritingProfile =
+    input.appliedWritingProfile === null
+      ? undefined
+      : input.appliedWritingProfile ?? latest?.appliedWritingProfile
 
   if (!input.force && latest && isSameDraftCopy(latest, input.nextDraft)) {
     return versions
@@ -97,14 +123,22 @@ export function evolveDraftVersions(input: {
       title: input.nextDraft.title,
       body: [...input.nextDraft.body],
       updatedAt: timestamp,
+      ...(appliedWritingProfile ? { appliedWritingProfile } : {}),
     }
+    if (!appliedWritingProfile) delete nextLatest.appliedWritingProfile
     return [...versions.slice(0, -1), nextLatest]
   }
 
   const nextVersion = Math.max(0, ...versions.map((version) => version.version)) + 1
   versions = [
     ...versions,
-    createDraftVersion(input.nextDraft, input.source, nextVersion, timestamp),
+    createDraftVersion(
+      input.nextDraft,
+      input.source,
+      nextVersion,
+      timestamp,
+      appliedWritingProfile,
+    ),
   ]
   return versions
 }

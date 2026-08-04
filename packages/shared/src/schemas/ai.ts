@@ -316,6 +316,25 @@ export const aiSkillMetadataSchema = z.object({
   promptHash: z.string().regex(/^[a-f0-9]{64}$/),
 })
 
+export const appliedWritingPreferenceSchema = z.object({
+  id: z.string().trim().min(1).max(120),
+  scope: z.enum(['account', 'project']),
+  dimension: z.string().trim().min(1).max(80),
+  statement: z.string().trim().min(1).max(800),
+})
+
+export const appliedWritingProfileRevisionSchema = z.object({
+  revisionId: z.string().uuid(),
+  version: z.number().int().positive(),
+  scope: z.enum(['account', 'project']),
+  preferences: z.array(appliedWritingPreferenceSchema).max(60),
+})
+
+export const appliedWritingProfileContextSchema = z.object({
+  account: appliedWritingProfileRevisionSchema.nullable(),
+  project: appliedWritingProfileRevisionSchema.nullable(),
+})
+
 export const analyzeReferencesResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
@@ -347,6 +366,7 @@ const generatedDraftResponseSchema = z.object({
   model: z.string(),
   skill: aiSkillMetadataSchema,
   draft: aiDraftCopySchema,
+  appliedWritingProfile: appliedWritingProfileContextSchema,
   usage: aiUsageSchema.nullable(),
 })
 
@@ -367,6 +387,7 @@ export const rewriteDraftResponseSchema = z.object({
   model: z.string(),
   skill: aiSkillMetadataSchema,
   rewrite: aiRewriteResultSchema,
+  appliedWritingProfile: appliedWritingProfileContextSchema,
   usage: aiUsageSchema.nullable(),
 })
 
@@ -398,6 +419,13 @@ export type RewriteDraftRequest = z.infer<typeof rewriteDraftRequestSchema>
 export type PreviewDraftForReaderRequest = z.infer<typeof previewDraftForReaderRequestSchema>
 export type AiUsage = z.infer<typeof aiUsageSchema>
 export type AiSkillMetadata = z.infer<typeof aiSkillMetadataSchema>
+export type AppliedWritingPreference = z.infer<typeof appliedWritingPreferenceSchema>
+export type AppliedWritingProfileRevision = z.infer<
+  typeof appliedWritingProfileRevisionSchema
+>
+export type AppliedWritingProfileContext = z.infer<
+  typeof appliedWritingProfileContextSchema
+>
 export type AnalyzeReferencesResponse = z.infer<typeof analyzeReferencesResponseSchema>
 export type GenerateDraftResponse = z.infer<typeof generateDraftResponseSchema>
 export type RewriteDraftResponse = z.infer<typeof rewriteDraftResponseSchema>

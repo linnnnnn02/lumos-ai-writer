@@ -12,7 +12,10 @@ import {
   normalizeWriterModelOutput,
   writerModelSkillV1,
 } from '../src/skills/writer-model-v1/index.js'
-import { compactActiveWritingProfile } from '../src/skills/shared/writing-profile.js'
+import {
+  compactActiveWritingProfile,
+  getAppliedWritingProfileContext,
+} from '../src/skills/shared/writing-profile.js'
 import {
   applyWritingPreferenceAction,
   canReuseWritingProfileRevision,
@@ -385,6 +388,19 @@ assert.equal(
   compactActiveWritingProfile(enabledRevision, 'product_education')?.preferences.length,
   1,
 )
+const appliedBrandStoryProfile = getAppliedWritingProfileContext(
+  { accountProfile: enabledRevision, projectProfile: null },
+  'brand_story',
+)
+assert.equal(appliedBrandStoryProfile.account?.revisionId, enabledRevision.id)
+assert.equal(appliedBrandStoryProfile.account?.version, enabledRevision.version)
+assert.deepEqual(
+  appliedBrandStoryProfile.account?.preferences.map((preference) => preference.statement),
+  compactActiveWritingProfile(enabledRevision, 'brand_story')?.preferences.map(
+    (preference) => preference.statement,
+  ),
+)
+assert.equal(appliedBrandStoryProfile.project, null)
 
 const deleteInput = buildWritingProfileRequestSchema.parse({
   ...disableInput,
