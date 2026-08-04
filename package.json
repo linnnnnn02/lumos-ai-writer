@@ -24,6 +24,7 @@
     "test:cloud-library-operations": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-library-operations.ts",
     "test:cloud-session-refresh": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-session-refresh.ts",
     "test:cloud-trash-reconcile": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-trash-reconcile.ts",
+    "test:workspace-recovery": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-empty-conversation-recovery.ts",
     "check:p0": "node scripts/check-p0.mjs",
     "eval:skills": "pnpm --filter @lumos-ai/api eval:skills",
     "smoke:p0": "node scripts/smoke-p0.mjs",

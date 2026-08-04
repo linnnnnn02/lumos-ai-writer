@@ -120,6 +120,7 @@ import {
 } from '@/lib/api-client'
 import { getCurrentAccessToken } from '@/lib/supabase-browser'
 import { loadLocalWorkspace, saveLocalWorkspace } from '@/lib/local-workspace'
+import { recoverProjectConversationState } from '@/lib/conversation-recovery'
 import { cn } from '@/lib/utils'
 import { demoFolders, demoNotes, demoSnippets } from './lib/demo-data'
 import { buildDemoAnalysis } from './lib/analysis'
@@ -450,6 +451,28 @@ const initialProjects: ProjectRecord[] = [
 
 const defaultConversationTitle = '新的文案对话'
 const noProjectFolderId = '__no_project_folder__'
+
+function createEmptyConversation(options: { id?: string; now?: string } = {}): ConversationRecord {
+  const now = options.now ?? new Date().toISOString()
+
+  return {
+    id: options.id ?? crypto.randomUUID(),
+    title: defaultConversationTitle,
+    step: 'learn',
+    workflowStage: 'intake',
+    writingRequest: '',
+    selectedItemIds: [],
+    chatMessages: [],
+    analysisReady: false,
+    length: null,
+    topic: '',
+    targetAudience: '',
+    writingBrief: getDefaultWritingBrief(''),
+    createdAt: now,
+    lastOpenedAt: now,
+    updatedAt: now,
+  }
+}
 
 function buildConversationTitleFromPrompt(prompt: string) {
   const normalized = prompt.replace(/\s+/g, ' ').trim()
@@ -854,14 +877,17 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       }
     })
 
-    return {
-      id: project.id,
-      name: project.name,
-      folderId: project.folderId ?? '',
-      conversations,
-      activeConversationId: project.activeConversationId ?? conversations[0]?.id ?? '',
-      updatedAt: project.updatedAt,
-    }
+    return recoverProjectConversationState(
+      {
+        id: project.id,
+        name: project.name,
+        folderId: project.folderId ?? '',
+        conversations,
+        activeConversationId: project.activeConversationId ?? '',
+        updatedAt: project.updatedAt,
+      },
+      createEmptyConversation,
+    )
   })
 
   return {
@@ -1059,18 +1085,17 @@ function loadGuestWorkspaceSnapshot(): LocalWorkspaceSnapshot | null {
         .map(normalizeLocalConversation)
         .filter((conversation): conversation is ConversationRecord => Boolean(conversation))
 
-      return {
-        id: project.id,
-        name: project.name,
-        folderId: project.folderId,
-        activeConversationId: conversations.some(
-          (conversation) => conversation.id === project.activeConversationId,
-        )
-          ? project.activeConversationId
-          : conversations[0]?.id ?? '',
-        updatedAt: project.updatedAt,
-        conversations,
-      }
+      return recoverProjectConversationState(
+        {
+          id: project.id,
+          name: project.name,
+          folderId: project.folderId,
+          activeConversationId: project.activeConversationId,
+          updatedAt: project.updatedAt,
+          conversations,
+        },
+        createEmptyConversation,
+      )
     })
     .filter((project): project is ProjectRecord => Boolean(project))
 
@@ -1877,9 +1902,13 @@ function App() {
   const recentFeedbackMemoriesRef = useRef<FeedbackMemoryDto[]>([])
   const draftVersionsRef = useRef(draftVersionsByConversation)
 
-  const activeProject = useMemo(
+  const storedActiveProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
     [activeProjectId, projects],
+  )
+  const activeProject = useMemo(
+    () => recoverProjectConversationState(storedActiveProject, createEmptyConversation),
+    [storedActiveProject],
   )
   const isUsingCloudLibrary = cloudLibrary.status !== 'guest'
   const libraryFolders = isUsingCloudLibrary ? cloudLibrary.folders : demoFolders
@@ -3602,33 +3631,15 @@ function App() {
     if (!name || projects.some((project) => project.name.trim() === name)) return
 
     const now = new Date().toISOString()
-    const conversationId = crypto.randomUUID()
+    const nextConversation = createEmptyConversation({ now })
     const nextProject: ProjectRecord = {
       id: crypto.randomUUID(),
       name,
       folderId:
         effectiveNewProjectFolderId === noProjectFolderId ? '' : effectiveNewProjectFolderId,
-      activeConversationId: conversationId,
+      activeConversationId: nextConversation.id,
       updatedAt: now,
-      conversations: [
-        {
-          id: conversationId,
-          title: defaultConversationTitle,
-          step: 'learn',
-          workflowStage: 'intake',
-          writingRequest: '',
-          selectedItemIds: [],
-          chatMessages: [],
-          analysisReady: false,
-          length: null,
-          topic: '',
-          targetAudience: '',
-          writingBrief: getDefaultWritingBrief(''),
-          createdAt: now,
-          lastOpenedAt: now,
-          updatedAt: now,
-        },
-      ],
+      conversations: [nextConversation],
     }
 
     setProjects((current) => [nextProject, ...current])
@@ -3641,43 +3652,26 @@ function App() {
     showConversationRoute('intake', {
       mode: 'push',
       projectId: nextProject.id,
-      conversationId,
+      conversationId: nextConversation.id,
     })
   }
 
   function handleCreateConversation() {
     const now = new Date().toISOString()
-    const conversationId = crypto.randomUUID()
-    const nextConversation: ConversationRecord = {
-      id: conversationId,
-      title: defaultConversationTitle,
-      step: 'learn',
-      workflowStage: 'intake',
-      writingRequest: '',
-      selectedItemIds: [],
-      chatMessages: [],
-      analysisReady: false,
-      length: null,
-      topic: '',
-      targetAudience: '',
-      writingBrief: getDefaultWritingBrief(''),
-      createdAt: now,
-      lastOpenedAt: now,
-      updatedAt: now,
-    }
+    const nextConversation = createEmptyConversation({ now })
 
     setIsChatStreaming(false)
     resetConversationTransientState()
     updateProject(activeProject.id, (project) => ({
       ...project,
-      activeConversationId: conversationId,
+      activeConversationId: nextConversation.id,
       updatedAt: now,
       conversations: sortConversationsForSidebar([nextConversation, ...project.conversations]),
     }))
     showConversationRoute('intake', {
       mode: 'push',
       projectId: activeProject.id,
-      conversationId,
+      conversationId: nextConversation.id,
     })
   }
 
