@@ -19,12 +19,12 @@ export type RewriteSkillInput = RewriteDraftRequest & {
 }
 
 const outputContract = {
-  summary: '一句话说明本轮改写重点，不复述思考过程',
+  summary: '不超过 80 个汉字的一句话改写重点，不复述思考过程',
   suggestions: [
     {
       label: '不超过 12 个汉字的版本标签',
       text: '只用于替换 selectedText 的完整文本',
-      rationale: '一句话说明它如何响应用户要求并承接上下文',
+      rationale: '不超过 120 个汉字的一句话，说明它如何响应要求并承接上下文',
     },
   ],
   recommendedIndex: 0,
@@ -51,6 +51,7 @@ function compactProfile(revision: WritingProfileRevisionDto | null | undefined) 
 }
 
 export function compactRewriteSkillInput(input: RewriteSkillInput) {
+  const selectedCharacters = Array.from(input.selectedText.replace(/\s/g, '')).length
   return {
     project: {
       name: input.projectName,
@@ -91,6 +92,13 @@ export function compactRewriteSkillInput(input: RewriteSkillInput) {
       rule: 'suggestion.text 中的每个事实、动作、地点、时间、数字、结果和因果都必须能在 evidenceSources 中找到证据',
       missingInformation:
         '没有证据时改写已有表达或明确请用户补充，不得提供看似具体的虚构示例',
+    },
+    outputRequirements: {
+      suggestionCount: { min: 2, max: 3 },
+      summaryMaxCharacters: 80,
+      labelMaxCharacters: 12,
+      textMaxCharacters: Math.min(1200, Math.max(160, selectedCharacters + 80)),
+      rationaleMaxCharacters: 120,
     },
   }
 }
@@ -186,7 +194,11 @@ export const rewriteRepairSystemPrompt = [
   '如果用户要求具体动作，但 originalInput 没有可用动作，就用已有信息自然收住，或明确请用户补充，不得编例子。',
   '不得把通勤方式、天气、消费、休息、饮食等常见生活场景当作可自由补充的合理联想。',
   '仍需返回 2-3 个可直接替换 selectedText 的不同版本，并正确设置 recommendedIndex。',
+  'originalInput.input.outputRequirements 是硬约束。summary、label、text 和 rationale 必须在对应字符上限内，一个意思说清后立即停止。',
+  '不要复述 originalInput、candidateRewrite、validationError、事实审计过程或完整草稿。',
   '只输出原始 JSON contract 的裸 object；禁止包在 rewrite、result、data 或其他外层字段中，不要 Markdown、解释或思考过程。',
+  'JSON 字段必须严格匹配：',
+  JSON.stringify(outputContract),
 ].join('\n')
 
 export const rewriteRepairUserPromptTemplate =
@@ -222,6 +234,7 @@ const rewriteSystemPrompt = [
   '不得编造输入中没有的人物、经历、产品、地点、时间、数字、结果或因果。信息不足时宁可克制表达。',
   'recommendedIndex 选择最符合当前 instruction 且不违背高置信度写作偏好的版本。',
   'rationale 只说明版本差异和适用效果，不输出思考过程，不声称已经修改 fullDraft。',
+  'input.outputRequirements 是硬约束。summary、label、text 和 rationale 必须在对应字符上限内，不要为了显得完整而扩写。',
   '去 AI 味规则：',
   ...humanChineseCopyRulesV1.map((rule, index) => `${index + 1}. ${rule}`),
   '只输出一个 JSON object，不要 Markdown，不要代码块，不要额外解释。',
@@ -231,10 +244,10 @@ const rewriteSystemPrompt = [
 
 export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResult> = {
   id: 'selection-rewrite',
-  version: '1.1.0',
+  version: '1.2.0',
   taskType: 'rewrite',
   model: 'deepseek-v4-flash',
-  maxTokens: 1600,
+  maxTokens: 2400,
   temperature: 0.32,
   systemPrompt: rewriteSystemPrompt,
   userPromptTemplate:

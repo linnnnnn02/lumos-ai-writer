@@ -150,7 +150,7 @@ function buildFixture(projectId, projectName) {
       sourceUrl: 'https://example.com/lumos-pilot-chain',
       coverImageUrl: '',
       contentText:
-        '它没有突然变聪明。第一天我删掉一句太像广告的话，换成自己平时会说的表达。第二天再写同类内容时，开头已经不再堆三个形容词。第三天最明显，我标过的真实细节被放到了前面。不是 AI 猜中了我，而是每次选择、删除和改写都留下了证据。',
+        '系统没有在某一天突然掌握我的风格。每次我留下一个版本、划去不合适的句子，下一次结果都会有一点变化。连续使用后，我发现它会优先保留我反复选择的细节。这个过程更像是在一次次选择里，慢慢积累判断依据。',
       savedAt: now,
     },
   ]
@@ -160,7 +160,7 @@ function buildFixture(projectId, projectName) {
       noteUrl: notes[0].sourceUrl,
       noteTitle: notes[0].title,
       noteAuthorName: notes[0].authorName,
-      selectedText: '它没有突然变聪明。',
+      selectedText: '系统没有在某一天突然掌握我的风格。',
       reasonText: '喜欢先承认边界，不把产品写成一步到位的神器。',
       colorTagName: '克制可信',
       colorValue: '#64748b',
@@ -171,7 +171,7 @@ function buildFixture(projectId, projectName) {
       noteUrl: notes[0].sourceUrl,
       noteTitle: notes[0].title,
       noteAuthorName: notes[0].authorName,
-      selectedText: '不是 AI 猜中了我，而是每次选择、删除和改写都留下了证据。',
+      selectedText: '这个过程更像是在一次次选择里，慢慢积累判断依据。',
       reasonText: '喜欢先纠正常见误解，再用具体动作解释原因，结尾不喊口号。',
       colorTagName: '因果解释',
       colorValue: '#0f766e',
@@ -201,10 +201,10 @@ function buildFixture(projectId, projectName) {
         id: 'pilot-chain-feedback-1',
         projectId,
         type: 'manual_edit',
-        content: '第三天最明显，我标过的真实细节被放到了前面。',
+        content: '连续用了几次，开头那些多余的形容词少了。',
         context: {
           beforeText: '这个功能越来越智能。',
-          afterText: '第三天最明显，我标过的真实细节被放到了前面。',
+          afterText: '连续用了几次，开头那些多余的形容词少了。',
         },
         source: 'isolated_ai_pilot',
         createdAt: now,
@@ -222,7 +222,7 @@ function buildFixture(projectId, projectName) {
         id: 'pilot-chain-feedback-3',
         projectId,
         type: 'final_choice',
-        content: '不是 AI 猜中了我，而是每次选择、删除和改写都留下了证据。',
+        content: '我更愿意保留能说明变化过程的具体动作。',
         context: { reason: '保留克制的因果解释作为收尾。' },
         source: 'isolated_ai_pilot',
         createdAt: now,
@@ -347,12 +347,12 @@ async function main() {
       snippets: fixture.snippets,
       brief: {
         mustInclude:
-          '第一天删掉广告腔；第二天开头不再堆形容词；第三天真实细节被前置；不是 AI 猜中了用户，而是选择、删除和改写留下了证据。',
+          '第一天删掉广告腔；第二天开头不再堆形容词；第三天真实细节被前置；明确说明变化来自用户留下的可追溯反馈，而非系统凭空猜测。',
         avoidTone: '不使用神器、颠覆、彻底改变、精准拿捏；不承诺完全替代人工。',
         objective: '用具体的三天变化解释插件和网页如何逐步学会用户的写作方式。',
         sourceFacts:
           '第一天，用户删掉一句太像广告的话并改成自己的日常表达。第二天，同类内容的开头不再堆三个形容词。第三天，用户标注过的真实细节被放到前面。系统依据每次选择、删除和改写留下的证据调整写作。',
-        instructions: '先承认系统不会突然懂用户，再按三天的变化解释学习过程，结尾保持克制。',
+        instructions: '先说明学习依赖累计反馈，再按三天的变化解释过程，结尾保持克制。',
         allowConservativeDraft: false,
         contentMode: 'other',
         facts: [

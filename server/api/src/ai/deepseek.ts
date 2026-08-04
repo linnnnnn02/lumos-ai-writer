@@ -139,7 +139,7 @@ export function getDeepSeekConfigStatus(config: AppConfig) {
   }
 }
 
-function parseJsonWithBoundedMissingArrayCommas(content: string): unknown {
+function parseJsonWithBoundedMissingCommas(content: string): unknown {
   const maxRepairs = 2
   let candidate = content
 
@@ -152,7 +152,7 @@ function parseJsonWithBoundedMissingArrayCommas(content: string): unknown {
       const positionMatch =
         error instanceof SyntaxError
           ? error.message.match(
-              /Expected ',' or '\]' after array element in JSON at position (\d+)/,
+              /Expected ',' or (?:'\]' after array element|'\}' after property value) in JSON at position (\d+)/,
             )
           : null
       const position = Number(positionMatch?.[1])
@@ -160,13 +160,47 @@ function parseJsonWithBoundedMissingArrayCommas(content: string): unknown {
         throw error
       }
 
-      // Each insertion is anchored to the native parser's exact array error.
-      // Any third syntax defect or non-array error remains rejected.
+      // Each insertion is anchored to the native parser's exact delimiter error.
+      // Any third syntax defect or different grammar error remains rejected.
       candidate = `${candidate.slice(0, position)},${candidate.slice(position)}`
     }
   }
 
   throw new DeepSeekUpstreamError('DeepSeek returned invalid JSON content.', 502)
+}
+
+function extractFirstJsonObject(content: string) {
+  const start = content.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let insideString = false
+  let escaped = false
+
+  for (let index = start; index < content.length; index += 1) {
+    const character = content[index]
+    if (insideString) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === '"') {
+        insideString = false
+      }
+      continue
+    }
+
+    if (character === '"') {
+      insideString = true
+    } else if (character === '{') {
+      depth += 1
+    } else if (character === '}') {
+      depth -= 1
+      if (depth === 0) return content.slice(start, index + 1)
+    }
+  }
+
+  return null
 }
 
 function escapeControlCharactersInsideJsonStrings(content: string) {
@@ -214,10 +248,12 @@ export function parseJsonContent(content: string): unknown {
   try {
     return JSON.parse(content)
   } catch {
-    const match = content.match(/\{[\s\S]*\}/)
-    if (!match) throw new DeepSeekUpstreamError('DeepSeek returned non-JSON content.', 502)
-    return parseJsonWithBoundedMissingArrayCommas(
-      escapeControlCharactersInsideJsonStrings(match[0]),
+    const candidate = extractFirstJsonObject(content)
+    if (!candidate) {
+      throw new DeepSeekUpstreamError('DeepSeek returned non-JSON content.', 502)
+    }
+    return parseJsonWithBoundedMissingCommas(
+      escapeControlCharactersInsideJsonStrings(candidate),
     )
   }
 }
@@ -802,77 +838,80 @@ export async function rewriteDraftWithDeepSeek(
       }
     }
 
-    let repairData: DeepSeekChatCompletionResponse
-    try {
-      repairData = await requestDeepSeekChatCompletion(config, {
-        model: preparedSkill.model,
-        messages: [
-          { role: 'system', content: rewriteRepairSystemPrompt },
-          {
-            role: 'user',
-            content: buildRewriteRepairUserPrompt(
-              preparedSkill.userPrompt,
-              candidateRewrite,
-              getErrorMessage(validationError),
-            ),
-          },
-        ],
-        response_format: { type: 'json_object' },
-        thinking: { type: 'disabled' },
-        max_tokens: preparedSkill.maxTokens,
-        temperature: 0.1,
-        stream: false,
-      })
-    } catch (error) {
-      throw new DeepSeekOutputValidationError(
-        error,
-        initialUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
+    let combinedUsage = initialUsage
+    let latestValidationError: unknown = validationError
 
-    const combinedUsage = mergeAiUsage(initialUsage, toUsage(repairData.usage))
-    const repairContent = repairData.choices?.[0]?.message?.content
-    if (repairData.error?.message || !repairContent) {
-      throw new DeepSeekOutputValidationError(
-        new Error(
+    for (let repairAttempt = 1; repairAttempt <= 2; repairAttempt += 1) {
+      let repairData: DeepSeekChatCompletionResponse
+      try {
+        repairData = await requestDeepSeekChatCompletion(config, {
+          model: preparedSkill.model,
+          messages: [
+            { role: 'system', content: rewriteRepairSystemPrompt },
+            {
+              role: 'user',
+              content: buildRewriteRepairUserPrompt(
+                preparedSkill.userPrompt,
+                candidateRewrite,
+                getErrorMessage(latestValidationError),
+              ),
+            },
+          ],
+          response_format: { type: 'json_object' },
+          thinking: { type: 'disabled' },
+          max_tokens: preparedSkill.maxTokens,
+          temperature: 0.1,
+          stream: false,
+        })
+      } catch (error) {
+        throw new DeepSeekOutputValidationError(
+          error,
+          combinedUsage,
+          preparedSkill.metadata.promptHash,
+        )
+      }
+
+      combinedUsage = mergeAiUsage(combinedUsage, toUsage(repairData.usage))
+      const repairContent = repairData.choices?.[0]?.message?.content
+      if (repairData.error?.message || !repairContent) {
+        latestValidationError = new Error(
           repairData.error?.message || 'DeepSeek returned an empty repaired rewrite.',
-        ),
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
+        )
+        continue
+      }
+
+      try {
+        const repairedRewrite = preparedSkill.outputSchema.parse(
+          unwrapDeepSeekObject(
+            parseJsonContent(repairContent),
+            ['summary', 'suggestions', 'recommendedIndex'],
+          ),
+        )
+        const filteredRepair = filterGroundedRewriteSuggestions(
+          repairedRewrite,
+          groundingSource,
+        )
+        candidateRewrite = validateRewriteSkillOutput(
+          filteredRepair.suggestions.length >= 2 ? filteredRepair : repairedRewrite,
+          input.selectedText,
+          groundingSource,
+        )
+        return {
+          rewrite: candidateRewrite,
+          skill: preparedSkill.metadata,
+          model: preparedSkill.model,
+          usage: combinedUsage,
+        }
+      } catch (error) {
+        latestValidationError = error
+      }
     }
 
-    try {
-      const repairedRewrite = preparedSkill.outputSchema.parse(
-        unwrapDeepSeekObject(
-          parseJsonContent(repairContent),
-          ['summary', 'suggestions', 'recommendedIndex'],
-        ),
-      )
-      const filteredRepair = filterGroundedRewriteSuggestions(
-        repairedRewrite,
-        groundingSource,
-      )
-      candidateRewrite = validateRewriteSkillOutput(
-        filteredRepair.suggestions.length >= 2 ? filteredRepair : repairedRewrite,
-        input.selectedText,
-        groundingSource,
-      )
-    } catch (error) {
-      throw new DeepSeekOutputValidationError(
-        error,
-        combinedUsage,
-        preparedSkill.metadata.promptHash,
-      )
-    }
-
-    return {
-      rewrite: candidateRewrite,
-      skill: preparedSkill.metadata,
-      model: preparedSkill.model,
-      usage: combinedUsage,
-    }
+    throw new DeepSeekOutputValidationError(
+      latestValidationError,
+      combinedUsage,
+      preparedSkill.metadata.promptHash,
+    )
   }
 
   return {

@@ -26,6 +26,10 @@ type DatabaseError = {
   message?: string
 }
 
+type DatabaseOperationResult = {
+  error: DatabaseError | null
+}
+
 type FolderRow = {
   id: string
   name: string
@@ -136,6 +140,35 @@ function assertNoDatabaseError(error: DatabaseError | null) {
     throw new SupabaseSchemaMissingError('Supabase schema has not been installed yet.')
   }
   throw new Error(error.message || 'Supabase request failed.')
+}
+
+export function isTransientDatabaseError(error: DatabaseError | null) {
+  if (!error) return false
+  return /fetch failed|network (?:error|request failed)|econnreset|etimedout|socket hang up/i.test(
+    `${error.code ?? ''} ${error.message ?? ''}`,
+  )
+}
+
+export async function retryTransientDatabaseOperation<
+  TResult extends DatabaseOperationResult,
+>(
+  operation: () => Promise<TResult>,
+  options: { maxAttempts?: number; delayMs?: number } = {},
+) {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3)
+  const delayMs = Math.max(0, options.delayMs ?? 150)
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await operation()
+    if (!isTransientDatabaseError(result.error) || attempt === maxAttempts) {
+      return result
+    }
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt))
+    }
+  }
+
+  throw new Error('Database retry loop finished without a result.')
 }
 
 function getAdminClient(config: AppConfig) {
@@ -263,14 +296,17 @@ export async function upsertUserProfile(config: AppConfig, user: User): Promise<
         : null
   const avatarUrl = typeof metadata.avatar_url === 'string' ? metadata.avatar_url : null
 
-  const { error } = await supabase.from('profiles').upsert(
-    {
-      id: user.id,
-      email: user.email ?? null,
-      display_name: displayName,
-      avatar_url: avatarUrl,
-    },
-    { onConflict: 'id' },
+  const { error } = await retryTransientDatabaseOperation(
+    async () =>
+      await supabase.from('profiles').upsert(
+        {
+          id: user.id,
+          email: user.email ?? null,
+          display_name: displayName,
+          avatar_url: avatarUrl,
+        },
+        { onConflict: 'id' },
+      ),
   )
 
   assertNoDatabaseError(error)
