@@ -10,7 +10,10 @@ import {
   normalizeWriterModelOutput,
   writerModelSkillV1,
 } from '../src/skills/writer-model-v1/index.js'
-import { collectWritingEvidenceIds } from '../src/writing-profile.js'
+import {
+  canReuseWritingProfileRevision,
+  collectWritingEvidenceIds,
+} from '../src/writing-profile.js'
 
 async function readJsonFixture(name: string) {
   return JSON.parse(
@@ -151,6 +154,43 @@ assert.deepEqual(
   changedEvidenceIds.filter((id) => !id.startsWith('__content_fingerprint__:')),
 )
 assert.notEqual(originalEvidenceIds.at(-1), changedEvidenceIds.at(-1))
+
+const currentRevision = {
+  id: '11111111-1111-4111-8111-111111111111',
+  scope: 'account' as const,
+  projectId: null,
+  version: 2,
+  profile: expectedOutput,
+  evidenceIds: originalEvidenceIds,
+  skill: prepared.metadata,
+  createdAt: '2026-08-04T00:00:00.000Z',
+}
+assert.equal(
+  canReuseWritingProfileRevision(
+    currentRevision,
+    [...originalEvidenceIds].reverse(),
+    prepared.metadata,
+  ),
+  true,
+)
+assert.equal(
+  canReuseWritingProfileRevision(currentRevision, changedEvidenceIds, prepared.metadata),
+  false,
+)
+assert.equal(
+  canReuseWritingProfileRevision(currentRevision, originalEvidenceIds, {
+    ...prepared.metadata,
+    version: '1.3.0',
+  }),
+  false,
+)
+assert.equal(
+  canReuseWritingProfileRevision(currentRevision, originalEvidenceIds, {
+    ...prepared.metadata,
+    promptHash: 'b'.repeat(64),
+  }),
+  false,
+)
 
 const api = createApiApp()
 const disabledResponse = await api.request(

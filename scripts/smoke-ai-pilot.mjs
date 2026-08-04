@@ -239,8 +239,8 @@ function countCharacters(value) {
 
 function assertDraftContract(draft) {
   const bodyCharacters = countCharacters(draft.body.join(''))
-  if (draft.body.length < 5 || draft.body.length > 7) {
-    throw new Error(`Medium draft has ${draft.body.length} paragraphs; expected 5-7.`)
+  if (draft.body.length < 3 || draft.body.length > 6) {
+    throw new Error(`Medium draft has ${draft.body.length} paragraphs; expected 3-6.`)
   }
   if (bodyCharacters < 201 || bodyCharacters > 600) {
     throw new Error(`Medium draft has ${bodyCharacters} characters; expected 201-600.`)
@@ -305,6 +305,37 @@ async function main() {
     }
     console.log(`OK reference analysis - ${analysis.usage?.totalTokens ?? '?'} tokens`)
 
+    const insufficientDraft = await apiRequest('/v1/ai/draft', token, {
+      projectId,
+      projectName,
+      topic: '介绍一款尚未提供具体信息的产品',
+      targetAudience: fixture.targetAudience,
+      length: 'medium',
+      analysis: analysis.analysis,
+      notes: fixture.notes,
+      snippets: fixture.snippets,
+      brief: {
+        mustInclude: '只使用已确认的产品事实。',
+        avoidTone: '不补写产品名称、成分、功效或使用体验。',
+        objective: '帮助读者理解产品。',
+        sourceFacts: '',
+        instructions: '',
+        allowConservativeDraft: false,
+        contentMode: 'product_education',
+        facts: [],
+      },
+    })
+    if (
+      !insufficientDraft?.ok ||
+      insufficientDraft.status !== 'insufficient_facts' ||
+      !insufficientDraft.assessment?.missingFacts?.length
+    ) {
+      throw new Error('Draft fact gate did not return the expected insufficient_facts result.')
+    }
+    console.log(
+      `OK draft fact gate - ${insufficientDraft.assessment.missingFacts.length} missing fact prompts, no model call for this step`,
+    )
+
     const draft = await apiRequest('/v1/ai/draft', token, {
       projectId,
       projectName,
@@ -318,9 +349,46 @@ async function main() {
         mustInclude:
           '第一天删掉广告腔；第二天开头不再堆形容词；第三天真实细节被前置；不是 AI 猜中了用户，而是选择、删除和改写留下了证据。',
         avoidTone: '不使用神器、颠覆、彻底改变、精准拿捏；不承诺完全替代人工。',
+        objective: '用具体的三天变化解释插件和网页如何逐步学会用户的写作方式。',
+        sourceFacts:
+          '第一天，用户删掉一句太像广告的话并改成自己的日常表达。第二天，同类内容的开头不再堆三个形容词。第三天，用户标注过的真实细节被放到前面。系统依据每次选择、删除和改写留下的证据调整写作。',
+        instructions: '先承认系统不会突然懂用户，再按三天的变化解释学习过程，结尾保持克制。',
+        allowConservativeDraft: false,
+        contentMode: 'other',
+        facts: [
+          {
+            id: 'day-one-edit',
+            statement: '第一天，用户删掉一句太像广告的话并改成自己的日常表达。',
+            required: true,
+          },
+          {
+            id: 'day-two-opening',
+            statement: '第二天，同类内容的开头不再堆三个形容词。',
+            required: true,
+          },
+          {
+            id: 'day-three-detail',
+            statement: '第三天，用户标注过的真实细节被放到前面。',
+            required: true,
+          },
+          {
+            id: 'learning-evidence',
+            statement: '系统依据每次选择、删除和改写留下的证据调整写作。',
+            required: true,
+          },
+        ],
       },
     })
-    if (!draft?.ok || !draft.draft?.body) throw new Error('Draft generation failed.')
+    if (!draft?.ok) throw new Error('Draft generation failed.')
+    if (draft.status === 'insufficient_facts') {
+      const missingLabels = draft.assessment.missingFacts
+        .map((fact) => fact.label)
+        .join(', ')
+      throw new Error(`Grounded draft fixture is missing required facts: ${missingLabels}`)
+    }
+    if (draft.status !== 'generated' || !draft.draft?.body) {
+      throw new Error(`Draft returned an unsupported status: ${String(draft.status)}`)
+    }
     const draftCharacters = assertDraftContract(draft.draft)
     console.log(
       `OK medium draft - ${draft.draft.body.length} paragraphs, ${draftCharacters} characters, ${draft.usage?.totalTokens ?? '?'} tokens`,

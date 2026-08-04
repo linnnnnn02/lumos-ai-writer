@@ -58,16 +58,22 @@ async function createSkillPromptHash<TInput, TOutput>(
   return toHex(new Uint8Array(digest))
 }
 
+export async function getAiSkillMetadata<TInput, TOutput>(
+  skill: AiSkillDefinition<TInput, TOutput>,
+): Promise<AiSkillMetadata> {
+  return {
+    id: skill.id,
+    version: skill.version,
+    promptHash: await createSkillPromptHash(skill),
+  }
+}
+
 export async function prepareAiSkill<TInput, TOutput>(
   skill: AiSkillDefinition<TInput, TOutput>,
   input: TInput,
 ): Promise<PreparedAiSkill<TOutput>> {
   return {
-    metadata: {
-      id: skill.id,
-      version: skill.version,
-      promptHash: await createSkillPromptHash(skill),
-    },
+    metadata: await getAiSkillMetadata(skill),
     model: skill.model,
     maxTokens: skill.maxTokens,
     temperature: skill.temperature,

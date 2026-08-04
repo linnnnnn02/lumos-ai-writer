@@ -64,6 +64,8 @@ import {
   previewDraftForReaderWithDeepSeek,
 } from './ai/deepseek.js'
 import { assessDraftFactSufficiency } from './skills/draft-v1/index.js'
+import { getAiSkillMetadata } from './skills/runtime.js'
+import { writerModelSkillV1 } from './skills/writer-model-v1/index.js'
 import {
   createAiExecutionConfig,
   getAiAccessBlockReason,
@@ -108,6 +110,7 @@ import {
   WorkspaceOwnershipError,
 } from './workspace.js'
 import {
+  canReuseWritingProfileRevision,
   collectWritingEvidenceIds,
   createWritingProfileRevision,
   getWritingProfileContext,
@@ -1153,12 +1156,12 @@ export function createApiApp() {
           ? profileContext.accountProfile
           : profileContext.projectProfile
       const evidenceIds = collectWritingEvidenceIds(body)
-      const hasSameEvidence =
-        currentRevision !== null &&
-        currentRevision.evidenceIds.length === evidenceIds.length &&
-        evidenceIds.every((id) => currentRevision.evidenceIds.includes(id))
+      const activeSkill = await getAiSkillMetadata(writerModelSkillV1)
 
-      if (currentRevision && hasSameEvidence) {
+      if (
+        currentRevision &&
+        canReuseWritingProfileRevision(currentRevision, evidenceIds, activeSkill)
+      ) {
         return c.json(
           buildWritingProfileResponseSchema.parse({
             ok: true,
