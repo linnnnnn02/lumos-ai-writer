@@ -21,7 +21,7 @@ function getEnvConfig(): PublicConfigResponse | null {
     authConfigured: true,
     supabaseUrl,
     supabaseAnonKey,
-    oauthProviders: ['github', 'google'],
+    oauthProviders: ['google'],
   }
 }
 

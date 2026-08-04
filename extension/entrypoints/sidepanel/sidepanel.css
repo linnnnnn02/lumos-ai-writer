@@ -523,6 +523,10 @@ button:disabled {
 }
 
 .cloud-login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: var(--ui-control-height-md);
   border: 0;
   border-radius: var(--ui-field-radius);
@@ -537,6 +541,23 @@ button:disabled {
   box-shadow: var(--panel-primary-shadow);
   text-shadow: 0 1px 1px rgba(3, 7, 18, 0.18);
   white-space: nowrap;
+}
+
+.cloud-login-button img {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fff;
+  padding: 2px;
+}
+
+.cloud-login-note {
+  margin: 0;
+  color: var(--panel-text-soft);
+  font-size: var(--ui-text-caption);
+  line-height: 1.5;
+  text-align: center;
 }
 
 .cloud-login-button:hover:not(:disabled),

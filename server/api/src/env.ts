@@ -35,7 +35,7 @@ const configSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
-  AUTH_OAUTH_PROVIDERS: z.string().default('github,google'),
+  AUTH_OAUTH_PROVIDERS: z.string().default('google'),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   CORS_ALLOW_CHROME_EXTENSIONS: featureFlagSchema,
   AI_FEATURE_ENABLED: featureFlagSchema,

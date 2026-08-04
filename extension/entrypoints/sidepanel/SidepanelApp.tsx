@@ -40,7 +40,7 @@ import { AiEditing, ArrowUpRight, Library } from '../../components/ui/icon'
 import {
   getCloudAuthState,
   getValidCloudAccessToken,
-  signInToCloud,
+  signInToCloudWithGoogle,
   signOutFromCloud,
   type CloudAuthState,
 } from '../../lib/cloud-auth'
@@ -187,8 +187,6 @@ export function SidepanelApp() {
     status: 'unauthenticated',
     user: null,
   })
-  const [cloudEmail, setCloudEmail] = useState('')
-  const [cloudPassword, setCloudPassword] = useState('')
   const [cloudFeedback, setCloudFeedback] = useState('')
   const [isCloudSigningIn, setIsCloudSigningIn] = useState(false)
   const [isCloudSyncing, setIsCloudSyncing] = useState(false)
@@ -337,9 +335,6 @@ export function SidepanelApp() {
       .then((state) => {
         if (!isMounted) return
         setCloudAuthState(state)
-        if (state.status === 'authenticated' && state.user.email) {
-          setCloudEmail(state.user.email)
-        }
       })
       .catch(() => {
         if (!isMounted) return
@@ -596,26 +591,22 @@ export function SidepanelApp() {
   }
 
   async function handleCloudSignIn() {
-    const email = cloudEmail.trim()
-    const password = cloudPassword
-
-    if (!email || !password) {
-      setCloudFeedback('请输入邮箱和密码。')
-      return
-    }
-
     setIsCloudSigningIn(true)
     setCloudFeedback('')
 
     try {
-      const nextAuthState = await signInToCloud(email, password)
+      const nextAuthState = await signInToCloudWithGoogle()
       setCloudAuthState(nextAuthState)
-      setCloudPassword('')
       setCloudFeedback('云端已连接。')
       void chrome.runtime.sendMessage({ type: 'XHS_RETRY_ANNOTATION_SYNC' })
       void chrome.runtime.sendMessage({ type: 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS' })
     } catch (error) {
-      setCloudFeedback(`登录失败：${getErrorMessage(error)}`)
+      const message = getErrorMessage(error)
+      setCloudFeedback(
+        /cancel|approve|closed|canceled/i.test(message)
+          ? 'Google 登录已取消。'
+          : `登录失败：${message}`,
+      )
     } finally {
       setIsCloudSigningIn(false)
     }
@@ -624,7 +615,6 @@ export function SidepanelApp() {
   async function handleCloudSignOut() {
     await signOutFromCloud()
     setCloudAuthState({ status: 'unauthenticated', user: null })
-    setCloudPassword('')
     setCloudFeedback('已退出云端同步。')
   }
 
@@ -961,7 +951,7 @@ export function SidepanelApp() {
   function renderCloudSyncPanel() {
     const cloudUserLabel =
       cloudAuthState.status === 'authenticated'
-        ? cloudAuthState.user.email || cloudAuthState.user.displayName || '已登录账号'
+        ? cloudAuthState.user.displayName || cloudAuthState.user.email || '已登录账号'
         : ''
     const cloudFeedbackIsError =
       cloudFeedback.includes('失败') || cloudFeedback.includes('过期')
@@ -998,38 +988,29 @@ export function SidepanelApp() {
             </button>
           </div>
         ) : (
-          <form
+          <div
             className="cloud-login-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void handleCloudSignIn()
-            }}
           >
             <div className="cloud-login-title">云端同步</div>
-            <Input
-              className="cloud-login-input"
-              type="email"
-              value={cloudEmail}
-              placeholder="邮箱"
-              autoComplete="email"
-              onChange={(event) => setCloudEmail(event.target.value)}
-            />
-            <Input
-              className="cloud-login-input"
-              type="password"
-              value={cloudPassword}
-              placeholder="密码"
-              autoComplete="current-password"
-              onChange={(event) => setCloudPassword(event.target.value)}
-            />
             <button
               className="cloud-login-button"
-              type="submit"
+              type="button"
               disabled={isCloudSigningIn}
+              onClick={() => {
+                void handleCloudSignIn()
+              }}
             >
-              {isCloudSigningIn ? '登录中...' : '登录同步'}
+              {isCloudSigningIn ? (
+                '正在打开 Google...'
+              ) : (
+                <>
+                  <img src="/google-icon.svg" alt="" aria-hidden="true" />
+                  使用 Google 账号登录
+                </>
+              )}
             </button>
-          </form>
+            <p className="cloud-login-note">使用与网页端相同的 Google 账号</p>
+          </div>
         )}
         {cloudFeedback ? (
           <div className="cloud-feedback-row">

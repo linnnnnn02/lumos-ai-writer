@@ -73,20 +73,62 @@ async function saveCloudSession(session: Session) {
   ])
 }
 
-export async function signInToCloud(email: string, password: string): Promise<CloudAuthState> {
+function launchGoogleAuthFlow(url: string) {
+  return new Promise<string>((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow({ url, interactive: true }, (redirectUrl) => {
+      const runtimeError = chrome.runtime.lastError
+      if (runtimeError) {
+        reject(new Error(runtimeError.message || 'Google 登录窗口未能打开'))
+        return
+      }
+      if (!redirectUrl) {
+        reject(new Error('Google 登录没有返回有效结果'))
+        return
+      }
+      resolve(redirectUrl)
+    })
+  })
+}
+
+export async function signInToCloudWithGoogle(): Promise<CloudAuthState> {
   const supabase = await createSupabaseAuthClient()
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
+  const redirectTo = chrome.identity.getRedirectURL('supabase-auth')
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+      scopes: 'openid email profile',
+      queryParams: { prompt: 'select_account' },
+    },
   })
 
   if (error) throw new Error(error.message)
-  if (!data.session) throw new Error('登录没有返回有效 session')
+  if (!data.url) throw new Error('Google 登录没有返回有效地址')
 
-  await saveCloudSession(data.session)
+  const redirectUrl = await launchGoogleAuthFlow(data.url)
+  const parsedRedirect = new URL(redirectUrl)
+  const hashParams = new URLSearchParams(parsedRedirect.hash.replace(/^#/, ''))
+  const oauthError = hashParams.get('error_description') || hashParams.get('error')
+  if (oauthError) throw new Error(oauthError)
+
+  const accessToken = hashParams.get('access_token')
+  const refreshToken = hashParams.get('refresh_token')
+  if (!accessToken || !refreshToken) {
+    throw new Error('Google 登录没有返回有效 session')
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  })
+  if (sessionError) throw new Error(sessionError.message)
+  if (!sessionData.session) throw new Error('Google 登录没有返回有效 session')
+
+  await saveCloudSession(sessionData.session)
   return {
     status: 'authenticated',
-    user: toCurrentUser(data.session),
+    user: toCurrentUser(sessionData.session),
   }
 }
 

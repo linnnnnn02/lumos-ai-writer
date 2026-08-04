@@ -10,7 +10,7 @@ export default defineConfig({
   manifest: {
     name: 'Lumos AI Writer',
     description: '采集小红书笔记，沉淀参考库，并在网页端完成 AI 文案学习、生成与改写。',
-    permissions: ['storage', 'tabs', 'activeTab', 'scripting', 'sidePanel'],
+    permissions: ['storage', 'tabs', 'activeTab', 'scripting', 'sidePanel', 'identity'],
     host_permissions: [
       'https://www.xiaohongshu.com/*',
       `${localApiOrigin}/*`,
