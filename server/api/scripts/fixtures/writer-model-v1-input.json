@@ -46,7 +46,17 @@
       "content": "不要像攻略，改成像跟朋友复盘自己怎么慢慢适应。",
       "context": {
         "selectedText": "通勤骑行需要先规划路线并准备装备。",
-        "step": "rewrite"
+        "step": "rewrite",
+        "learningEvidence": {
+          "category": "draft_requirement",
+          "scope": "draft",
+          "contentMode": "brand_story",
+          "beforeText": "通勤骑行需要先规划路线并准备装备。",
+          "afterText": "不要像攻略，改成像跟朋友复盘自己怎么慢慢适应。",
+          "confidence": 0.95,
+          "evidenceCount": 1,
+          "status": "active"
+        }
       },
       "source": "explicit_user_action",
       "createdAt": "2026-06-01T08:00:00.000Z"
@@ -59,7 +69,17 @@
       "context": {
         "beforeText": "后来我逐渐熟悉了骑行通勤。",
         "afterText": "第三天，我已经知道在哪个路口提前减速。",
-        "fieldId": "body-2"
+        "fieldId": "body-2",
+        "learningEvidence": {
+          "category": "pattern_preference",
+          "scope": "draft",
+          "contentMode": "brand_story",
+          "beforeText": "后来我逐渐熟悉了骑行通勤。",
+          "afterText": "第三天，我已经知道在哪个路口提前减速。",
+          "confidence": 0.35,
+          "evidenceCount": 1,
+          "status": "candidate"
+        }
       },
       "source": "manual_editor",
       "createdAt": "2026-06-01T08:10:00.000Z"
@@ -70,7 +90,17 @@
       "type": "final_choice",
       "content": "第一次带出门时我只拍了白天。第三次拍夜景后，才知道自己真正需要调的是哪一项。",
       "context": {
-        "step": "reader"
+        "step": "reader",
+        "learningEvidence": {
+          "category": "pattern_preference",
+          "scope": "draft",
+          "contentMode": "brand_story",
+          "beforeText": "",
+          "afterText": "第一次带出门时我只拍了白天。第三次拍夜景后，才知道自己真正需要调的是哪一项。",
+          "confidence": 0.35,
+          "evidenceCount": 1,
+          "status": "candidate"
+        }
       },
       "source": "explicit_user_action",
       "createdAt": "2026-06-10T08:00:00.000Z"
@@ -81,7 +111,17 @@
       "type": "profile_correction",
       "content": "我不喜欢最后突然总结上价值，写到具体感受结束就好。",
       "context": {
-        "dimension": "ending"
+        "dimension": "ending",
+        "learningEvidence": {
+          "category": "long_term_habit",
+          "scope": "account",
+          "contentMode": "unclassified",
+          "beforeText": "",
+          "afterText": "我不喜欢最后突然总结上价值，写到具体感受结束就好。",
+          "confidence": 0.95,
+          "evidenceCount": 1,
+          "status": "active"
+        }
       },
       "source": "explicit_profile_correction",
       "createdAt": "2026-06-12T08:00:00.000Z"
@@ -92,7 +132,17 @@
       "type": "rewrite_preference",
       "content": "这一篇必须写深圳南山的路线。",
       "context": {
-        "scope": "project"
+        "scope": "project",
+        "learningEvidence": {
+          "category": "draft_requirement",
+          "scope": "draft",
+          "contentMode": "brand_story",
+          "beforeText": "",
+          "afterText": "这一篇必须写深圳南山的路线。",
+          "confidence": 0.95,
+          "evidenceCount": 1,
+          "status": "active"
+        }
       },
       "source": "explicit_user_action",
       "createdAt": "2026-06-01T08:20:00.000Z"

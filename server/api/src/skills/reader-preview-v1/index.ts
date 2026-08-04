@@ -12,6 +12,7 @@ import {
   findUnsupportedMaterialTerms,
   findUnsupportedNumericClaims,
 } from '../shared/grounding.js'
+import { compactActiveWritingProfile } from '../shared/writing-profile.js'
 
 export type ReaderPreviewSkillInput = PreviewDraftForReaderRequest & {
   writingProfileContext?: {
@@ -45,26 +46,6 @@ const outputContract = {
   ],
 }
 
-function compactProfile(revision: WritingProfileRevisionDto | null | undefined) {
-  if (!revision) return null
-  return {
-    version: revision.version,
-    summary: revision.profile.summary,
-    decisionPrinciples: revision.profile.decisionPrinciples,
-    voicePatterns: revision.profile.voicePatterns,
-    readerRelationship: revision.profile.readerRelationship,
-    mustKeep: revision.profile.mustKeep,
-    mustAvoid: revision.profile.mustAvoid,
-    preferences: revision.profile.preferences.map((preference) => ({
-      dimension: preference.dimension,
-      statement: preference.statement,
-      application: preference.application,
-      avoid: preference.avoid,
-      confidence: preference.confidence,
-    })),
-  }
-}
-
 export function compactReaderPreviewSkillInput(input: ReaderPreviewSkillInput) {
   return {
     project: {
@@ -75,8 +56,14 @@ export function compactReaderPreviewSkillInput(input: ReaderPreviewSkillInput) {
     readerAudience: input.readerAudience || input.targetAudience,
     draft: input.draft,
     writingProfile: {
-      account: compactProfile(input.writingProfileContext?.accountProfile),
-      project: compactProfile(input.writingProfileContext?.projectProfile),
+      account: compactActiveWritingProfile(
+        input.writingProfileContext?.accountProfile,
+        input.analysis?.contentMode.targetMode ?? 'unclassified',
+      ),
+      project: compactActiveWritingProfile(
+        input.writingProfileContext?.projectProfile,
+        input.analysis?.contentMode.targetMode ?? 'unclassified',
+      ),
     },
     analysis: input.analysis
       ? {

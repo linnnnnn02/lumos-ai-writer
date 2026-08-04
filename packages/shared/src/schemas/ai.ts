@@ -380,6 +380,7 @@ export const previewDraftForReaderResponseSchema = z.object({
 })
 
 export type AiFeaturedSnippet = z.infer<typeof aiFeaturedSnippetSchema>
+export type AiContentMode = z.infer<typeof aiContentModeSchema>
 export type AiAnalysisResult = z.infer<typeof aiAnalysisResultSchema>
 export type AiDraftCopy = z.infer<typeof aiDraftCopySchema>
 export type DraftMissingFact = z.infer<typeof draftMissingFactSchema>

@@ -54,13 +54,46 @@ function getAdminClient(config: AppConfig) {
   return supabase
 }
 
+export function parseStoredWritingProfile(value: unknown): WritingProfile {
+  const rawProfile =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  const rawPreferences = Array.isArray(rawProfile.preferences) ? rawProfile.preferences : []
+  const profile = writingProfileSchema.parse(value)
+
+  return {
+    ...profile,
+    preferences: profile.preferences.map((preference, index) => {
+      const rawPreference = rawPreferences[index]
+      const hasPersistedStatus = Boolean(
+        rawPreference &&
+          typeof rawPreference === 'object' &&
+          !Array.isArray(rawPreference) &&
+          'status' in rawPreference,
+      )
+      if (hasPersistedStatus) return preference
+
+      return {
+        ...preference,
+        status:
+          preference.supportCount <= 1 && preference.confidence <= 0.45
+            ? ('candidate' as const)
+            : ('active' as const),
+      }
+    }),
+  }
+}
+
 function toRevisionDto(row: WritingProfileRevisionRow): WritingProfileRevisionDto {
+  const profile = parseStoredWritingProfile(row.profile)
+
   return {
     id: row.id,
     scope: row.scope,
     projectId: row.project_id,
     version: row.version,
-    profile: writingProfileSchema.parse(row.profile),
+    profile,
     evidenceIds: row.evidence_ids ?? [],
     skill: {
       id: row.skill_id,

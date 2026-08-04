@@ -1,7 +1,11 @@
 import {
+  writingEditEvidenceSchema,
+  writingPreferenceSchema,
   writingPreferenceDimensionSchema,
   writingProfileSchema,
   type BuildWritingProfileRequest,
+  type WritingEditEvidence,
+  type WritingPreference,
   type WritingProfile,
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
@@ -27,6 +31,9 @@ const outputContract = {
       supportCount: 2,
       evidenceIds: ['真实输入证据 ID'],
       contradictions: [],
+      sourceCategory: 'pattern_preference',
+      status: 'active',
+      contentModes: ['brand_story'],
     },
   ],
   openQuestions: ['证据不足时需要继续向用户确认的问题'],
@@ -43,6 +50,90 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getStringField(value: Record<string, unknown>, key: string) {
   return typeof value[key] === 'string' ? value[key] : ''
+}
+
+function getStringArrayField(value: Record<string, unknown>, key: string) {
+  return Array.isArray(value[key])
+    ? value[key].filter((item): item is string => typeof item === 'string')
+    : []
+}
+
+type FeedbackEvidence = BuildWritingProfileRequest['feedbackEvidence'][number]
+const maxWritingPreferenceCount = 60
+type PreferenceAction = {
+  action: 'enable' | 'disable' | 'delete' | 'correct'
+  preferenceId: string
+  snapshot: WritingPreference | null
+}
+
+function getLearningEvidence(feedback: FeedbackEvidence): WritingEditEvidence | null {
+  const result = writingEditEvidenceSchema.safeParse(feedback.context.learningEvidence)
+  return result.success ? result.data : null
+}
+
+function getPreferenceAction(feedback: FeedbackEvidence): PreferenceAction | null {
+  if (feedback.type !== 'profile_correction' || !isRecord(feedback.context.preferenceAction)) {
+    return null
+  }
+
+  const value = feedback.context.preferenceAction
+  const action = getStringField(value, 'action')
+  const preferenceId = getStringField(value, 'preferenceId')
+  if (
+    !preferenceId ||
+    !['enable', 'disable', 'delete', 'correct'].includes(action)
+  ) {
+    return null
+  }
+
+  const snapshotResult = writingPreferenceSchema.safeParse(value.snapshot)
+  return {
+    action: action as PreferenceAction['action'],
+    preferenceId,
+    snapshot: snapshotResult.success ? snapshotResult.data : null,
+  }
+}
+
+function getAppliedPreferenceIds(feedback: FeedbackEvidence) {
+  return Array.from(
+    new Set([
+      ...getStringArrayField(feedback.context, 'appliedPreferenceIds'),
+      ...getStringArrayField(feedback.context, 'draftAppliedPreferenceIds'),
+    ]),
+  ).slice(0, 120)
+}
+
+function isPreferenceEvidence(
+  feedback: FeedbackEvidence,
+  profileScope: BuildWritingProfileRequest['scope'],
+) {
+  const action = getPreferenceAction(feedback)
+  if (action?.action === 'disable' || action?.action === 'delete') return false
+  if (
+    feedback.type === 'profile_correction' &&
+    (feedback.context.scope === 'account' || feedback.context.scope === 'project') &&
+    feedback.context.scope !== profileScope
+  ) {
+    return false
+  }
+
+  const learningEvidence = getLearningEvidence(feedback)
+  return (
+    !learningEvidence ||
+    learningEvidence.category === 'pattern_preference' ||
+    learningEvidence.category === 'long_term_habit'
+  )
+}
+
+function isFeedbackVisibleToProfile(
+  feedback: FeedbackEvidence,
+  profileScope: BuildWritingProfileRequest['scope'],
+) {
+  return !(
+    feedback.type === 'profile_correction' &&
+    (feedback.context.scope === 'account' || feedback.context.scope === 'project') &&
+    feedback.context.scope !== profileScope
+  )
 }
 
 function summarizeTextSurface(text: string) {
@@ -137,9 +228,30 @@ function buildEvidenceTypeMap(input: BuildWritingProfileRequest) {
     )
   }
   for (const feedback of input.feedbackEvidence) {
-    evidenceTypes.set(feedback.id, feedback.type)
+    if (isPreferenceEvidence(feedback, input.scope)) {
+      evidenceTypes.set(feedback.id, feedback.type)
+    }
   }
   return evidenceTypes
+}
+
+function buildFeedbackMap(input: BuildWritingProfileRequest) {
+  return new Map(input.feedbackEvidence.map((feedback) => [feedback.id, feedback]))
+}
+
+function getLatestPreferenceActions(input: BuildWritingProfileRequest) {
+  const latestActions = new Map<string, { feedback: FeedbackEvidence; action: PreferenceAction }>()
+  const feedbackByTime = [...input.feedbackEvidence].sort(
+    (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt),
+  )
+
+  for (const feedback of feedbackByTime) {
+    const action = getPreferenceAction(feedback)
+    if (action && feedback.context.scope === input.scope) {
+      latestActions.set(action.preferenceId, { feedback, action })
+    }
+  }
+  return latestActions
 }
 
 function getConfidenceLimit(evidenceTypes: string[]) {
@@ -161,8 +273,9 @@ export function normalizeWriterModelOutput(
   if (!isRecord(value)) return value
 
   const evidenceTypes = buildEvidenceTypeMap(input)
+  const feedbackById = buildFeedbackMap(input)
   const allowedDimensions = new Set(writingPreferenceDimensionSchema.options)
-  const preferences = Array.isArray(value.preferences)
+  const preferences: WritingPreference[] = Array.isArray(value.preferences)
     ? value.preferences.flatMap((preference) => {
         if (!isRecord(preference)) return []
         if (
@@ -190,26 +303,157 @@ export function normalizeWriterModelOutput(
           typeof preference.confidence === 'number' && Number.isFinite(preference.confidence)
             ? preference.confidence
             : 0
+        const boundedConfidence = Math.min(
+          Math.max(rawConfidence, 0),
+          getConfidenceLimit(evidenceTypeList),
+        )
+        const feedbackEvidence = evidenceIds
+          .map((id) => feedbackById.get(id))
+          .filter((feedback): feedback is FeedbackEvidence => Boolean(feedback))
+        const hasExplicitPreference = feedbackEvidence.some((feedback) => {
+          if (feedback.type !== 'profile_correction') return false
+          const action = getPreferenceAction(feedback)
+          return !action || action.action === 'enable' || action.action === 'correct'
+        })
+        const hasLongTermEvidence = feedbackEvidence.some(
+          (feedback) =>
+            getLearningEvidence(feedback)?.category === 'long_term_habit' &&
+            !getPreferenceAction(feedback),
+        )
+        const contentModes = hasLongTermEvidence
+          ? []
+          : Array.from(
+              new Set(
+                feedbackEvidence
+                  .map((feedback) => getLearningEvidence(feedback)?.contentMode)
+                  .filter(
+                    (mode): mode is WritingEditEvidence['contentMode'] =>
+                      Boolean(mode) && mode !== 'unclassified',
+                  ),
+              ),
+            )
+        const projectIds = new Set(
+          feedbackEvidence
+            .map((feedback) => feedback.projectId)
+            .filter((projectId): projectId is string => Boolean(projectId)),
+        )
+        const hasLibraryEvidence = evidenceIds.some((id) => !feedbackById.has(id))
+        const hasEnoughScopeEvidence =
+          input.scope === 'project' || hasLibraryEvidence || projectIds.size >= 2
+        const hasRepeatedStrongEvidence =
+          evidenceTypeList.filter((type) =>
+            ['profile_correction', 'manual_edit', 'final_choice'].includes(type),
+          ).length >= 2
+        const hasContradiction =
+          Array.isArray(preference.contradictions) &&
+          preference.contradictions.length > 0
+        const canActivateFromRepeatedEvidence =
+          evidenceIds.length >= 2 &&
+          hasEnoughScopeEvidence &&
+          hasRepeatedStrongEvidence &&
+          !hasContradiction
+        const confidence = canActivateFromRepeatedEvidence
+          ? Math.max(boundedConfidence, 0.55)
+          : boundedConfidence
 
-        return [
-          {
-            ...preference,
-            scope: input.scope,
-            confidence: Math.min(
-              Math.max(rawConfidence, 0),
-              getConfidenceLimit(evidenceTypeList),
-            ),
-            supportCount: evidenceIds.length,
-            evidenceIds,
-          },
-        ]
+        const normalizedPreference = writingPreferenceSchema.safeParse({
+          ...preference,
+          scope: input.scope,
+          confidence,
+          supportCount: evidenceIds.length,
+          evidenceIds,
+          sourceCategory: hasExplicitPreference
+            ? 'long_term_habit'
+            : 'pattern_preference',
+          status:
+            hasExplicitPreference ||
+            (canActivateFromRepeatedEvidence && confidence >= 0.55)
+              ? 'active'
+              : 'candidate',
+          contentModes,
+        })
+        return normalizedPreference.success ? [normalizedPreference.data] : []
       })
     : []
 
+  const latestPreferenceActions = getLatestPreferenceActions(input)
+  const controlledPreferenceIdByEvidenceId = new Map(
+    Array.from(latestPreferenceActions.values())
+      .filter(
+        ({ action }) => action.action === 'enable' || action.action === 'correct',
+      )
+      .map(({ feedback, action }) => [feedback.id, action.preferenceId]),
+  )
+  const preferencesById = new Map(
+    preferences
+      .filter((preference) =>
+        preference.evidenceIds.every((evidenceId) => {
+          const controlledPreferenceId = controlledPreferenceIdByEvidenceId.get(evidenceId)
+          return !controlledPreferenceId || controlledPreferenceId === preference.id
+        }),
+      )
+      .slice(0, maxWritingPreferenceCount)
+      .map((preference) => [String(preference.id), preference]),
+  )
+
+  for (const previousPreference of input.previousProfile?.preferences ?? []) {
+    if (preferencesById.size >= maxWritingPreferenceCount) break
+    if (!preferencesById.has(previousPreference.id)) {
+      preferencesById.set(previousPreference.id, previousPreference)
+    }
+  }
+
+  for (const [preferenceId, control] of latestPreferenceActions) {
+    const current =
+      preferencesById.get(preferenceId) ??
+      input.previousProfile?.preferences.find((item) => item.id === preferenceId) ??
+      control.action.snapshot
+    if (!current) continue
+
+    if (!preferencesById.has(preferenceId) && preferencesById.size >= maxWritingPreferenceCount) {
+      const removablePreferenceId = Array.from(preferencesById.keys())
+        .reverse()
+        .find((id) => !latestPreferenceActions.has(id))
+      if (removablePreferenceId) preferencesById.delete(removablePreferenceId)
+    }
+
+    if (control.action.action === 'disable') {
+      preferencesById.set(preferenceId, { ...current, status: 'disabled' })
+      continue
+    }
+    if (control.action.action === 'delete') {
+      preferencesById.set(preferenceId, { ...current, status: 'rejected' })
+      continue
+    }
+
+    const evidenceIds = evidenceTypes.has(control.feedback.id)
+      ? Array.from(new Set([...current.evidenceIds, control.feedback.id]))
+      : current.evidenceIds
+    preferencesById.set(preferenceId, {
+      ...current,
+      scope: input.scope,
+      statement:
+        control.action.action === 'correct' ? control.feedback.content : current.statement,
+      application:
+        control.action.action === 'correct'
+          ? '未来写作直接遵循这条用户明确规则，当前任务的事实和明确要求仍然优先。'
+          : current.application,
+      confidence: Math.max(current.confidence, 0.85),
+      supportCount: evidenceIds.length,
+      evidenceIds,
+      sourceCategory: 'long_term_habit',
+      status: 'active',
+      contentModes: current.contentModes,
+    })
+  }
+
   return {
     ...value,
-    preferences,
-    evidenceCount: evidenceTypes.size,
+    preferences: Array.from(preferencesById.values()),
+    evidenceCount:
+      input.libraryEvidence.notes.length +
+      input.libraryEvidence.snippets.length +
+      input.feedbackEvidence.length,
   }
 }
 
@@ -233,16 +477,22 @@ export function compactWriterModelInput(input: BuildWritingProfileRequest) {
         colorTagName: snippet.colorTagName,
       })),
     },
-    feedbackEvidence: input.feedbackEvidence.slice(0, 240).map((feedback) => ({
-      id: feedback.id,
-      projectId: feedback.projectId,
-      type: feedback.type,
-      content: trimText(feedback.content, 1600),
-      context: trimText(JSON.stringify(feedback.context), 1400),
-      editSignal: buildWritingEditSignal(feedback),
-      source: feedback.source,
-      createdAt: feedback.createdAt,
-    })),
+    feedbackEvidence: input.feedbackEvidence
+      .filter((feedback) => isFeedbackVisibleToProfile(feedback, input.scope))
+      .slice(0, 240)
+      .map((feedback) => ({
+        id: feedback.id,
+        projectId: feedback.projectId,
+        type: feedback.type,
+        content: trimText(feedback.content, 1600),
+        context: trimText(JSON.stringify(feedback.context), 1400),
+        learningEvidence: getLearningEvidence(feedback),
+        preferenceAction: getPreferenceAction(feedback),
+        appliedPreferenceIds: getAppliedPreferenceIds(feedback),
+        editSignal: buildWritingEditSignal(feedback),
+        source: feedback.source,
+        createdAt: feedback.createdAt,
+      })),
   }
 }
 
@@ -251,6 +501,9 @@ const writerModelSystemPrompt = [
   '你的任务有两个：从素材库共性和标注理由中理解用户为什么喜欢这些文案；从用户修改、接受、拒绝和最终选稿中学习用户自己的判断与表达方式。',
   '需要分别观察字词选择、固定替换、禁用表达、句式长度、停顿与标点、段落节奏、情感强度、确定性和与读者的距离；这些表层习惯必须落入 vocabulary、sentence_rhythm、emotional_expression、tone 或 forbidden_pattern，不能只概括成“自然”“像真人”。',
   'manual_edit 和 accepted_rewrite 可能包含 editSignal。它只帮助识别修改前后的表层变化，结论仍必须引用原始 feedback evidence ID。',
+  'feedbackEvidence.appliedPreferenceIds 只表示这些规则曾作为上下文提供给对应 AI 操作，不表示模型一定采用了它，也不表示后续修改一定在反对它。必须结合 before、after 和 editSignal 判断修改是否真正支持、细化或冲突；不得把一次修改计为所有关联规则的共同证据。',
+  'feedbackEvidence.learningEvidence 已将变化分为 fact_correction、draft_requirement、pattern_preference、long_term_habit。前两类只服务事实或本篇任务，不得进入 preference；后两类才是偏好证据。',
+  'preferenceAction 是用户对已有规则的管理指令。disable、delete 不是写作偏好，不能据此生成新规则；enable 是明确确认，correct 的 content 是用户纠正后的规则。',
   '先判断修改原因。事实修正、名称替换、错别字、字数压缩和本次任务硬约束不是长期风格；只有可跨内容复用的选择才可进入 preference。',
   '学习替换关系时必须保留方向，例如“用户删除了什么、改成了什么、未来何时适用”；不要把修改前后的两种表达都写成偏好。',
   '不要因为用户偶尔保留一个网络词就推断其偏好口语化，也不要因为一次短句拆分就推断所有文案都应该短句化。',
@@ -258,15 +511,22 @@ const writerModelSystemPrompt = [
   '证据优先级：profile_correction > manual_edit > accepted_rewrite/rejected_rewrite > final_choice > rewrite_preference > snippet reason > snippet label > repeated library pattern。',
   '每条 preferences 必须引用输入中真实存在的 evidence ID；不得编造证据、用户身份、经历或人口属性。',
   'scope=account 时，只保留跨项目仍成立的长期偏好；项目主题、受众和一次性要求只能进入 openQuestions，不能升级为账号偏好。',
+  '账号级规则若只来自 feedbackEvidence，至少需要覆盖两个不同 projectId；同一项目中的重复修改只能在 project 画像中晋级，账号画像仍为 candidate。素材库共性可以作为独立账号级证据。',
   'scope=account 只表示偏好可跨项目长期保存，不表示它适用于所有内容模式。同一账号可以同时有品牌叙事、产品说明、活动互动、事件通知和日常热点等不同写法，不得平均成一个全局语气。',
   'scope=project 时，可以记录当前项目覆盖，但 preference.scope 必须为 project。',
+  'profile_correction 和 preferenceAction 只作用于 context.scope 指定的画像，不得把项目规则的确认、纠正、停用或删除同步到账号画像，反之亦然。',
   '每条 preference 都要判断迁移边界。若证据只来自一种内容模式，application 必须明确写出适用模式和触发条件；只有证据覆盖至少两种不同内容模式，或用户通过 profile_correction 明确说明是长期通用习惯，才可写成跨模式默认规则。',
   '事实准确、不得编造、不得照抄参考等正确性约束可以跨模式成立；账号自称、互动动作、句长、分行、双关和结尾方式默认是模式相关偏好，除非有跨模式证据。',
+  '输出前先按“同一方向、同一适用条件、同一未来动作”聚类证据。多条修改共享同一种表层变化时，应由一条 preference 引用全部支持证据；不得把重叠结论拆成多条各自只有一个 evidenceId 的候选。',
   '单条非明确纠正证据只能形成待验证偏好，confidence 不得高于 0.45；单条 profile_correction 可达到 0.85；两条一致独立证据不得高于 0.7；三条以上且包含明确纠正、手动改稿或最终选择时才可高于 0.8。',
+  '两条以上一致的手动修改或最终选择被同一条 preference 引用、没有 contradictions 且已满足当前 scope 的晋级门槛时，confidence 不应低于 0.55；不得为凑数量重复引用同一证据。',
   'supportCount 必须等于该偏好引用的独立 evidenceIds 数量。出现冲突时保留在 contradictions，不要平均成模糊结论。',
+  'status 只能表达证据成熟度：单条非明确证据必须为 candidate；重复一致证据或用户明确确认才可为 active。disabled 和 rejected 只由系统根据用户管理动作写入。',
+  'contentModes 记录证据真实覆盖的内容模式。只有 long_term_habit 明确纠正或跨模式证据才可为空数组表示通用；不要把单一模式经验写成全模式规则。',
   `dimension 只能是以下值之一：${writingPreferenceDimensionSchema.options.join(', ')}。无法归类时不要输出该条 preference。`,
   'application 必须明确说明未来写作怎么选内容、组织结构或处理措辞，不能只写“更自然”“更像用户”。',
-  'previousProfile 只是上一版假设；新证据支持时强化，冲突时降低置信度或保留矛盾，不得无条件复制。',
+  'previousProfile 是需要持续维护的上一版假设。没有相关新证据时保留原 ID、状态、证据和适用模式，不得因本轮模型漏项而静默遗忘；新证据支持时强化，冲突时使用同一 ID 降低置信度并写入 contradictions，用户明确纠正时更新，只有 preferenceAction 可以停用、删除或恢复。',
+  '新证据与 previousProfile 中已有 preference 同方向时，必须沿用原 ID，追加真实 evidenceIds 并重新校准状态；不要为同义或上下位关系的规则另建新 ID。',
   'top-level 的原则和模式必须能够由 preferences 中的证据支持。',
   'evidenceCount 必须等于本次输入中 notes、snippets 和 feedbackEvidence 的去重证据总数。',
   '只输出一个 JSON object，不要 Markdown、代码块、额外解释或思考过程。',
@@ -279,11 +539,11 @@ export const writerModelSkillV1: AiSkillDefinition<
   WritingProfile
 > = {
   id: 'user-writing-model',
-  version: '1.2.0',
+  version: '1.4.2',
   taskType: 'profile-learn',
   model: 'deepseek-v4-flash',
   maxTokens: 3200,
-  temperature: 0.25,
+  temperature: 0,
   systemPrompt: writerModelSystemPrompt,
   userPromptTemplate:
     'JSON.stringify({ task: "learn_user_writing_model", input: compactWriterModelInput(input) })',

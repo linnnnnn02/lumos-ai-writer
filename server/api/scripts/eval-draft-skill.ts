@@ -4,6 +4,7 @@ import {
   aiDraftCopySchema,
   generateDraftRequestSchema,
   generateDraftResponseSchema,
+  type WritingProfileRevisionDto,
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
@@ -47,23 +48,24 @@ const expectedOutput = aiDraftCopySchema.parse(
 const accountWritingProfile = writingProfileSchema.parse(
   await readJsonFixture('writer-model-v1-output.json'),
 )
+const accountWritingProfileRevision: WritingProfileRevisionDto = {
+  id: '33333333-3333-4333-8333-333333333333',
+  scope: 'account',
+  projectId: null,
+  version: 1,
+  profile: accountWritingProfile,
+  evidenceIds: [],
+  skill: {
+    id: 'user-writing-model',
+    version: '1.4.2',
+    promptHash: 'a'.repeat(64),
+  },
+  createdAt: '2026-06-12T09:00:00.000Z',
+}
 const prepared = await prepareAiSkill(draftSkillV1, {
   ...input,
   writingProfileContext: {
-    accountProfile: {
-      id: '33333333-3333-4333-8333-333333333333',
-      scope: 'account',
-      projectId: null,
-      version: 1,
-      profile: accountWritingProfile,
-      evidenceIds: [],
-      skill: {
-        id: 'user-writing-model',
-        version: '1.0.0',
-        promptHash: 'a'.repeat(64),
-      },
-      createdAt: '2026-06-12T09:00:00.000Z',
-    },
+    accountProfile: accountWritingProfileRevision,
     projectProfile: null,
   },
 })
@@ -100,7 +102,11 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       usesLegacyFallback: boolean
     }
     writingProfile: {
-      account: { summary: string; mustAvoid: string[] } | null
+      account: {
+        summary: string
+        mustAvoid: string[]
+        preferences: Array<{ statement: string }>
+      } | null
       project: unknown | null
     }
     referenceUsagePolicy: {
@@ -286,9 +292,30 @@ const legacyAtomicFactInput = generateDraftRequestSchema.parse({
   },
 })
 assert.equal(legacyAtomicFactInput.brief.facts[0]?.required, true)
-assert.equal(userPayload.input.writingProfile.account?.summary, accountWritingProfile.summary)
-assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
+assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(userPayload.input.writingProfile.account?.summary.includes('结尾突然总结上价值'))
+assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
+assert.ok(
+  userPayload.input.writingProfile.account?.mustAvoid.includes(
+    '不要追加改变生活、成为更好的自己等拔高句。',
+  ),
+)
+assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
 assert.equal(userPayload.input.writingProfile.project, null)
+const productModeDraftInput = compactDraftSkillInput({
+  ...input,
+  brief: { ...input.brief, contentMode: 'product_education' },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.equal(productModeDraftInput.writingProfile.account?.preferences.length, 1)
+assert.ok(
+  productModeDraftInput.writingProfile.account?.preferences.every(
+    (preference) => preference.statement !== '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 assert.match(userPayload.input.referenceUsagePolicy.verbatimRule, /连续重合 16 个/)
 assert.equal(userPayload.input.referenceLearning.noteCount, input.notes.length)
 assert.equal(userPayload.input.referenceLearning.totalNoteCount, input.notes.length)

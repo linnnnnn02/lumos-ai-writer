@@ -27,6 +27,7 @@ import type {
   SavedSnippetRecord,
   SyncWorkspaceRequest,
   DraftFactSufficiencyResult,
+  WritingEditEvidence,
   WritingProfileRevisionDto,
   WritingProfileScope,
   WorkspaceProjectDto,
@@ -677,6 +678,91 @@ type HydratedCloudWorkspace = {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function hasChangedFactMarker(beforeText: string, afterText: string) {
+  const markerPattern =
+    /(?:https?:\/\/\S+|@[\p{L}\p{N}_-]+|\d+(?:\.\d+)?(?:%|元|人|天|次|点|时|分|年|月|日|号|cm|mm|kg|g|ml)?)/gu
+  const getMarkers = (text: string) => (text.match(markerPattern) ?? []).sort().join('|')
+  return getMarkers(beforeText) !== getMarkers(afterText)
+}
+
+function buildWritingEditEvidence(
+  input: CreateFeedbackMemoryRequest,
+  contentMode: WritingEditEvidence['contentMode'],
+): WritingEditEvidence | null {
+  const context = input.context ?? {}
+  const beforeText =
+    typeof context.beforeText === 'string'
+      ? context.beforeText
+      : typeof context.selectedText === 'string'
+        ? context.selectedText
+        : ''
+  const afterText = typeof context.afterText === 'string' ? context.afterText : input.content
+  const preferenceAction = isObject(context.preferenceAction)
+    ? context.preferenceAction.action
+    : ''
+
+  if (input.type === 'profile_correction') {
+    const scope = context.scope === 'project' ? 'project' : 'account'
+    const actionStatus =
+      preferenceAction === 'disable'
+        ? 'disabled'
+        : preferenceAction === 'delete'
+          ? 'rejected'
+          : 'active'
+    return {
+      category: scope === 'account' ? 'long_term_habit' : 'pattern_preference',
+      scope,
+      contentMode,
+      beforeText,
+      afterText,
+      confidence: 0.95,
+      evidenceCount: 1,
+      status: actionStatus,
+    }
+  }
+
+  if (input.type === 'rewrite_preference') {
+    return {
+      category: 'draft_requirement',
+      scope: 'draft',
+      contentMode,
+      beforeText,
+      afterText,
+      confidence: 0.95,
+      evidenceCount: 1,
+      status: 'active',
+    }
+  }
+
+  if (
+    ![
+      'manual_edit',
+      'accepted_rewrite',
+      'rejected_rewrite',
+      'final_choice',
+      'ai_smell_feedback',
+      'like',
+      'dislike',
+    ].includes(input.type)
+  ) {
+    return null
+  }
+
+  return {
+    category:
+      input.type === 'manual_edit' && hasChangedFactMarker(beforeText, afterText)
+        ? 'fact_correction'
+        : 'pattern_preference',
+    scope: 'draft',
+    contentMode,
+    beforeText,
+    afterText,
+    confidence: input.type === 'accepted_rewrite' ? 0.5 : 0.35,
+    evidenceCount: 1,
+    status: 'candidate',
+  }
 }
 
 function isConversationStage(value: unknown): value is ConversationStage {
@@ -3714,6 +3800,20 @@ function App() {
   function rememberExplicitFeedback(input: CreateFeedbackMemoryRequest) {
     if (cloudWorkspaceStatus !== 'ready') return Promise.resolve<FeedbackMemoryDto | null>(null)
 
+    const learningEvidence = buildWritingEditEvidence(
+      input,
+      analysisByConversation[activeConversation.id]?.contentMode.targetMode ?? 'unclassified',
+    )
+    const feedbackInput =
+      learningEvidence && !input.context?.learningEvidence
+        ? {
+            ...input,
+            context: {
+              ...input.context,
+              learningEvidence,
+            },
+          }
+        : input
     const payload = workspaceSyncPayload
     const serializedPayload = workspaceSyncSerialized
     const rememberTask = workspaceSaveQueueRef.current
@@ -3721,7 +3821,7 @@ function App() {
       .then(async () => {
         await saveCloudWorkspace(payload)
         workspaceSyncBaselineRef.current = serializedPayload
-        const memory = await rememberCloudFeedback(input)
+        const memory = await rememberCloudFeedback(feedbackInput)
         recentFeedbackMemoriesRef.current = [
           memory,
           ...recentFeedbackMemoriesRef.current.filter((item) => item.id !== memory.id),

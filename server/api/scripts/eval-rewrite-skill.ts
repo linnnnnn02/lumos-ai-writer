@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   aiRewriteResultSchema,
+  generateDraftRequestSchema,
   rewriteDraftRequestSchema,
   rewriteDraftResponseSchema,
+  type WritingProfileRevisionDto,
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
@@ -14,6 +16,7 @@ import {
 import { readConfig } from '../src/env.js'
 import {
   buildRewriteRepairUserPrompt,
+  compactRewriteSkillInput,
   filterGroundedRewriteSuggestions,
   rewriteRepairSystemPrompt,
   rewriteSkillV1,
@@ -34,29 +37,33 @@ async function readJsonFixture(name: string) {
 const input = rewriteDraftRequestSchema.parse(
   await readJsonFixture('rewrite-v1-input.json'),
 )
+const draftInput = generateDraftRequestSchema.parse(
+  await readJsonFixture('draft-v1-input.json'),
+)
 const expectedOutput = aiRewriteResultSchema.parse(
   await readJsonFixture('rewrite-v1-output.json'),
 )
 const accountWritingProfile = writingProfileSchema.parse(
   await readJsonFixture('writer-model-v1-output.json'),
 )
+const accountWritingProfileRevision: WritingProfileRevisionDto = {
+  id: '33333333-3333-4333-8333-333333333333',
+  scope: 'account',
+  projectId: null,
+  version: 1,
+  profile: accountWritingProfile,
+  evidenceIds: [],
+  skill: {
+    id: 'user-writing-model',
+    version: '1.4.2',
+    promptHash: 'a'.repeat(64),
+  },
+  createdAt: '2026-06-12T09:00:00.000Z',
+}
 const prepared = await prepareAiSkill(rewriteSkillV1, {
   ...input,
   writingProfileContext: {
-    accountProfile: {
-      id: '33333333-3333-4333-8333-333333333333',
-      scope: 'account',
-      projectId: null,
-      version: 1,
-      profile: accountWritingProfile,
-      evidenceIds: [],
-      skill: {
-        id: 'user-writing-model',
-        version: '1.0.0',
-        promptHash: 'a'.repeat(64),
-      },
-      createdAt: '2026-06-12T09:00:00.000Z',
-    },
+    accountProfile: accountWritingProfileRevision,
     projectProfile: null,
   },
 })
@@ -76,7 +83,11 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
     selection: { fieldId: string; selectedText: string }
     fullDraft: { title: string; body: string[] }
     writingProfile: {
-      account: { mustAvoid: string[] } | null
+      account: {
+        summary: string
+        mustAvoid: string[]
+        preferences: Array<{ statement: string }>
+      } | null
       project: unknown | null
     }
     groundingPolicy: {
@@ -102,8 +113,30 @@ assert.equal(userPayload.input.instruction, input.instruction)
 assert.equal(userPayload.input.selection.fieldId, input.fieldId)
 assert.equal(userPayload.input.selection.selectedText, input.selectedText)
 assert.deepEqual(userPayload.input.fullDraft, input.draft)
-assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
+assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
+assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
 assert.equal(userPayload.input.writingProfile.project, null)
+const productModeRewriteInput = compactRewriteSkillInput({
+  ...input,
+  analysis: {
+    ...draftInput.analysis,
+    contentMode: {
+      ...draftInput.analysis.contentMode,
+      targetMode: 'product_education',
+    },
+  },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.equal(productModeRewriteInput.writingProfile.account?.preferences.length, 1)
+assert.ok(
+  productModeRewriteInput.writingProfile.account?.preferences.every(
+    (preference) => preference.statement !== '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 assert.equal(userPayload.input.groundingPolicy.mode, 'closed_world')
 assert.ok(userPayload.input.groundingPolicy.evidenceSources.includes('fullDraft'))
 assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('不得提供'))

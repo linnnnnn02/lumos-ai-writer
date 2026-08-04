@@ -6,6 +6,7 @@ import {
   generateDraftRequestSchema,
   previewDraftForReaderRequestSchema,
   previewDraftForReaderResponseSchema,
+  type WritingProfileRevisionDto,
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
@@ -15,6 +16,7 @@ import {
 } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
+  compactReaderPreviewSkillInput,
   filterGroundedReaderSuggestions,
   normalizeReaderPreviewConfidence,
   normalizeReaderPreviewOutput,
@@ -50,23 +52,24 @@ const expectedOutput = aiReaderPreviewResultSchema.parse(
 const accountWritingProfile = writingProfileSchema.parse(
   await readJsonFixture('writer-model-v1-output.json'),
 )
+const accountWritingProfileRevision: WritingProfileRevisionDto = {
+  id: '33333333-3333-4333-8333-333333333333',
+  scope: 'account',
+  projectId: null,
+  version: 1,
+  profile: accountWritingProfile,
+  evidenceIds: [],
+  skill: {
+    id: 'user-writing-model',
+    version: '1.4.2',
+    promptHash: 'a'.repeat(64),
+  },
+  createdAt: '2026-06-12T09:00:00.000Z',
+}
 const prepared = await prepareAiSkill(readerPreviewSkillV1, {
   ...input,
   writingProfileContext: {
-    accountProfile: {
-      id: '33333333-3333-4333-8333-333333333333',
-      scope: 'account',
-      projectId: null,
-      version: 1,
-      profile: accountWritingProfile,
-      evidenceIds: [],
-      skill: {
-        id: 'user-writing-model',
-        version: '1.0.0',
-        promptHash: 'a'.repeat(64),
-      },
-      createdAt: '2026-06-12T09:00:00.000Z',
-    },
+    accountProfile: accountWritingProfileRevision,
     projectProfile: null,
   },
 })
@@ -80,7 +83,11 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
     readerAudience: string
     draft: { title: string; body: string[] }
     writingProfile: {
-      account: { mustAvoid: string[] } | null
+      account: {
+        summary: string
+        mustAvoid: string[]
+        preferences: Array<{ statement: string }>
+      } | null
       project: unknown | null
     }
     analysis: { readerView: string[] } | null
@@ -99,8 +106,31 @@ assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
 assert.deepEqual(userPayload.input.draft, input.draft)
 assert.ok(userPayload.input.analysis?.readerView.length)
-assert.ok(userPayload.input.writingProfile.account?.mustAvoid.includes('结尾突然总结上价值'))
+assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
+assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
 assert.equal(userPayload.input.writingProfile.project, null)
+assert.ok(input.analysis)
+const productModeReaderInput = compactReaderPreviewSkillInput({
+  ...input,
+  analysis: {
+    ...input.analysis,
+    contentMode: {
+      ...input.analysis.contentMode,
+      targetMode: 'product_education',
+    },
+  },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.equal(productModeReaderInput.writingProfile.account?.preferences.length, 1)
+assert.ok(
+  productModeReaderInput.writingProfile.account?.preferences.every(
+    (preference) => preference.statement !== '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 assert.equal(userPayload.input.groundingPolicy.mode, 'closed_world')
 assert.ok(userPayload.input.groundingPolicy.suggestionRule.includes('不得代写'))
 assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('条件式'))
