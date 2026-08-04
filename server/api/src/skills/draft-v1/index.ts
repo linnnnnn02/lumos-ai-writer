@@ -8,6 +8,7 @@ import {
 import { z } from 'zod'
 import type { AiSkillDefinition } from '../runtime.js'
 import { humanChineseCopyRulesV1 } from '../shared/human-chinese-copy-rules-v1.js'
+import { compactActiveWritingProfile } from '../shared/writing-profile.js'
 
 export const draftLengthPolicies = {
   short: {
@@ -335,28 +336,6 @@ export function findReferenceReuseIssues(
   ).slice(0, 4)
 }
 
-function compactProfile(revision: WritingProfileRevisionDto | null | undefined) {
-  if (!revision) return null
-  return {
-    version: revision.version,
-    summary: revision.profile.summary,
-    decisionPrinciples: revision.profile.decisionPrinciples,
-    contentPatterns: revision.profile.contentPatterns,
-    structurePatterns: revision.profile.structurePatterns,
-    voicePatterns: revision.profile.voicePatterns,
-    readerRelationship: revision.profile.readerRelationship,
-    mustKeep: revision.profile.mustKeep,
-    mustAvoid: revision.profile.mustAvoid,
-    preferences: revision.profile.preferences.map((preference) => ({
-      dimension: preference.dimension,
-      statement: preference.statement,
-      application: preference.application,
-      avoid: preference.avoid,
-      confidence: preference.confidence,
-    })),
-  }
-}
-
 const neutralModeMismatchSurfaceStyle = {
   sentenceRhythm: '句长服从当前事实密度，不迁移其他内容模式的节奏',
   paragraphShape: '按当前任务的信息顺序分段，不迁移其他内容模式的版式',
@@ -666,8 +645,14 @@ export function compactDraftSkillInput(input: DraftSkillInput) {
     brief: input.brief,
     contentMode,
     writingProfile: {
-      account: compactProfile(input.writingProfileContext?.accountProfile),
-      project: compactProfile(input.writingProfileContext?.projectProfile),
+      account: compactActiveWritingProfile(
+        input.writingProfileContext?.accountProfile,
+        contentMode.usesLegacyFallback ? 'unclassified' : contentMode.resolvedMode,
+      ),
+      project: compactActiveWritingProfile(
+        input.writingProfileContext?.projectProfile,
+        contentMode.usesLegacyFallback ? 'unclassified' : contentMode.resolvedMode,
+      ),
     },
     analysis: {
       userPreference: input.analysis.userPreference,

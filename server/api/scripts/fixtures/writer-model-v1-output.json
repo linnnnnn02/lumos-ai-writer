@@ -45,7 +45,10 @@
         "feedback-manual-concrete-edit",
         "feedback-final-camera"
       ],
-      "contradictions": []
+      "contradictions": [],
+      "sourceCategory": "pattern_preference",
+      "status": "active",
+      "contentModes": ["brand_story"]
     },
     {
       "id": "friend-review-tone",
@@ -54,13 +57,15 @@
       "application": "从自己遇到的问题和调整过程展开，让判断跟在经历之后。",
       "avoid": "避免先列步骤、参数和统一结论。",
       "scope": "account",
-      "confidence": 0.7,
-      "supportCount": 2,
+      "confidence": 0.45,
+      "supportCount": 1,
       "evidenceIds": [
-        "snippet-counter-intuition",
-        "feedback-rewrite-review-tone"
+        "snippet-counter-intuition"
       ],
-      "contradictions": []
+      "contradictions": [],
+      "sourceCategory": "pattern_preference",
+      "status": "candidate",
+      "contentModes": []
     },
     {
       "id": "no-elevated-ending",
@@ -74,7 +79,10 @@
       "evidenceIds": [
         "feedback-explicit-no-elevation"
       ],
-      "contradictions": []
+      "contradictions": [],
+      "sourceCategory": "long_term_habit",
+      "status": "active",
+      "contentModes": []
     }
   ],
   "openQuestions": [

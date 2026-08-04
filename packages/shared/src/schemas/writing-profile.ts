@@ -1,8 +1,35 @@
 import { z } from 'zod'
-import { aiSkillMetadataSchema, aiUsageSchema } from './ai.js'
+import { aiContentModeSchema, aiSkillMetadataSchema, aiUsageSchema } from './ai.js'
 import { feedbackMemoryTypeSchema } from './workspace.js'
 
 export const writingProfileScopeSchema = z.enum(['account', 'project'])
+
+export const writingFeedbackCategorySchema = z.enum([
+  'fact_correction',
+  'draft_requirement',
+  'pattern_preference',
+  'long_term_habit',
+])
+
+export const writingEvidenceScopeSchema = z.enum(['draft', 'project', 'account'])
+
+export const writingPreferenceStatusSchema = z.enum([
+  'candidate',
+  'active',
+  'disabled',
+  'rejected',
+])
+
+export const writingEditEvidenceSchema = z.object({
+  category: writingFeedbackCategorySchema,
+  scope: writingEvidenceScopeSchema,
+  contentMode: aiContentModeSchema,
+  beforeText: z.string().max(30000),
+  afterText: z.string().max(30000),
+  confidence: z.number().min(0).max(1),
+  evidenceCount: z.number().int().positive(),
+  status: writingPreferenceStatusSchema,
+})
 
 export const writingPreferenceDimensionSchema = z.enum([
   'content_selection',
@@ -43,6 +70,9 @@ export const writingPreferenceSchema = z.object({
   supportCount: z.number().int().nonnegative(),
   evidenceIds: z.array(z.string().trim().min(1).max(160)).min(1).max(30),
   contradictions: z.array(z.string().trim().min(1).max(800)).max(10),
+  sourceCategory: writingFeedbackCategorySchema.default('pattern_preference'),
+  status: writingPreferenceStatusSchema.default('active'),
+  contentModes: z.array(aiContentModeSchema).max(aiContentModeSchema.options.length).default([]),
 })
 
 export const writingProfileSchema = z.object({
@@ -153,6 +183,10 @@ export const buildWritingProfileResponseSchema = z.object({
 })
 
 export type WritingProfileScope = z.infer<typeof writingProfileScopeSchema>
+export type WritingFeedbackCategory = z.infer<typeof writingFeedbackCategorySchema>
+export type WritingEvidenceScope = z.infer<typeof writingEvidenceScopeSchema>
+export type WritingPreferenceStatus = z.infer<typeof writingPreferenceStatusSchema>
+export type WritingEditEvidence = z.infer<typeof writingEditEvidenceSchema>
 export type WritingPreference = z.infer<typeof writingPreferenceSchema>
 export type WritingProfile = z.infer<typeof writingProfileSchema>
 export type BuildWritingProfileRequest = z.infer<typeof buildWritingProfileRequestSchema>
