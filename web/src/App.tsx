@@ -98,6 +98,7 @@ import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
+  ApiClientError,
   analyzeReferences,
   buildWritingProfile,
   createFolder,
@@ -110,6 +111,7 @@ import {
   emptyTrash,
   generateDraft,
   getWritingProfile,
+  manageWritingPreference,
   rewriteDraft,
   previewDraftForReader,
   restoreFolder,
@@ -4031,6 +4033,12 @@ function App() {
     setIsWritingProfileSaving(true)
     setWritingProfileError('')
     try {
+      const revision =
+        input.scope === 'account'
+          ? writingProfileContext.accountProfile
+          : writingProfileContext.projectProfile
+      if (!revision) throw new Error('表达档案已经变化，请重新打开后再操作。')
+
       const content =
         input.action === 'correct' ? input.content?.trim() ?? '' : input.preference.statement
       if (!content) throw new Error('请输入修改后的表达规则。')
@@ -4054,10 +4062,45 @@ function App() {
       })
       if (!memory) throw new Error('这条规则暂时没有更新成功，请稍后重试。')
 
-      const refreshed = await refreshWritingProfiles({ extraFeedback: [memory], silent: true })
-      if (!refreshed) throw new Error('规则已经保存，但表达档案暂时没有刷新成功。')
+      const accessToken = await getCurrentAccessToken()
+      if (!accessToken) throw new Error('登录状态已过期，请重新登录后再管理表达规则。')
+      const response = await manageWritingPreference(accessToken, {
+        scope: input.scope,
+        projectId: input.scope === 'project' ? activeProject.id : undefined,
+        preferenceId: input.preference.id,
+        action: input.action,
+        feedbackMemoryId: memory.id,
+        expectedRevisionId: revision.id,
+        expectedVersion: revision.version,
+      })
+      setWritingProfileContext((current) =>
+        input.scope === 'account'
+          ? { ...current, accountProfile: response.revision }
+          : { ...current, projectProfile: response.revision },
+      )
       return true
     } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        (error.code === 'conflict' || error.code === 'not_found')
+      ) {
+        let message = error.message
+        try {
+          const accessToken = await getCurrentAccessToken()
+          if (accessToken) {
+            const profiles = await getWritingProfile(accessToken, activeProject.id)
+            setWritingProfileContext({
+              accountProfile: profiles.accountProfile,
+              projectProfile: profiles.projectProfile,
+            })
+            message = '表达档案已在其他设备更新，已载入最新版，请确认当前状态后重试。'
+          }
+        } catch {
+          // Keep the original conflict message when the latest profile cannot be loaded.
+        }
+        setWritingProfileError(message)
+        return false
+      }
       setWritingProfileError(getErrorMessage(error))
       return false
     } finally {

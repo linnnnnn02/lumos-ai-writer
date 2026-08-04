@@ -94,6 +94,20 @@ function getPreferenceAction(feedback: FeedbackEvidence): PreferenceAction | nul
   }
 }
 
+function isPersistedPreferenceAction(
+  feedback: FeedbackEvidence,
+  input: BuildWritingProfileRequest,
+) {
+  if (!getPreferenceAction(feedback)) return true
+
+  // Undefined keeps offline fixtures and older callers backward compatible. The API always supplies
+  // the current revision evidence list, so an action from a failed concurrent update is excluded.
+  return (
+    input.previousRevisionEvidenceIds === undefined ||
+    input.previousRevisionEvidenceIds.includes(feedback.id)
+  )
+}
+
 function getAppliedPreferenceIds(feedback: FeedbackEvidence) {
   return Array.from(
     new Set([
@@ -105,14 +119,15 @@ function getAppliedPreferenceIds(feedback: FeedbackEvidence) {
 
 function isPreferenceEvidence(
   feedback: FeedbackEvidence,
-  profileScope: BuildWritingProfileRequest['scope'],
+  input: BuildWritingProfileRequest,
 ) {
+  if (!isPersistedPreferenceAction(feedback, input)) return false
   const action = getPreferenceAction(feedback)
   if (action?.action === 'disable' || action?.action === 'delete') return false
   if (
     feedback.type === 'profile_correction' &&
     (feedback.context.scope === 'account' || feedback.context.scope === 'project') &&
-    feedback.context.scope !== profileScope
+    feedback.context.scope !== input.scope
   ) {
     return false
   }
@@ -127,12 +142,13 @@ function isPreferenceEvidence(
 
 function isFeedbackVisibleToProfile(
   feedback: FeedbackEvidence,
-  profileScope: BuildWritingProfileRequest['scope'],
+  input: BuildWritingProfileRequest,
 ) {
+  if (!isPersistedPreferenceAction(feedback, input)) return false
   return !(
     feedback.type === 'profile_correction' &&
     (feedback.context.scope === 'account' || feedback.context.scope === 'project') &&
-    feedback.context.scope !== profileScope
+    feedback.context.scope !== input.scope
   )
 }
 
@@ -228,7 +244,7 @@ function buildEvidenceTypeMap(input: BuildWritingProfileRequest) {
     )
   }
   for (const feedback of input.feedbackEvidence) {
-    if (isPreferenceEvidence(feedback, input.scope)) {
+    if (isPreferenceEvidence(feedback, input)) {
       evidenceTypes.set(feedback.id, feedback.type)
     }
   }
@@ -247,7 +263,11 @@ function getLatestPreferenceActions(input: BuildWritingProfileRequest) {
 
   for (const feedback of feedbackByTime) {
     const action = getPreferenceAction(feedback)
-    if (action && feedback.context.scope === input.scope) {
+    if (
+      action &&
+      feedback.context.scope === input.scope &&
+      isPersistedPreferenceAction(feedback, input)
+    ) {
       latestActions.set(action.preferenceId, { feedback, action })
     }
   }
@@ -478,7 +498,7 @@ export function compactWriterModelInput(input: BuildWritingProfileRequest) {
       })),
     },
     feedbackEvidence: input.feedbackEvidence
-      .filter((feedback) => isFeedbackVisibleToProfile(feedback, input.scope))
+      .filter((feedback) => isFeedbackVisibleToProfile(feedback, input))
       .slice(0, 240)
       .map((feedback) => ({
         id: feedback.id,

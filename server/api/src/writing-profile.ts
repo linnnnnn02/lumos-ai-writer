@@ -3,7 +3,10 @@ import {
   writingProfileSchema,
   type AiSkillMetadata,
   type BuildWritingProfileRequest,
+  type ManageWritingPreferenceAction,
+  type ManageWritingPreferenceRequest,
   type WritingProfile,
+  type WritingPreference,
   type WritingProfileRevisionDto,
   type WritingProfileScope,
 } from '@lumos-ai/shared'
@@ -30,9 +33,49 @@ type WritingProfileRevisionRow = {
   created_at: string
 }
 
+type PreferenceFeedbackRow = {
+  id: string
+  project_id: string | null
+  type: string
+  content: string
+  context: unknown
+  source: string
+}
+
 export type WritingProfileContext = {
   accountProfile: WritingProfileRevisionDto | null
   projectProfile: WritingProfileRevisionDto | null
+}
+
+export class WritingProfileVersionConflictError extends Error {
+  currentRevision: WritingProfileRevisionDto
+
+  constructor(currentRevision: WritingProfileRevisionDto) {
+    super('Writing profile revision changed.')
+    this.name = 'WritingProfileVersionConflictError'
+    this.currentRevision = currentRevision
+  }
+}
+
+export class WritingPreferenceNotFoundError extends Error {
+  constructor() {
+    super('Writing preference not found.')
+    this.name = 'WritingPreferenceNotFoundError'
+  }
+}
+
+export class WritingPreferenceTransitionError extends Error {
+  constructor() {
+    super('Writing preference action is not valid for its current status.')
+    this.name = 'WritingPreferenceTransitionError'
+  }
+}
+
+export class WritingPreferenceFeedbackError extends Error {
+  constructor() {
+    super('Writing preference feedback does not match the requested action.')
+    this.name = 'WritingPreferenceFeedbackError'
+  }
 }
 
 const revisionColumns =
@@ -52,6 +95,81 @@ function getAdminClient(config: AppConfig) {
     throw new SupabaseSchemaMissingError('Supabase service role key is not configured.')
   }
   return supabase
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+const validActionsByStatus: Record<
+  WritingPreference['status'],
+  readonly ManageWritingPreferenceAction[]
+> = {
+  candidate: ['enable', 'correct'],
+  active: ['disable', 'correct'],
+  disabled: ['enable', 'delete'],
+  rejected: ['enable'],
+}
+
+export function applyWritingPreferenceAction(
+  profile: WritingProfile,
+  input: {
+    preferenceId: string
+    action: ManageWritingPreferenceAction
+    content: string
+    feedbackMemoryId: string
+  },
+) {
+  const preferenceIndex = profile.preferences.findIndex(
+    (preference) => preference.id === input.preferenceId,
+  )
+  if (preferenceIndex < 0) throw new WritingPreferenceNotFoundError()
+
+  const current = profile.preferences[preferenceIndex]
+  if (!validActionsByStatus[current.status].includes(input.action)) {
+    throw new WritingPreferenceTransitionError()
+  }
+
+  const explicitEvidenceIds = Array.from(
+    new Set([...current.evidenceIds, input.feedbackMemoryId]),
+  ).slice(-30)
+  let updated: WritingPreference
+
+  if (input.action === 'disable') {
+    updated = { ...current, status: 'disabled' }
+  } else if (input.action === 'delete') {
+    updated = { ...current, status: 'rejected' }
+  } else if (input.action === 'correct') {
+    const statement = input.content.trim()
+    if (!statement || statement.length > 800) throw new WritingPreferenceFeedbackError()
+    updated = {
+      ...current,
+      statement,
+      application: '未来写作直接遵循这条用户明确规则，当前任务的事实和明确要求仍然优先。',
+      confidence: Math.max(current.confidence, 0.85),
+      supportCount: explicitEvidenceIds.length,
+      evidenceIds: explicitEvidenceIds,
+      sourceCategory: current.scope === 'account' ? 'long_term_habit' : 'pattern_preference',
+      status: 'active',
+    }
+  } else {
+    updated = {
+      ...current,
+      confidence: Math.max(current.confidence, 0.85),
+      supportCount: explicitEvidenceIds.length,
+      evidenceIds: explicitEvidenceIds,
+      sourceCategory: current.scope === 'account' ? 'long_term_habit' : 'pattern_preference',
+      status: 'active',
+    }
+  }
+
+  return writingProfileSchema.parse({
+    ...profile,
+    evidenceCount: profile.evidenceCount + 1,
+    preferences: profile.preferences.map((preference, index) =>
+      index === preferenceIndex ? updated : preference,
+    ),
+  })
 }
 
 export function parseStoredWritingProfile(value: unknown): WritingProfile {
@@ -139,6 +257,44 @@ async function getLatestRevision(
 
   const row = (data?.[0] ?? null) as WritingProfileRevisionRow | null
   return row ? toRevisionDto(row) : null
+}
+
+async function getPreferenceFeedback(
+  config: AppConfig,
+  user: User,
+  input: ManageWritingPreferenceRequest,
+) {
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('feedback_memories')
+    .select('id,project_id,type,content,context,source')
+    .eq('id', input.feedbackMemoryId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  assertNoDatabaseError(error)
+
+  const feedback = data as PreferenceFeedbackRow | null
+  const context = isRecord(feedback?.context) ? feedback.context : null
+  const preferenceAction = isRecord(context?.preferenceAction)
+    ? context.preferenceAction
+    : null
+  const expectedProjectId = input.scope === 'project' ? input.projectId ?? null : null
+  const matchesAction =
+    preferenceAction?.action === input.action &&
+    preferenceAction.preferenceId === input.preferenceId
+
+  if (
+    !feedback ||
+    feedback.type !== 'profile_correction' ||
+    feedback.source !== 'profile_preference_management' ||
+    feedback.project_id !== expectedProjectId ||
+    context?.scope !== input.scope ||
+    !matchesAction
+  ) {
+    throw new WritingPreferenceFeedbackError()
+  }
+
+  return feedback
 }
 
 export async function getWritingProfileContext(
@@ -230,5 +386,54 @@ export async function createWritingProfileRevision(
     .single()
   assertNoDatabaseError(error)
 
+  return toRevisionDto(data as WritingProfileRevisionRow)
+}
+
+export async function createManagedWritingProfileRevision(
+  config: AppConfig,
+  user: User,
+  input: ManageWritingPreferenceRequest,
+) {
+  const projectId = input.scope === 'project' ? input.projectId ?? null : null
+  if (projectId) await assertOwnedProject(config, user, projectId)
+
+  const latest = await getLatestRevision(config, user, input.scope, projectId)
+  if (!latest) throw new WritingPreferenceNotFoundError()
+  if (latest.id !== input.expectedRevisionId || latest.version !== input.expectedVersion) {
+    throw new WritingProfileVersionConflictError(latest)
+  }
+
+  const feedback = await getPreferenceFeedback(config, user, input)
+  if (latest.evidenceIds.includes(feedback.id)) {
+    throw new WritingPreferenceFeedbackError()
+  }
+  const profile = applyWritingPreferenceAction(latest.profile, {
+    preferenceId: input.preferenceId,
+    action: input.action,
+    content: feedback.content,
+    feedbackMemoryId: feedback.id,
+  })
+  const supabase = getAdminClient(config)
+  const { data, error } = await supabase
+    .from('writing_profile_revisions')
+    .insert({
+      user_id: user.id,
+      scope: input.scope,
+      project_id: projectId,
+      version: latest.version + 1,
+      profile,
+      evidence_ids: Array.from(new Set([...latest.evidenceIds, feedback.id])),
+      skill_id: latest.skill.id,
+      skill_version: latest.skill.version,
+      prompt_hash: latest.skill.promptHash,
+    })
+    .select(revisionColumns)
+    .single()
+
+  if (error?.code === '23505') {
+    const currentRevision = await getLatestRevision(config, user, input.scope, projectId)
+    throw new WritingProfileVersionConflictError(currentRevision ?? latest)
+  }
+  assertNoDatabaseError(error)
   return toRevisionDto(data as WritingProfileRevisionRow)
 }
