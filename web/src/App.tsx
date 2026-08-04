@@ -28,6 +28,7 @@ import type {
   SyncWorkspaceRequest,
   DraftFactSufficiencyResult,
   WritingEditEvidence,
+  WritingPreference,
   WritingProfileRevisionDto,
   WritingProfileScope,
   WorkspaceProjectDto,
@@ -4010,7 +4011,51 @@ function App() {
       })
       if (!memory) throw new Error('这条表达习惯暂时没有保存成功，请稍后重试。')
 
-      await refreshWritingProfiles({ extraFeedback: [memory], silent: true })
+      const refreshed = await refreshWritingProfiles({ extraFeedback: [memory], silent: true })
+      if (!refreshed) throw new Error('规则已经保存，但表达档案暂时没有刷新成功。')
+      return true
+    } catch (error) {
+      setWritingProfileError(getErrorMessage(error))
+      return false
+    } finally {
+      setIsWritingProfileSaving(false)
+    }
+  }
+
+  async function handleManageWritingPreference(input: {
+    scope: WritingProfileScope
+    preference: WritingPreference
+    action: 'enable' | 'disable' | 'delete' | 'correct'
+    content?: string
+  }) {
+    setIsWritingProfileSaving(true)
+    setWritingProfileError('')
+    try {
+      const content =
+        input.action === 'correct' ? input.content?.trim() ?? '' : input.preference.statement
+      if (!content) throw new Error('请输入修改后的表达规则。')
+
+      const memory = await rememberExplicitFeedback({
+        projectId: input.scope === 'project' ? activeProject.id : undefined,
+        conversationId: activeConversation.id,
+        type: 'profile_correction',
+        content,
+        context: {
+          scope: input.scope,
+          projectName: activeProject.name,
+          step: activeConversation.step,
+          preferenceAction: {
+            action: input.action,
+            preferenceId: input.preference.id,
+            snapshot: input.preference,
+          },
+        },
+        source: 'profile_preference_management',
+      })
+      if (!memory) throw new Error('这条规则暂时没有更新成功，请稍后重试。')
+
+      const refreshed = await refreshWritingProfiles({ extraFeedback: [memory], silent: true })
+      if (!refreshed) throw new Error('规则已经保存，但表达档案暂时没有刷新成功。')
       return true
     } catch (error) {
       setWritingProfileError(getErrorMessage(error))
@@ -8863,10 +8908,12 @@ function App() {
         isLoading={isWritingProfileLoading}
         isSaving={isWritingProfileSaving}
         error={writingProfileError}
+        onClearError={() => setWritingProfileError('')}
         onRefresh={() => {
           void refreshWritingProfiles()
         }}
         onAddCorrection={handleAddWritingProfileCorrection}
+        onManagePreference={handleManageWritingPreference}
       />
       {showShellHeader ? (
         <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(248,250,252,0.82)] backdrop-blur-2xl">

@@ -383,6 +383,120 @@ assert.equal(
   1,
 )
 
+const deleteInput = buildWritingProfileRequestSchema.parse({
+  ...disableInput,
+  previousProfile: disabledProfile,
+  feedbackEvidence: [
+    {
+      ...disableFeedback,
+      id: 'feedback-delete-preference',
+      context: {
+        ...disableFeedback.context,
+        preferenceAction: {
+          ...disableFeedback.context.preferenceAction,
+          action: 'delete',
+          snapshot: disabledPreference,
+        },
+        learningEvidence: {
+          ...disableFeedback.context.learningEvidence,
+          status: 'rejected',
+        },
+      },
+      createdAt: '2026-06-22T08:00:00.000Z',
+    },
+  ],
+})
+const rejectedProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput({ ...expectedOutput, preferences: [] }, deleteInput),
+)
+const rejectedPreference = rejectedProfile.preferences.find(
+  (preference) => preference.id === activePreference.id,
+)
+assert.ok(rejectedPreference)
+assert.equal(rejectedPreference.status, 'rejected')
+
+const restoreInput = buildWritingProfileRequestSchema.parse({
+  ...deleteInput,
+  previousProfile: rejectedProfile,
+  feedbackEvidence: [
+    {
+      ...disableFeedback,
+      id: 'feedback-restore-preference',
+      context: {
+        ...disableFeedback.context,
+        preferenceAction: {
+          ...disableFeedback.context.preferenceAction,
+          action: 'enable',
+          snapshot: rejectedPreference,
+        },
+        learningEvidence: {
+          ...disableFeedback.context.learningEvidence,
+          status: 'active',
+        },
+      },
+      createdAt: '2026-06-23T08:00:00.000Z',
+    },
+  ],
+})
+const restoredProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...expectedOutput,
+      preferences: [
+        {
+          ...activePreference,
+          id: 'duplicate-restored-preference',
+          evidenceIds: ['feedback-restore-preference'],
+        },
+      ],
+    },
+    restoreInput,
+  ),
+)
+const restoredPreference = restoredProfile.preferences.find(
+  (preference) => preference.id === activePreference.id,
+)
+assert.ok(restoredPreference)
+assert.equal(restoredPreference.status, 'active')
+assert.equal(restoredProfile.preferences.length, expectedOutput.preferences.length)
+
+const correctedStatement = '结尾写到具体感受就停，不额外拔高主题。'
+const correctInput = buildWritingProfileRequestSchema.parse({
+  ...enableInput,
+  previousProfile: enabledProfile,
+  feedbackEvidence: [
+    {
+      ...disableFeedback,
+      id: 'feedback-correct-preference',
+      content: correctedStatement,
+      context: {
+        ...disableFeedback.context,
+        preferenceAction: {
+          ...disableFeedback.context.preferenceAction,
+          action: 'correct',
+          snapshot: enabledPreference,
+        },
+        learningEvidence: {
+          ...disableFeedback.context.learningEvidence,
+          afterText: correctedStatement,
+          status: 'active',
+        },
+      },
+      createdAt: '2026-06-24T08:00:00.000Z',
+    },
+  ],
+})
+const correctedProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput({ ...expectedOutput, preferences: [] }, correctInput),
+)
+const correctedPreference = correctedProfile.preferences.find(
+  (preference) => preference.id === activePreference.id,
+)
+assert.ok(correctedPreference)
+assert.equal(correctedPreference.status, 'active')
+assert.equal(correctedPreference.statement, correctedStatement)
+assert.ok(correctedPreference.evidenceIds.includes('feedback-correct-preference'))
+
 const projectOnlyDisableFeedback = {
   ...disableFeedback,
   id: 'feedback-project-only-disable',
