@@ -149,6 +149,25 @@ export function collectWritingEvidenceIds(input: BuildWritingProfileRequest) {
   ]
 }
 
+export function canReuseWritingProfileRevision(
+  revision: WritingProfileRevisionDto | null,
+  evidenceIds: string[],
+  activeSkill: AiSkillMetadata,
+) {
+  if (!revision) return false
+
+  const revisionEvidenceIds = new Set(revision.evidenceIds)
+  const hasSameEvidence =
+    revisionEvidenceIds.size === evidenceIds.length &&
+    evidenceIds.every((id) => revisionEvidenceIds.has(id))
+  const hasSameSkill =
+    revision.skill.id === activeSkill.id &&
+    revision.skill.version === activeSkill.version &&
+    revision.skill.promptHash === activeSkill.promptHash
+
+  return hasSameEvidence && hasSameSkill
+}
+
 export async function createWritingProfileRevision(
   config: AppConfig,
   user: User,

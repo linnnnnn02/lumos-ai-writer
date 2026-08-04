@@ -7,7 +7,10 @@ import {
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
-import { rewriteDraftWithDeepSeek } from '../src/ai/deepseek.js'
+import {
+  parseJsonContent,
+  rewriteDraftWithDeepSeek,
+} from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
 import {
   buildRewriteRepairUserPrompt,
@@ -81,11 +84,18 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       evidenceSources: string[]
       missingInformation: string
     }
+    outputRequirements: {
+      suggestionCount: { min: number; max: number }
+      summaryMaxCharacters: number
+      labelMaxCharacters: number
+      textMaxCharacters: number
+      rationaleMaxCharacters: number
+    }
   }
 }
 
 assert.equal(prepared.metadata.id, 'selection-rewrite')
-assert.equal(prepared.metadata.version, '1.1.0')
+assert.equal(prepared.metadata.version, '1.2.0')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'rewrite_selected_text')
 assert.equal(userPayload.input.instruction, input.instruction)
@@ -97,10 +107,38 @@ assert.equal(userPayload.input.writingProfile.project, null)
 assert.equal(userPayload.input.groundingPolicy.mode, 'closed_world')
 assert.ok(userPayload.input.groundingPolicy.evidenceSources.includes('fullDraft'))
 assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('不得提供'))
+assert.deepEqual(userPayload.input.outputRequirements.suggestionCount, { min: 2, max: 3 })
+assert.equal(userPayload.input.outputRequirements.summaryMaxCharacters, 80)
+assert.equal(userPayload.input.outputRequirements.labelMaxCharacters, 12)
+assert.equal(userPayload.input.outputRequirements.rationaleMaxCharacters, 120)
+assert.equal(
+  userPayload.input.outputRequirements.textMaxCharacters,
+  Math.max(160, Array.from(input.selectedText.replace(/\s/g, '')).length + 80),
+)
 assert.ok(prepared.systemPrompt.includes('当前 instruction > project writingProfile > account writingProfile'))
 assert.ok(prepared.systemPrompt.includes('不得返回整篇文案、整段未选文字或改写后的 fullDraft'))
 assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
 assert.ok(prepared.systemPrompt.includes('一个意思说清后就停止'))
+assert.ok(prepared.systemPrompt.includes('input.outputRequirements 是硬约束'))
+assert.ok(rewriteRepairSystemPrompt.includes('JSON 字段必须严格匹配'))
+assert.deepEqual(
+  parseJsonContent(
+    '{"summary":"局部改写" "suggestions":[{"label":"克制版" "text":"保留原意"}]}',
+  ),
+  {
+    summary: '局部改写',
+    suggestions: [{ label: '克制版', text: '保留原意' }],
+  },
+)
+assert.deepEqual(
+  parseJsonContent('{"summary":"保留第一个对象"}{"summary":"忽略多余对象"}'),
+  { summary: '保留第一个对象' },
+)
+assert.throws(() =>
+  parseJsonContent(
+    '{"summary" "缺少冒号","suggestions":[{"label":"测试"}]}',
+  ),
+)
 
 assert.doesNotThrow(() =>
   validateRewriteSkillOutput(
@@ -277,6 +315,56 @@ try {
 } finally {
   globalThis.fetch = originalFetch
 }
+
+const formatRetryRequests: Array<{ messages: Array<{ content: string }> }> = []
+let formatRetryIndex = 0
+globalThis.fetch = async (_request, init) => {
+  formatRetryRequests.push(JSON.parse(String(init?.body)))
+  const contents = [
+    JSON.stringify(invalidGroundingOutput),
+    '{"summary":"truncated repair"',
+    JSON.stringify(expectedOutput),
+  ]
+  const usages = [
+    { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 },
+    { prompt_tokens: 220, completion_tokens: 120, total_tokens: 340 },
+    { prompt_tokens: 210, completion_tokens: 110, total_tokens: 320 },
+  ]
+  const currentIndex = formatRetryIndex
+  formatRetryIndex += 1
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: contents[currentIndex] } }],
+      usage: usages[currentIndex],
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+try {
+  const recoveredFormat = await rewriteDraftWithDeepSeek(
+    readConfig({
+      APP_ENV: 'local',
+      AI_FEATURE_ENABLED: 'true',
+      AI_PROVIDER_PRIMARY: 'deepseek',
+      DEEPSEEK_API_KEY: 'offline-evaluation-placeholder',
+    }),
+    input,
+  )
+  assert.deepEqual(recoveredFormat.rewrite, expectedOutput)
+  assert.deepEqual(recoveredFormat.usage, {
+    promptTokens: 730,
+    completionTokens: 330,
+    totalTokens: 1060,
+  })
+  assert.equal(formatRetryRequests.length, 3)
+  const secondRepairPrompt = JSON.parse(
+    formatRetryRequests[2]?.messages[1]?.content ?? '{}',
+  ) as { validationError?: string }
+  assert.match(secondRepairPrompt.validationError ?? '', /non-JSON content/)
+} finally {
+  globalThis.fetch = originalFetch
+}
 assert.throws(() =>
   validateRewriteSkillOutput(
     {
@@ -366,6 +454,6 @@ console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`fixture suggestions: ${expectedOutput.suggestions.length}`)
 console.log('selection-only contract: enforced')
-console.log('single grounding repair: simulated and usage-combined')
+console.log('up to two grounding repairs: simulated and usage-combined')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')

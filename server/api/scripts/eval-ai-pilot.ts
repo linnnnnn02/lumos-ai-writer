@@ -7,6 +7,10 @@ import {
 } from '../src/ai/access.js'
 import { DeepSeekOutputValidationError } from '../src/ai/deepseek.js'
 import { readConfig } from '../src/env.js'
+import {
+  isTransientDatabaseError,
+  retryTransientDatabaseOperation,
+} from '../src/library.js'
 
 const pilotUserId = '11111111-1111-4111-8111-111111111111'
 const otherUserId = '22222222-2222-4222-8222-222222222222'
@@ -39,6 +43,40 @@ const validationError = new DeepSeekOutputValidationError(
 )
 assert.equal(validationError.usage?.totalTokens, 1400)
 assert.equal(validationError.promptHash, 'a'.repeat(64))
+
+assert.equal(
+  isTransientDatabaseError({ message: 'TypeError: fetch failed' }),
+  true,
+)
+assert.equal(
+  isTransientDatabaseError({ code: '42501', message: 'permission denied' }),
+  false,
+)
+let transientAttempts = 0
+const recoveredResult = await retryTransientDatabaseOperation(
+  async () => {
+    transientAttempts += 1
+    return {
+      error:
+        transientAttempts < 3
+          ? { message: 'TypeError: fetch failed' }
+          : null,
+    }
+  },
+  { maxAttempts: 3, delayMs: 0 },
+)
+assert.equal(recoveredResult.error, null)
+assert.equal(transientAttempts, 3)
+
+let permanentAttempts = 0
+await retryTransientDatabaseOperation(
+  async () => {
+    permanentAttempts += 1
+    return { error: { code: '42501', message: 'permission denied' } }
+  },
+  { maxAttempts: 3, delayMs: 0 },
+)
+assert.equal(permanentAttempts, 1)
 
 const missingBudgetConfig = readConfig({
   APP_ENV: 'local',

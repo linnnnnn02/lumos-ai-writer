@@ -129,7 +129,10 @@ assert.throws(() =>
     '{"items":[{"id":1}\n {"id":2}\n {"id":3}\n {"id":4}]}',
   ),
 )
-assert.throws(() => parseJsonContent('{"first":1\n "second":2}'))
+assert.deepEqual(
+  parseJsonContent('{"first":1\n "second":2}'),
+  { first: 1, second: 2 },
+)
 assert.throws(() => parseJsonContent('{"items":["first"\n invalid]}'))
 
 assert.doesNotThrow(() =>
