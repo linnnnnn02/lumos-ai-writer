@@ -12,6 +12,7 @@ import type {
   DeleteResourceResponse,
   GenerateDraftRequest,
   GenerateDraftResponse,
+  GetWritingProfileResponse,
   GetWorkspaceResponse,
   HealthResponse,
   ListFoldersResponse,
@@ -271,6 +272,11 @@ export function buildWritingProfile(token: string, input: BuildWritingProfileReq
     method: 'POST',
     body: input,
   })
+}
+
+export function getWritingProfile(token: string, projectId?: string) {
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
+  return requestJson<GetWritingProfileResponse>(`/v1/writing-profile${query}`, token)
 }
 
 export function generateDraft(token: string, input: GenerateDraftRequest) {

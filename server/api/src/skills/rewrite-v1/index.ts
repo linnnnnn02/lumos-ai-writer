@@ -5,7 +5,7 @@ import {
   type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
 import type { AiSkillDefinition } from '../runtime.js'
-import { antiAiWritingRulesV1 } from '../shared/anti-ai-writing-rules-v1.js'
+import { humanChineseCopyRulesV1 } from '../shared/human-chinese-copy-rules-v1.js'
 import {
   findUnsupportedMaterialTerms,
   findUnsupportedNumericClaims,
@@ -223,7 +223,7 @@ const rewriteSystemPrompt = [
   'recommendedIndex 选择最符合当前 instruction 且不违背高置信度写作偏好的版本。',
   'rationale 只说明版本差异和适用效果，不输出思考过程，不声称已经修改 fullDraft。',
   '去 AI 味规则：',
-  ...antiAiWritingRulesV1.map((rule, index) => `${index + 1}. ${rule}`),
+  ...humanChineseCopyRulesV1.map((rule, index) => `${index + 1}. ${rule}`),
   '只输出一个 JSON object，不要 Markdown，不要代码块，不要额外解释。',
   'JSON 字段必须严格匹配：',
   JSON.stringify(outputContract),
@@ -231,7 +231,7 @@ const rewriteSystemPrompt = [
 
 export const rewriteSkillV1: AiSkillDefinition<RewriteSkillInput, AiRewriteResult> = {
   id: 'selection-rewrite',
-  version: '1.0.3',
+  version: '1.1.0',
   taskType: 'rewrite',
   model: 'deepseek-v4-flash',
   maxTokens: 1600,

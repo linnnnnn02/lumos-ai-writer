@@ -1,6 +1,6 @@
 ---
 id: selection-rewrite
-version: 1.0.3
+version: 1.1.0
 task: rewrite
 model: deepseek-v4-flash
 ---
@@ -24,6 +24,8 @@ Rewrite only the text selected by the user while preserving facts, continuity, a
 - Make each version meaningfully different and identify the recommended version.
 - Read the surrounding and full-draft context so each replacement connects naturally.
 - Apply evidence-backed user preferences without treating a one-off instruction as a lasting preference.
+- Preserve the user's learned vocabulary, sentence rhythm, punctuation, emotional intensity, and forbidden patterns when they do not conflict with the current instruction.
+- Remove template-like transitions and repeated conclusions instead of replacing them with different generic language.
 - Treat the input as a closed-world fact set; every concrete detail in a suggestion must be traceable to the selection, context, draft, or analysis.
 - Produce structured JSON that passes `aiRewriteResultSchema`.
 - If grounding validation fails, make at most one repair attempt using the exact validation error and aggregate both calls in usage accounting.

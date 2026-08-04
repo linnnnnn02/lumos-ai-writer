@@ -1122,10 +1122,16 @@ export function LibraryManager({
 
   function renderSortControl() {
     return (
-      <div className="inline-flex min-h-[var(--ui-control-height-lg)] items-center gap-2 rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--surface-muted)] px-3">
-        <span className="text-xs font-bold text-[var(--soft-foreground)]">排序</span>
+      <div className="inline-flex min-h-[var(--ui-control-height-lg)] shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ui-field-radius)] border border-[var(--border)] bg-[var(--surface-muted)] px-3">
+        <span className="shrink-0 whitespace-nowrap text-xs font-bold text-[var(--soft-foreground)]">
+          排序
+        </span>
         <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-          <SelectTrigger controlSize="sm" className="border-0 bg-transparent px-1 text-xs font-bold shadow-none">
+          <SelectTrigger
+            controlSize="sm"
+            aria-label="排序方式"
+            className="w-auto min-w-[5.5rem] shrink-0 whitespace-nowrap border-0 bg-transparent px-1 text-xs font-bold shadow-none [&>span]:whitespace-nowrap"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent align="end">
@@ -1243,14 +1249,16 @@ export function LibraryManager({
     >
       <aside className="relative flex h-screen flex-col border-r border-[var(--border)] bg-white/62 px-4 py-6">
         <div className="flex items-center gap-3 px-1 pb-5">
-          <Button variant="secondary" size="icon" onClick={onBack} aria-label="返回项目页">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
           <div className="min-w-0">
             <p className="text-xs font-bold text-[var(--muted-foreground)]">Lumos AI Writer</p>
             <h1 className="mt-0.5 text-2xl font-extrabold tracking-normal">笔记库</h1>
           </div>
         </div>
+
+        <Button type="button" variant="secondary" className="mb-3 w-full" onClick={onBack}>
+          <ArrowLeft className="h-4 w-4" />
+          去 AI 写作台
+        </Button>
 
         <Button
           type="button"

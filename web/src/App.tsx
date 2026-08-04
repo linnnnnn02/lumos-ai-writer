@@ -19,12 +19,16 @@ import type {
   AiReaderPreviewResult,
   AiUsage,
   CreateFeedbackMemoryRequest,
+  FeedbackMemoryDto,
   NoteLearningStatus,
   ProjectLength,
   SavedFolderRecord,
   SavedNoteRecord,
   SavedSnippetRecord,
   SyncWorkspaceRequest,
+  DraftFactSufficiencyResult,
+  WritingProfileRevisionDto,
+  WritingProfileScope,
   WorkspaceProjectDto,
 } from '@lumos-ai/shared'
 import {
@@ -86,6 +90,7 @@ import { LearnWorkspace } from '@/components/learn-workspace'
 import { ConversationIntake } from '@/components/conversation-intake'
 import { LibraryManager } from '@/components/library-manager'
 import { DraftVersionHistory } from '@/components/draft-version-history'
+import { WritingProfileDialog } from '@/components/writing-profile-dialog'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
@@ -102,6 +107,7 @@ import {
   deleteSnippet,
   emptyTrash,
   generateDraft,
+  getWritingProfile,
   rewriteDraft,
   previewDraftForReader,
   restoreFolder,
@@ -1788,6 +1794,14 @@ function App() {
     Record<string, string>
   >(restoredGuestWorkspace?.currentDraftVersionIdByConversation ?? {})
   const [isDraftVersionHistoryOpen, setIsDraftVersionHistoryOpen] = useState(false)
+  const [isWritingProfileOpen, setIsWritingProfileOpen] = useState(false)
+  const [writingProfileContext, setWritingProfileContext] = useState<{
+    accountProfile: WritingProfileRevisionDto | null
+    projectProfile: WritingProfileRevisionDto | null
+  }>({ accountProfile: null, projectProfile: null })
+  const [isWritingProfileLoading, setIsWritingProfileLoading] = useState(false)
+  const [isWritingProfileSaving, setIsWritingProfileSaving] = useState(false)
+  const [writingProfileError, setWritingProfileError] = useState('')
   const [isWritingBriefOpen, setIsWritingBriefOpen] = useState(false)
   const [, setDraftUsageByConversation] = useState<
     Record<string, AiUsage | null>
@@ -1795,6 +1809,9 @@ function App() {
   const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
   const [draftGenerationErrorByConversation, setDraftGenerationErrorByConversation] = useState<
     Record<string, string>
+  >({})
+  const [draftFactGapByConversation, setDraftFactGapByConversation] = useState<
+    Record<string, DraftFactSufficiencyResult>
   >({})
   const [draftDragSelection, setDraftDragSelection] = useState<DraftDragSelection | null>(null)
   const [draftPointerDrag, setDraftPointerDrag] = useState<DraftPointerDrag | null>(null)
@@ -1857,6 +1874,7 @@ function App() {
   )
   const skipNextWorkspaceAutosaveRef = useRef(false)
   const workspaceSaveQueueRef = useRef(Promise.resolve())
+  const recentFeedbackMemoriesRef = useRef<FeedbackMemoryDto[]>([])
   const draftVersionsRef = useRef(draftVersionsByConversation)
 
   const activeProject = useMemo(
@@ -2831,6 +2849,7 @@ function App() {
       : 0
   const analysisError = analysisErrorByConversation[activeConversation.id] ?? ''
   const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
+  const draftFactGap = draftFactGapByConversation[activeConversation.id] ?? null
   const effectiveLength = activeConversation.length ?? 'medium'
 
   useEffect(() => {
@@ -2948,6 +2967,11 @@ function App() {
 
   const creationBrief = useMemo(
     () => ({
+      objective: activeConversation.writingBrief.objective.trim(),
+      sourceFacts: activeConversation.writingBrief.requiredFacts.trim(),
+      instructions: activeConversation.writingBrief.instructions.trim(),
+      contentMode: 'auto' as const,
+      facts: [],
       mustInclude: [
         activeConversation.writingBrief.requiredFacts.trim(),
         activeConversation.writingBrief.objective.trim()
@@ -3095,6 +3119,11 @@ function App() {
 
   function invalidateAnalysisAndDraft(conversationId: string) {
     setAnalysisByConversation((current) => {
+      const next = { ...current }
+      delete next[conversationId]
+      return next
+    })
+    setDraftFactGapByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
       return next
@@ -3689,17 +3718,212 @@ function App() {
   }
 
   function rememberExplicitFeedback(input: CreateFeedbackMemoryRequest) {
-    if (cloudWorkspaceStatus !== 'ready') return
+    if (cloudWorkspaceStatus !== 'ready') return Promise.resolve<FeedbackMemoryDto | null>(null)
 
     const payload = workspaceSyncPayload
     const serializedPayload = workspaceSyncSerialized
-    workspaceSaveQueueRef.current = workspaceSaveQueueRef.current
+    const rememberTask = workspaceSaveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
         await saveCloudWorkspace(payload)
         workspaceSyncBaselineRef.current = serializedPayload
-        await rememberCloudFeedback(input)
+        const memory = await rememberCloudFeedback(input)
+        recentFeedbackMemoriesRef.current = [
+          memory,
+          ...recentFeedbackMemoriesRef.current.filter((item) => item.id !== memory.id),
+        ].slice(0, 400)
+        return memory
       })
+      .catch((error) => {
+        console.warn('Writing feedback could not be saved.', error)
+        return null
+      })
+    workspaceSaveQueueRef.current = rememberTask.then(() => undefined)
+    return rememberTask
+  }
+
+  function mergeWritingFeedback(extraFeedback: FeedbackMemoryDto[] = []) {
+    const merged = new Map<string, FeedbackMemoryDto>()
+    for (const memory of [
+      ...extraFeedback,
+      ...recentFeedbackMemoriesRef.current,
+      ...cloudFeedbackMemories,
+    ]) {
+      if (!merged.has(memory.id)) merged.set(memory.id, memory)
+    }
+    return Array.from(merged.values()).slice(0, 400)
+  }
+
+  function buildWritingLibraryEvidence(
+    notes: SavedNoteRecord[],
+    snippets: SavedSnippetRecord[],
+  ) {
+    const noteIdByUrl = new Map(
+      learningReadyNotes.map((note) => [normalizeNoteUrl(note.sourceUrl), note.id]),
+    )
+
+    return {
+      notes: notes.slice(0, 60).map((note) => ({
+        id: note.id,
+        title: note.title,
+        contentText: note.contentText,
+      })),
+      snippets: snippets.slice(0, 240).map((snippet) => ({
+        id: snippet.id,
+        noteId: noteIdByUrl.get(normalizeNoteUrl(snippet.noteUrl)),
+        selectedText: snippet.selectedText,
+        reasonText: snippet.reasonText,
+        colorTagName: snippet.colorTagName,
+      })),
+    }
+  }
+
+  function toWritingFeedbackEvidence(memories: FeedbackMemoryDto[]) {
+    return memories.map((memory) => ({
+      id: memory.id,
+      projectId: memory.projectId,
+      type: memory.type,
+      content: memory.content,
+      context: memory.context,
+      source: memory.source,
+      createdAt: memory.createdAt,
+    }))
+  }
+
+  async function refreshWritingProfiles(options: {
+    accessToken?: string
+    extraFeedback?: FeedbackMemoryDto[]
+    silent?: boolean
+  } = {}) {
+    if (cloudWorkspaceStatus !== 'ready') {
+      if (!options.silent) setWritingProfileError('登录后才能持续学习表达习惯。')
+      return false
+    }
+
+    if (!options.silent) setIsWritingProfileLoading(true)
+    setWritingProfileError('')
+
+    try {
+      await workspaceSaveQueueRef.current.catch(() => undefined)
+      const accessToken = options.accessToken || await getCurrentAccessToken()
+      if (!accessToken) throw new Error('登录状态已过期，请重新登录后再更新表达档案。')
+
+      const allFeedback = mergeWritingFeedback(options.extraFeedback)
+      const projectFeedback = allFeedback.filter(
+        (memory) => memory.projectId === activeProject.id,
+      )
+      const accountLibraryEvidence = buildWritingLibraryEvidence(
+        learningReadyNotes,
+        learningReadySnippets,
+      )
+      const projectLibraryEvidence = buildWritingLibraryEvidence(
+        selectedNotes,
+        selectedSnippets,
+      )
+      const accountEvidenceCount =
+        accountLibraryEvidence.notes.length +
+        accountLibraryEvidence.snippets.length +
+        allFeedback.length
+      const projectEvidenceCount =
+        projectLibraryEvidence.notes.length +
+        projectLibraryEvidence.snippets.length +
+        projectFeedback.length
+
+      const learningTasks: Promise<unknown>[] = []
+      if (accountEvidenceCount > 0) {
+        learningTasks.push(
+          buildWritingProfile(accessToken, {
+            scope: 'account',
+            libraryEvidence: accountLibraryEvidence,
+            feedbackEvidence: toWritingFeedbackEvidence(allFeedback),
+          }),
+        )
+      }
+      if (projectEvidenceCount > 0) {
+        learningTasks.push(
+          buildWritingProfile(accessToken, {
+            scope: 'project',
+            projectId: activeProject.id,
+            projectContext: {
+              projectName: activeProject.name,
+              topic: activeConversation.topic,
+              targetAudience: activeConversation.targetAudience,
+            },
+            libraryEvidence: projectLibraryEvidence,
+            feedbackEvidence: toWritingFeedbackEvidence(projectFeedback),
+          }),
+        )
+      }
+
+      await Promise.all(learningTasks)
+      const profiles = await getWritingProfile(accessToken, activeProject.id)
+      setWritingProfileContext({
+        accountProfile: profiles.accountProfile,
+        projectProfile: profiles.projectProfile,
+      })
+      return true
+    } catch (error) {
+      setWritingProfileError(getErrorMessage(error))
+      return false
+    } finally {
+      if (!options.silent) setIsWritingProfileLoading(false)
+    }
+  }
+
+  async function handleOpenWritingProfile() {
+    setIsWritingProfileOpen(true)
+    setWritingProfileError('')
+    if (cloudWorkspaceStatus !== 'ready') {
+      setWritingProfileContext({ accountProfile: null, projectProfile: null })
+      setWritingProfileError('登录后，系统才会跨设备保存并学习你的表达习惯。')
+      return
+    }
+
+    setIsWritingProfileLoading(true)
+    try {
+      const accessToken = await getCurrentAccessToken()
+      if (!accessToken) throw new Error('登录状态已过期，请重新登录后再查看表达档案。')
+      const profiles = await getWritingProfile(accessToken, activeProject.id)
+      setWritingProfileContext({
+        accountProfile: profiles.accountProfile,
+        projectProfile: profiles.projectProfile,
+      })
+    } catch (error) {
+      setWritingProfileError(getErrorMessage(error))
+    } finally {
+      setIsWritingProfileLoading(false)
+    }
+  }
+
+  async function handleAddWritingProfileCorrection(input: {
+    scope: WritingProfileScope
+    content: string
+  }) {
+    setIsWritingProfileSaving(true)
+    setWritingProfileError('')
+    try {
+      const memory = await rememberExplicitFeedback({
+        projectId: input.scope === 'project' ? activeProject.id : undefined,
+        conversationId: activeConversation.id,
+        type: 'profile_correction',
+        content: input.content,
+        context: {
+          scope: input.scope,
+          projectName: activeProject.name,
+          step: activeConversation.step,
+        },
+        source: 'explicit_profile_correction',
+      })
+      if (!memory) throw new Error('这条表达习惯暂时没有保存成功，请稍后重试。')
+
+      await refreshWritingProfiles({ extraFeedback: [memory], silent: true })
+      return true
+    } catch (error) {
+      setWritingProfileError(getErrorMessage(error))
+      return false
+    } finally {
+      setIsWritingProfileSaving(false)
+    }
   }
 
   async function getLibraryAccessToken() {
@@ -4141,58 +4365,31 @@ function App() {
     try {
       let nextAnalysis = fallbackAnalysis
 
-      if (isUsingCloudLibrary && cloudLibrary.status === 'ready' && selectedNotes.length > 0) {
+      if (isUsingCloudLibrary && cloudLibrary.status === 'ready') {
         const accessToken = await getCurrentAccessToken()
         if (!accessToken) {
           throw new Error('登录状态已过期，请重新登录后再开始分析。')
         }
 
-        const response = await analyzeReferences(accessToken, {
-          projectName: activeProject.name,
-          folderName: selectedFolderName,
-          topic: activeConversation.topic,
-          targetAudience: activeConversation.targetAudience,
-          length: effectiveLength,
-          notes: selectedNotes,
-          snippets: selectedSnippets,
-        })
-        nextAnalysis = response.analysis
-        setAnalysisUsageByConversation((current) => ({
-          ...current,
-          [conversationId]: response.usage,
-        }))
+        if (selectedNotes.length > 0) {
+          const response = await analyzeReferences(accessToken, {
+            projectName: activeProject.name,
+            folderName: selectedFolderName,
+            topic: activeConversation.topic,
+            targetAudience: activeConversation.targetAudience,
+            length: effectiveLength,
+            notes: selectedNotes,
+            snippets: selectedSnippets,
+          })
+          nextAnalysis = response.analysis
+          setAnalysisUsageByConversation((current) => ({
+            ...current,
+            [conversationId]: response.usage,
+          }))
+        }
 
-        const noteIdByUrl = new Map(
-          libraryNotes.map((note) => [normalizeNoteUrl(note.sourceUrl), note.id]),
-        )
-        void buildWritingProfile(accessToken, {
-          scope: 'account',
-          libraryEvidence: {
-            notes: learningReadyNotes.slice(0, 60).map((note) => ({
-              id: note.id,
-              title: note.title,
-              contentText: note.contentText,
-            })),
-            snippets: learningReadySnippets.slice(0, 240).map((snippet) => ({
-              id: snippet.id,
-              noteId: noteIdByUrl.get(normalizeNoteUrl(snippet.noteUrl)),
-              selectedText: snippet.selectedText,
-              reasonText: snippet.reasonText,
-              colorTagName: snippet.colorTagName,
-            })),
-          },
-          feedbackEvidence: cloudFeedbackMemories.slice(0, 400).map((memory) => ({
-            id: memory.id,
-            projectId: memory.projectId,
-            type: memory.type,
-            content: memory.content,
-            context: memory.context,
-            source: memory.source,
-            createdAt: memory.createdAt,
-          })),
-        }).catch((profileError) => {
-          console.warn('Writing profile update was skipped.', profileError)
-        })
+        // Learning finishes before drafting so this generation can use the newest profile.
+        await refreshWritingProfiles({ accessToken, silent: true })
       }
 
       const analysisMessages = buildAnalysisChat(nextAnalysis)
@@ -4247,6 +4444,7 @@ function App() {
   async function generateDraftForAnalysis(
     nextAnalysis: AiAnalysisResult,
     requireReadyState = true,
+    allowConservativeDraft = false,
   ) {
     if (
       (requireReadyState && !canGenerateDraft) ||
@@ -4300,9 +4498,25 @@ function App() {
           analysis: nextAnalysis,
           notes: selectedNotes,
           snippets: selectedSnippets,
-          brief: creationBrief,
+          brief: {
+            ...creationBrief,
+            allowConservativeDraft,
+          },
         })
+        if (response.status === 'insufficient_facts') {
+          setDraftFactGapByConversation((current) => ({
+            ...current,
+            [conversationId]: response.assessment,
+          }))
+          setIsWritingBriefOpen(true)
+          return false
+        }
         nextDraft = response.draft
+        setDraftFactGapByConversation((current) => {
+          const next = { ...current }
+          delete next[conversationId]
+          return next
+        })
         setDraftUsageByConversation((current) => ({
           ...current,
           [conversationId]: response.usage,
@@ -4367,6 +4581,10 @@ function App() {
 
   async function handleGenerateDraft() {
     await generateDraftForAnalysis(analysis)
+  }
+
+  async function handleGenerateConservativeDraft() {
+    await generateDraftForAnalysis(analysis, true, true)
   }
 
   function handleBackToSelection() {
@@ -5992,7 +6210,7 @@ function App() {
     }))
     showConversationRoute(nextStep === 'rewrite' ? 'review' : 'confirm')
     if (!wasAlreadyFinalized) {
-      rememberExplicitFeedback({
+      const learningTask = rememberExplicitFeedback({
         projectId: activeProject.id,
         conversationId: activeConversation.id,
         type: 'final_choice',
@@ -6001,6 +6219,10 @@ function App() {
           targetAudience: effectiveReaderAudience,
           step: 'reader',
         },
+      })
+      void learningTask.then((memory) => {
+        if (!memory) return
+        void refreshWritingProfiles({ extraFeedback: [memory], silent: true })
       })
     }
     setIsReaderAudienceOpen(false)
@@ -7344,6 +7566,10 @@ function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
+              <Button variant="secondary" size="sm" onClick={() => void handleOpenWritingProfile()}>
+                <Sparkles className="h-4 w-4" />
+                表达档案
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => goToStep('learn')}>
                 返回参考
               </Button>
@@ -7409,6 +7635,42 @@ function App() {
 
                       {isWritingBriefOpen ? (
                         <div className="mt-5 grid gap-4 border-t border-[var(--border)] pt-5 lg:grid-cols-2">
+                        {draftFactGap ? (
+                          <div
+                            className="grid gap-3 border border-[rgba(169,118,38,0.22)] bg-[rgba(246,239,223,0.62)] px-4 py-3 lg:col-span-2"
+                            role="status"
+                          >
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[rgb(146,99,31)]" />
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-[var(--foreground)]">
+                                  还差一点关键信息
+                                </p>
+                                <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
+                                  {draftFactGap.summary}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {draftFactGap.missingFacts.map((missingFact) => (
+                                <div
+                                  key={missingFact.id}
+                                  className="border-l-2 border-[rgba(169,118,38,0.34)] pl-3"
+                                >
+                                  <p className="text-xs font-semibold text-[var(--foreground)]">
+                                    {missingFact.label}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">
+                                    {missingFact.question}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-xs leading-5 text-[var(--soft-foreground)]">
+                              将答案补到下方“希望保留的信息”，不确定的内容可以明确写“暂不展开”
+                            </p>
+                          </div>
+                        ) : null}
                         <label className="grid gap-2">
                           <span className="text-sm font-semibold text-[var(--foreground)]">
                             内容主题 <span className="text-[var(--destructive)]">必填</span>
@@ -7608,14 +7870,20 @@ function App() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="text-sm leading-6 text-[var(--foreground)]">
                                 <p className="font-semibold">
-                                  {isWritingBriefValid
+                                  {draftFactGap
+                                    ? '还差一点关键信息'
+                                    : isWritingBriefValid
                                     ? isUsingCloudLibrary
                                       ? '准备完成'
                                       : '可以生成流程演示稿'
                                     : '先补全创作简报'}
                                 </p>
                                 <p className="mt-1 text-[var(--muted-foreground)]">
-                                  {isWritingBriefValid
+                                  {draftFactGap
+                                    ? `待补充：${draftFactGap.missingFacts
+                                        .map((item) => item.label)
+                                        .join('、')}`
+                                    : isWritingBriefValid
                                     ? `${
                                         effectiveLength === 'short'
                                           ? '短篇幅'
@@ -7631,21 +7899,37 @@ function App() {
                                   </p>
                                 ) : null}
                               </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={handleGenerateDraft}
-                                disabled={isDraftGenerating || !canGenerateDraft}
-                              >
-                                <WandSparkles className="h-4 w-4" />
-                                {draftGenerationError
-                                  ? isUsingCloudLibrary
-                                    ? '重新生成初稿'
-                                    : '重新生成演示稿'
-                                  : isUsingCloudLibrary
-                                    ? '生成初稿'
-                                    : '生成演示稿'}
-                              </Button>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                {draftFactGap?.canGenerateConservative ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleGenerateConservativeDraft}
+                                    disabled={isDraftGenerating}
+                                    className="text-[var(--muted-foreground)]"
+                                  >
+                                    按现有信息生成
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={handleGenerateDraft}
+                                  disabled={isDraftGenerating || !canGenerateDraft}
+                                >
+                                  <WandSparkles className="h-4 w-4" />
+                                  {draftFactGap
+                                    ? '补充后重新检查'
+                                    : draftGenerationError
+                                      ? isUsingCloudLibrary
+                                        ? '重新生成初稿'
+                                        : '重新生成演示稿'
+                                      : isUsingCloudLibrary
+                                        ? '生成初稿'
+                                        : '生成演示稿'}
+                                </Button>
+                              </div>
                             </div>
                             {draftGenerationError ? (
                               <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]">
@@ -7761,6 +8045,16 @@ function App() {
             </div>
 
             <div className="flex w-full flex-nowrap items-center justify-end gap-2 sm:w-auto sm:flex-wrap sm:gap-3 lg:justify-self-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="打开表达档案"
+                tooltip="表达档案"
+                onClick={() => void handleOpenWritingProfile()}
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="hidden sm:inline">表达档案</span>
+              </Button>
               {activeDraftVersions.length > 0 ? (
                 <Button
                   variant="outline"
@@ -8157,6 +8451,16 @@ function App() {
             </div>
 
             <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:justify-self-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="打开表达档案"
+                tooltip="表达档案"
+                onClick={() => void handleOpenWritingProfile()}
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="hidden sm:inline">表达档案</span>
+              </Button>
               {isReaderPreviewVisible ? (
                 <div ref={readerAudiencePopoverRef} className="relative w-full sm:w-auto">
                 <button
@@ -8454,6 +8758,21 @@ function App() {
         versions={activeDraftVersions}
         onClose={() => setIsDraftVersionHistoryOpen(false)}
         onRestore={handleRestoreDraftVersion}
+      />
+      <WritingProfileDialog
+        open={isWritingProfileOpen}
+        onOpenChange={setIsWritingProfileOpen}
+        accountProfile={writingProfileContext.accountProfile}
+        projectProfile={writingProfileContext.projectProfile}
+        projectName={activeProject.name}
+        canLearn={cloudWorkspaceStatus === 'ready'}
+        isLoading={isWritingProfileLoading}
+        isSaving={isWritingProfileSaving}
+        error={writingProfileError}
+        onRefresh={() => {
+          void refreshWritingProfiles()
+        }}
+        onAddCorrection={handleAddWritingProfileCorrection}
       />
       {showShellHeader ? (
         <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(248,250,252,0.82)] backdrop-blur-2xl">

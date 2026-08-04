@@ -85,7 +85,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'selection-rewrite')
-assert.equal(prepared.metadata.version, '1.0.3')
+assert.equal(prepared.metadata.version, '1.1.0')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'rewrite_selected_text')
 assert.equal(userPayload.input.instruction, input.instruction)
@@ -100,6 +100,7 @@ assert.ok(userPayload.input.groundingPolicy.missingInformation.includes('不得�
 assert.ok(prepared.systemPrompt.includes('当前 instruction > project writingProfile > account writingProfile'))
 assert.ok(prepared.systemPrompt.includes('不得返回整篇文案、整段未选文字或改写后的 fullDraft'))
 assert.ok(prepared.systemPrompt.includes('闭世界事实规则'))
+assert.ok(prepared.systemPrompt.includes('一个意思说清后就停止'))
 
 assert.doesNotThrow(() =>
   validateRewriteSkillOutput(

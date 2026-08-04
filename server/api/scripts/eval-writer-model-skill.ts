@@ -33,12 +33,19 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
       notes: Array<{ id: string; contentText: string }>
       snippets: Array<{ id: string; selectedText: string; reasonText: string }>
     }
-    feedbackEvidence: Array<{ id: string; type: string; content: string }>
+    feedbackEvidence: Array<{
+      id: string
+      type: string
+      content: string
+      editSignal: null | {
+        changedMiddle: { removed: string; added: string }
+      }
+    }>
   }
 }
 
 assert.equal(prepared.metadata.id, 'user-writing-model')
-assert.equal(prepared.metadata.version, '1.0.0')
+assert.equal(prepared.metadata.version, '1.2.0')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'learn_user_writing_model')
 assert.equal(userPayload.input.scope, 'account')
@@ -48,8 +55,19 @@ assert.ok(userPayload.input.libraryEvidence.snippets.every((item) => item.reason
 assert.ok(userPayload.input.feedbackEvidence.every((item) => item.content.length <= 1603))
 assert.ok(prepared.systemPrompt.includes('profile_correction > manual_edit'))
 assert.ok(prepared.systemPrompt.includes('项目主题、受众和一次性要求只能进入 openQuestions'))
+assert.ok(prepared.systemPrompt.includes('不表示它适用于所有内容模式'))
+assert.ok(prepared.systemPrompt.includes('至少两种不同内容模式'))
 assert.doesNotThrow(() => prepared.outputSchema.parse(expectedOutput))
 assert.ok(prepared.systemPrompt.includes('dimension 只能是以下值之一'))
+assert.ok(prepared.systemPrompt.includes('事实修正、名称替换、错别字'))
+const manualEditPayload = userPayload.input.feedbackEvidence.find(
+  (item) => item.type === 'manual_edit',
+)
+assert.equal(manualEditPayload?.editSignal?.changedMiddle.removed, '后来我逐渐熟悉了骑行通勤')
+assert.equal(
+  manualEditPayload?.editSignal?.changedMiddle.added,
+  '第三天，我已经知道在哪个路口提前减速',
+)
 
 const normalizedOutput = writingProfileSchema.parse(
   normalizeWriterModelOutput(
