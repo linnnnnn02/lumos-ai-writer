@@ -25,6 +25,8 @@ import {
   listNotesResponseSchema,
   listSnippetsResponseSchema,
   listTrashResponseSchema,
+  manageWritingPreferenceRequestSchema,
+  manageWritingPreferenceResponseSchema,
   meResponseSchema,
   previewDraftForReaderRequestSchema,
   previewDraftForReaderResponseSchema,
@@ -112,8 +114,13 @@ import {
 import {
   canReuseWritingProfileRevision,
   collectWritingEvidenceIds,
+  createManagedWritingProfileRevision,
   createWritingProfileRevision,
   getWritingProfileContext,
+  WritingPreferenceFeedbackError,
+  WritingPreferenceNotFoundError,
+  WritingPreferenceTransitionError,
+  WritingProfileVersionConflictError,
 } from './writing-profile.js'
 
 type ApiVariables = {
@@ -1130,6 +1137,67 @@ export function createApiApp() {
     }
   })
 
+  app.patch('/v1/writing-profile/preferences', async (c) => {
+    const config = c.get('config')
+    if (!isSupabaseConfigured(config)) {
+      return jsonError(c, {
+        code: 'service_not_configured',
+        message: 'Supabase is not configured yet. Writing profiles are unavailable.',
+        status: 503,
+      })
+    }
+
+    const body = await parseJsonBody(c, manageWritingPreferenceRequestSchema)
+    if (body instanceof Response) return body
+
+    const user = await requireCurrentUser(c)
+    if (user instanceof Response) return user
+
+    try {
+      const revision = await createManagedWritingProfileRevision(config, user, body)
+      return c.json(manageWritingPreferenceResponseSchema.parse({ ok: true, revision }))
+    } catch (error) {
+      if (error instanceof SupabaseSchemaMissingError) return getSchemaMissingErrorResponse(c)
+      if (error instanceof WorkspaceOwnershipError) {
+        return jsonError(c, {
+          code: 'forbidden',
+          message: error.message,
+          status: 403,
+        })
+      }
+      if (error instanceof WritingProfileVersionConflictError) {
+        return jsonError(c, {
+          code: 'conflict',
+          message: '表达档案已在另一台设备更新，请载入最新版后重试。',
+          status: 409,
+          details: { currentRevision: error.currentRevision },
+        })
+      }
+      if (error instanceof WritingPreferenceTransitionError) {
+        return jsonError(c, {
+          code: 'conflict',
+          message: '这条规则的状态已经变化，请载入最新版后重试。',
+          status: 409,
+        })
+      }
+      if (error instanceof WritingPreferenceNotFoundError) {
+        return jsonError(c, {
+          code: 'not_found',
+          message: '这条表达规则已不存在。',
+          status: 404,
+        })
+      }
+      if (error instanceof WritingPreferenceFeedbackError) {
+        return jsonError(c, {
+          code: 'validation_failed',
+          message: '规则操作与已保存的反馈不一致，请重试。',
+          status: 400,
+        })
+      }
+      throw error
+    }
+  })
+
   app.post('/v1/ai/writing-profile', async (c) => {
     const config = c.get('config')
     if (!hasAnyAiAudience(config)) {
@@ -1179,6 +1247,7 @@ export function createApiApp() {
       const learningInput = {
         ...body,
         previousProfile: currentRevision?.profile ?? null,
+        previousRevisionEvidenceIds: currentRevision?.evidenceIds ?? [],
       }
       const result = await learnWritingProfileWithDeepSeek(aiConfig, learningInput)
       const revision = await createWritingProfileRevision(

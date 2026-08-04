@@ -308,6 +308,7 @@ export function WritingProfileDialog({
                 <Input
                   autoFocus
                   controlSize="sm"
+                  maxLength={800}
                   value={editingPreferenceValue}
                   onChange={(event) => setEditingPreferenceValue(event.target.value)}
                   onKeyDown={(event) => {

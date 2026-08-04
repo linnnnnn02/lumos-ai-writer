@@ -19,6 +19,8 @@ import type {
   ListNotesResponse,
   ListSnippetsResponse,
   ListTrashResponse,
+  ManageWritingPreferenceRequest,
+  ManageWritingPreferenceResponse,
   MeResponse,
   PreviewDraftForReaderRequest,
   PreviewDraftForReaderResponse,
@@ -277,6 +279,13 @@ export function buildWritingProfile(token: string, input: BuildWritingProfileReq
 export function getWritingProfile(token: string, projectId?: string) {
   const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
   return requestJson<GetWritingProfileResponse>(`/v1/writing-profile${query}`, token)
+}
+
+export function manageWritingPreference(token: string, input: ManageWritingPreferenceRequest) {
+  return requestJson<ManageWritingPreferenceResponse>('/v1/writing-profile/preferences', token, {
+    method: 'PATCH',
+    body: input,
+  })
 }
 
 export function generateDraft(token: string, input: GenerateDraftRequest) {

@@ -127,6 +127,7 @@ export const buildWritingProfileRequestSchema = z
     scope: writingProfileScopeSchema,
     projectId: z.string().uuid().optional(),
     previousProfile: writingProfileSchema.nullable().optional(),
+    previousRevisionEvidenceIds: z.array(z.string().trim().min(1).max(160)).max(800).optional(),
     libraryEvidence: writingProfileLibraryEvidenceSchema,
     feedbackEvidence: z.array(writingProfileFeedbackEvidenceSchema).max(400),
     projectContext: z
@@ -171,6 +172,45 @@ export const getWritingProfileResponseSchema = z.object({
   projectProfile: writingProfileRevisionDtoSchema.nullable(),
 })
 
+export const manageWritingPreferenceActionSchema = z.enum([
+  'enable',
+  'disable',
+  'delete',
+  'correct',
+])
+
+export const manageWritingPreferenceRequestSchema = z
+  .object({
+    scope: writingProfileScopeSchema,
+    projectId: z.string().uuid().optional(),
+    preferenceId: z.string().trim().min(1).max(120),
+    action: manageWritingPreferenceActionSchema,
+    feedbackMemoryId: z.string().uuid(),
+    expectedRevisionId: z.string().uuid(),
+    expectedVersion: z.number().int().positive(),
+  })
+  .superRefine((value, context) => {
+    if (value.scope === 'project' && !value.projectId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['projectId'],
+        message: 'projectId is required for a project writing preference.',
+      })
+    }
+    if (value.scope === 'account' && value.projectId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['projectId'],
+        message: 'projectId must be omitted for an account writing preference.',
+      })
+    }
+  })
+
+export const manageWritingPreferenceResponseSchema = z.object({
+  ok: z.literal(true),
+  revision: writingProfileRevisionDtoSchema,
+})
+
 export const buildWritingProfileResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
@@ -192,4 +232,13 @@ export type WritingProfile = z.infer<typeof writingProfileSchema>
 export type BuildWritingProfileRequest = z.infer<typeof buildWritingProfileRequestSchema>
 export type WritingProfileRevisionDto = z.infer<typeof writingProfileRevisionDtoSchema>
 export type GetWritingProfileResponse = z.infer<typeof getWritingProfileResponseSchema>
+export type ManageWritingPreferenceAction = z.infer<
+  typeof manageWritingPreferenceActionSchema
+>
+export type ManageWritingPreferenceRequest = z.infer<
+  typeof manageWritingPreferenceRequestSchema
+>
+export type ManageWritingPreferenceResponse = z.infer<
+  typeof manageWritingPreferenceResponseSchema
+>
 export type BuildWritingProfileResponse = z.infer<typeof buildWritingProfileResponseSchema>

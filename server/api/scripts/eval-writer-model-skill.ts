@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   buildWritingProfileRequestSchema,
+  manageWritingPreferenceRequestSchema,
   writingProfileSchema,
 } from '@lumos-ai/shared'
 import { createApiApp } from '../src/app.js'
@@ -13,9 +14,11 @@ import {
 } from '../src/skills/writer-model-v1/index.js'
 import { compactActiveWritingProfile } from '../src/skills/shared/writing-profile.js'
 import {
+  applyWritingPreferenceAction,
   canReuseWritingProfileRevision,
   collectWritingEvidenceIds,
   parseStoredWritingProfile,
+  WritingPreferenceTransitionError,
 } from '../src/writing-profile.js'
 
 async function readJsonFixture(name: string) {
@@ -497,6 +500,25 @@ assert.equal(correctedPreference.status, 'active')
 assert.equal(correctedPreference.statement, correctedStatement)
 assert.ok(correctedPreference.evidenceIds.includes('feedback-correct-preference'))
 
+const staleCorrectInput = buildWritingProfileRequestSchema.parse({
+  ...correctInput,
+  previousRevisionEvidenceIds: [],
+})
+const profileAfterStaleCorrection = writingProfileSchema.parse(
+  normalizeWriterModelOutput({ ...expectedOutput, preferences: [] }, staleCorrectInput),
+)
+assert.equal(
+  profileAfterStaleCorrection.preferences.find(
+    (preference) => preference.id === activePreference.id,
+  )?.statement,
+  enabledPreference.statement,
+)
+assert.ok(
+  !compactWriterModelInput(staleCorrectInput).feedbackEvidence.some(
+    (feedback) => feedback.id === 'feedback-correct-preference',
+  ),
+)
+
 const projectOnlyDisableFeedback = {
   ...disableFeedback,
   id: 'feedback-project-only-disable',
@@ -592,6 +614,96 @@ const persistedDisabledProfile = parseStoredWritingProfile({
 })
 assert.equal(persistedDisabledProfile.preferences[0]?.status, 'disabled')
 
+const activeControlPreference = expectedOutput.preferences.find(
+  (preference) => preference.status === 'active',
+)
+const candidateControlPreference = expectedOutput.preferences.find(
+  (preference) => preference.status === 'candidate',
+)
+assert.ok(activeControlPreference)
+assert.ok(candidateControlPreference)
+
+const disabledControlProfile = applyWritingPreferenceAction(expectedOutput, {
+  preferenceId: activeControlPreference.id,
+  action: 'disable',
+  content: activeControlPreference.statement,
+  feedbackMemoryId: '55555555-5555-4555-8555-555555555555',
+})
+assert.equal(disabledControlProfile.evidenceCount, expectedOutput.evidenceCount + 1)
+assert.equal(
+  disabledControlProfile.preferences.find(
+    (preference) => preference.id === activeControlPreference.id,
+  )?.status,
+  'disabled',
+)
+assert.throws(
+  () =>
+    applyWritingPreferenceAction(expectedOutput, {
+      preferenceId: activeControlPreference.id,
+      action: 'delete',
+      content: activeControlPreference.statement,
+      feedbackMemoryId: '66666666-6666-4666-8666-666666666666',
+    }),
+  WritingPreferenceTransitionError,
+)
+
+const removedControlProfile = applyWritingPreferenceAction(disabledControlProfile, {
+  preferenceId: activeControlPreference.id,
+  action: 'delete',
+  content: activeControlPreference.statement,
+  feedbackMemoryId: '77777777-7777-4777-8777-777777777777',
+})
+assert.equal(
+  removedControlProfile.preferences.find(
+    (preference) => preference.id === activeControlPreference.id,
+  )?.status,
+  'rejected',
+)
+
+const restoredControlProfile = applyWritingPreferenceAction(removedControlProfile, {
+  preferenceId: activeControlPreference.id,
+  action: 'enable',
+  content: activeControlPreference.statement,
+  feedbackMemoryId: '88888888-8888-4888-8888-888888888888',
+})
+const restoredControlPreference = restoredControlProfile.preferences.find(
+  (preference) => preference.id === activeControlPreference.id,
+)
+assert.equal(restoredControlPreference?.status, 'active')
+assert.ok(restoredControlPreference?.evidenceIds.includes('88888888-8888-4888-8888-888888888888'))
+
+const correctedControlStatement = '结尾写到具体感受就停，不额外总结或升华。'
+const correctedControlProfile = applyWritingPreferenceAction(expectedOutput, {
+  preferenceId: candidateControlPreference.id,
+  action: 'correct',
+  content: correctedControlStatement,
+  feedbackMemoryId: '99999999-9999-4999-8999-999999999999',
+})
+const correctedControlPreference = correctedControlProfile.preferences.find(
+  (preference) => preference.id === candidateControlPreference.id,
+)
+assert.equal(correctedControlPreference?.id, candidateControlPreference.id)
+assert.equal(correctedControlPreference?.statement, correctedControlStatement)
+assert.equal(correctedControlPreference?.status, 'active')
+assert.ok(correctedControlPreference?.confidence >= 0.85)
+
+const validControlRequest = manageWritingPreferenceRequestSchema.parse({
+  scope: 'account',
+  preferenceId: candidateControlPreference.id,
+  action: 'enable',
+  feedbackMemoryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  expectedRevisionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  expectedVersion: 3,
+})
+assert.equal(validControlRequest.scope, 'account')
+assert.equal(
+  manageWritingPreferenceRequestSchema.safeParse({
+    ...validControlRequest,
+    projectId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  }).success,
+  false,
+)
+
 const currentRevision = {
   id: '11111111-1111-4111-8111-111111111111',
   scope: 'account' as const,
@@ -650,10 +762,29 @@ const disabledBody = (await disabledResponse.json()) as {
 assert.equal(disabledResponse.status, 503)
 assert.equal(disabledBody.error.code, 'feature_disabled')
 
+const controlResponse = await api.request(
+  '/v1/writing-profile/preferences',
+  {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(validControlRequest),
+  },
+  {
+    APP_ENV: 'local',
+    AI_FEATURE_ENABLED: 'false',
+  },
+)
+const controlBody = (await controlResponse.json()) as {
+  error: { code: string }
+}
+assert.equal(controlResponse.status, 503)
+assert.equal(controlBody.error.code, 'service_not_configured')
+
 console.log('writer-model-v1 offline evaluation passed')
 console.log(`skill: ${prepared.metadata.id}@${prepared.metadata.version}`)
 console.log(`prompt hash: ${prepared.metadata.promptHash}`)
 console.log(`grounded preferences: ${expectedOutput.preferences.length}`)
 console.log('scope isolation: account profile excludes project-only route requirement')
+console.log('preference controls: deterministic route bypasses the AI feature gate')
 console.log('AI feature gate: closed')
 console.log('paid model calls: 0')
