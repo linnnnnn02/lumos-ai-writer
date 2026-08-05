@@ -28,6 +28,7 @@
     "test:draft-preference-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-preference-snapshots.ts",
     "test:draft-quality-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-quality-snapshots.ts",
     "test:draft-version-history": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-version-history.ts",
+    "test:learning-result": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-learning-result.ts",
     "check:p0": "node scripts/check-p0.mjs",
     "eval:skills": "pnpm --filter @lumos-ai/api eval:skills",
     "smoke:p0": "node scripts/smoke-p0.mjs",
