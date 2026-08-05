@@ -491,19 +491,7 @@ export function AuthStatus({ className, cloudSummary }: AuthStatusProps) {
             {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
           </Button>
         </div>
-      ) : (
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            switchView('signin')
-            setIsOpen(true)
-          }}
-        >
-          <LogIn className="h-4 w-4" />
-          登录
-        </Button>
-      )}
+      ) : null}
 
       {dialogOpen ? (
         <div

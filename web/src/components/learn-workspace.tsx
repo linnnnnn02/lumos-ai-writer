@@ -58,7 +58,7 @@ type LearnWorkspaceProps = {
   folders: SavedFolderRecord[]
   notes: SavedNoteRecord[]
   snippets: SavedSnippetRecord[]
-  libraryStatus?: 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
+  libraryStatus?: 'demo' | 'extension' | 'initializing' | 'loading' | 'ready' | 'error'
   libraryError?: string
   nonLearningNoteCount?: number
   analysisError?: string
@@ -1012,7 +1012,7 @@ export function LearnWorkspace({
       return libraryError ? `文案库读取失败：${libraryError}` : '文案库读取失败。'
     }
 
-    if (libraryStatus === 'ready' && notes.length === 0) {
+    if ((libraryStatus === 'ready' || libraryStatus === 'extension') && notes.length === 0) {
       return '文案库暂无文案。'
     }
 

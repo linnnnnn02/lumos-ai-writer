@@ -33,7 +33,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ApiClientError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 
-type LibraryStatus = 'demo' | 'initializing' | 'loading' | 'ready' | 'error'
+type LibraryStatus = 'demo' | 'extension' | 'initializing' | 'loading' | 'ready' | 'error'
 type SortMode = 'newest' | 'oldest' | 'title'
 type AppView = 'library' | 'trash'
 
@@ -112,6 +112,7 @@ type LibraryManagerProps = {
   onDeleteNote: (note: SavedNoteRecord) => Promise<void>
   onDeleteNotePermanently: (noteId: string) => Promise<void>
   onEmptyTrash: () => Promise<void>
+  onOpenExtensionLibrary?: () => void
   onRefresh: () => Promise<void> | void
   onRestoreFolder: (folderId: string) => Promise<void>
   onRestoreNote: (noteId: string) => Promise<void>
@@ -525,6 +526,7 @@ export function LibraryManager({
   onDeleteNote,
   onDeleteNotePermanently,
   onEmptyTrash,
+  onOpenExtensionLibrary,
   onRefresh,
   onRestoreFolder,
   onRestoreNote,
@@ -1260,14 +1262,19 @@ export function LibraryManager({
           去 AI 写作台
         </Button>
 
-        <Button
-          type="button"
-          onClick={() => setIsCreatingFolder((current) => !current)}
-          disabled={!canMutate}
-        >
-          <Plus className="h-4 w-4" />
-          新建文件夹
-        </Button>
+        {canMutate ? (
+          <Button
+            type="button"
+            onClick={() => setIsCreatingFolder((current) => !current)}
+          >
+            <Plus className="h-4 w-4" />
+            新建文件夹
+          </Button>
+        ) : status === 'extension' && onOpenExtensionLibrary ? (
+          <Button type="button" onClick={onOpenExtensionLibrary}>
+            打开插件笔记库
+          </Button>
+        ) : null}
 
         {isCreatingFolder ? (
           <form
@@ -1393,7 +1400,13 @@ export function LibraryManager({
           </div>
           <div className="flex items-center justify-end gap-[var(--ui-gap-control)]">
             {status !== 'ready' ? (
-              <Badge variant="outline">{status === 'demo' ? '演示只读' : '连接中'}</Badge>
+              <Badge variant="outline">
+                {status === 'demo'
+                  ? '演示数据'
+                  : status === 'extension'
+                    ? '来自插件'
+                    : '连接中'}
+              </Badge>
             ) : null}
             {status === 'ready' && refreshedTimeLabel ? (
               <span className="hidden text-xs font-semibold text-[var(--soft-foreground)] md:inline">
@@ -1421,7 +1434,16 @@ export function LibraryManager({
             className="mx-auto mt-2 max-w-7xl text-sm leading-6 text-[var(--muted-foreground)]"
             role="note"
           >
-            当前是只读演示数据。登录后可以新建文件夹、编辑文案和管理标注片段。
+            当前显示演示数据。安装并启用 Lumos 插件后，这里会读取你在本机采集的文案。
+          </p>
+        ) : null}
+
+        {status === 'extension' ? (
+          <p
+            className="mx-auto mt-2 max-w-7xl text-sm leading-6 text-[var(--muted-foreground)]"
+            role="note"
+          >
+            文案来自本机插件；整理文件夹、编辑文案和管理标注请在插件笔记库完成。
           </p>
         ) : null}
 

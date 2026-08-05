@@ -98,6 +98,7 @@ import { WritingProfileDialog } from '@/components/writing-profile-dialog'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
+import { useExtensionLibrary } from '@/hooks/use-extension-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
   ApiClientError,
@@ -1957,6 +1958,7 @@ function App() {
   const [draftDropLanding, setDraftDropLanding] = useState<DraftDropLanding | null>(null)
   const [draftMovePrompt, setDraftMovePrompt] = useState<DraftMovePrompt | null>(null)
   const cloudLibrary = useCloudLibrary()
+  const extensionLibrary = useExtensionLibrary(cloudLibrary.status === 'guest')
   const {
     status: cloudWorkspaceStatus,
     userId: cloudWorkspaceUserId,
@@ -2024,12 +2026,44 @@ function App() {
     [storedActiveProject],
   )
   const isUsingCloudLibrary = cloudLibrary.status !== 'guest'
-  const libraryFolders = isUsingCloudLibrary ? cloudLibrary.folders : demoFolders
-  const libraryNotes = isUsingCloudLibrary ? cloudLibrary.notes : demoNotes
-  const librarySnippets = isUsingCloudLibrary ? cloudLibrary.snippets : demoSnippets
+  const isUsingExtensionLibrary =
+    !isUsingCloudLibrary && extensionLibrary.status === 'ready'
+  const libraryFolders = isUsingCloudLibrary
+    ? cloudLibrary.folders
+    : isUsingExtensionLibrary
+      ? extensionLibrary.folders
+      : demoFolders
+  const libraryNotes = isUsingCloudLibrary
+    ? cloudLibrary.notes
+    : isUsingExtensionLibrary
+      ? extensionLibrary.notes
+      : demoNotes
+  const librarySnippets = isUsingCloudLibrary
+    ? cloudLibrary.snippets
+    : isUsingExtensionLibrary
+      ? extensionLibrary.snippets
+      : demoSnippets
   const libraryTrashGroups = isUsingCloudLibrary ? cloudLibrary.trashGroups : []
-  const libraryStatus = cloudLibrary.status === 'guest' ? 'demo' : cloudLibrary.status
-  const libraryError = isUsingCloudLibrary ? cloudLibrary.error : ''
+  const libraryStatus =
+    cloudLibrary.status !== 'guest'
+      ? cloudLibrary.status
+      : extensionLibrary.status === 'ready'
+        ? 'extension'
+        : extensionLibrary.status === 'detecting'
+          ? 'initializing'
+          : 'demo'
+  const libraryError = isUsingCloudLibrary
+    ? cloudLibrary.error
+    : extensionLibrary.error
+  const libraryIsRefreshing = isUsingCloudLibrary
+    ? cloudLibrary.isRefreshing
+    : extensionLibrary.isRefreshing
+  const libraryRefreshedAt = isUsingCloudLibrary
+    ? cloudLibrary.refreshedAt
+    : extensionLibrary.refreshedAt
+  const refreshLibrary = isUsingCloudLibrary
+    ? cloudLibrary.refresh
+    : extensionLibrary.refresh
   const hasCloudLibraryData = cloudLibrary.status === 'ready' || Boolean(cloudLibrary.refreshedAt)
   const authCloudSummary: AuthCloudSummary | undefined = isUsingCloudLibrary
     ? {
@@ -7389,9 +7423,9 @@ function App() {
         authCloudSummary={authCloudSummary}
         error={libraryError}
         folders={libraryFolders}
-        isRefreshing={cloudLibrary.isRefreshing}
+        isRefreshing={libraryIsRefreshing}
         notes={libraryNotes}
-        refreshedAt={cloudLibrary.refreshedAt}
+        refreshedAt={libraryRefreshedAt}
         snippets={librarySnippets}
         status={libraryStatus}
         trashGroups={libraryTrashGroups}
@@ -7402,7 +7436,10 @@ function App() {
         onDeleteNote={handleDeleteLibraryNote}
         onDeleteNotePermanently={handleDeleteLibraryNotePermanently}
         onEmptyTrash={handleEmptyLibraryTrash}
-        onRefresh={cloudLibrary.refresh}
+        onOpenExtensionLibrary={
+          isUsingExtensionLibrary ? extensionLibrary.openLibrary : undefined
+        }
+        onRefresh={refreshLibrary}
         onRestoreFolder={handleRestoreLibraryFolder}
         onRestoreNote={handleRestoreLibraryNote}
         onSaveNote={handleSaveLibraryNote}

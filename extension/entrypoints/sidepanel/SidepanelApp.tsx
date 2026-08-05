@@ -40,7 +40,6 @@ import { AiEditing, ArrowUpRight, Library } from '../../components/ui/icon'
 import {
   getCloudAuthState,
   getValidCloudAccessToken,
-  signInToCloud,
   signOutFromCloud,
   type CloudAuthState,
 } from '../../lib/cloud-auth'
@@ -187,10 +186,7 @@ export function SidepanelApp() {
     status: 'unauthenticated',
     user: null,
   })
-  const [cloudEmail, setCloudEmail] = useState('')
-  const [cloudPassword, setCloudPassword] = useState('')
   const [cloudFeedback, setCloudFeedback] = useState('')
-  const [isCloudSigningIn, setIsCloudSigningIn] = useState(false)
   const [isCloudSyncing, setIsCloudSyncing] = useState(false)
   const [failedCloudSyncCount, setFailedCloudSyncCount] = useState(0)
   const [isAnnotationSaving, setIsAnnotationSaving] = useState(false)
@@ -337,9 +333,6 @@ export function SidepanelApp() {
       .then((state) => {
         if (!isMounted) return
         setCloudAuthState(state)
-        if (state.status === 'authenticated' && state.user.email) {
-          setCloudEmail(state.user.email)
-        }
       })
       .catch(() => {
         if (!isMounted) return
@@ -595,36 +588,9 @@ export function SidepanelApp() {
     })
   }
 
-  async function handleCloudSignIn() {
-    const email = cloudEmail.trim()
-    const password = cloudPassword
-
-    if (!email || !password) {
-      setCloudFeedback('请输入邮箱和密码。')
-      return
-    }
-
-    setIsCloudSigningIn(true)
-    setCloudFeedback('')
-
-    try {
-      const nextAuthState = await signInToCloud(email, password)
-      setCloudAuthState(nextAuthState)
-      setCloudPassword('')
-      setCloudFeedback('云端已连接。')
-      void chrome.runtime.sendMessage({ type: 'XHS_RETRY_ANNOTATION_SYNC' })
-      void chrome.runtime.sendMessage({ type: 'XHS_RETRY_CLOUD_LIBRARY_OPERATIONS' })
-    } catch (error) {
-      setCloudFeedback(`登录失败：${getErrorMessage(error)}`)
-    } finally {
-      setIsCloudSigningIn(false)
-    }
-  }
-
   async function handleCloudSignOut() {
     await signOutFromCloud()
     setCloudAuthState({ status: 'unauthenticated', user: null })
-    setCloudPassword('')
     setCloudFeedback('已退出云端同步。')
   }
 
@@ -959,78 +925,43 @@ export function SidepanelApp() {
   }
 
   function renderCloudSyncPanel() {
+    if (cloudAuthState.status !== 'authenticated') return null
+
     const cloudUserLabel =
-      cloudAuthState.status === 'authenticated'
-        ? cloudAuthState.user.email || cloudAuthState.user.displayName || '已登录账号'
-        : ''
+      cloudAuthState.user.email || cloudAuthState.user.displayName || '已登录账号'
     const cloudFeedbackIsError =
       cloudFeedback.includes('失败') || cloudFeedback.includes('过期')
 
     return (
       <section className="cloud-sync-panel" aria-label="云端同步">
-        {cloudAuthState.status === 'authenticated' ? (
-          <div className="cloud-sync-row">
-            <div className="cloud-sync-account">
-              <span
-                className={isCloudSyncing ? 'cloud-sync-avatar syncing' : 'cloud-sync-avatar'}
-                aria-hidden="true"
-              >
-                <img
-                  src={cloudAuthState.user.avatarUrl || '/icon.svg'}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  decoding="async"
-                />
-              </span>
-              <div className="cloud-sync-copy">
-                <span className="cloud-sync-title">云端同步</span>
-                <span className="cloud-sync-user">{cloudUserLabel}</span>
-              </div>
-            </div>
-            <button
-              className="cloud-sync-text-button"
-              type="button"
-              onClick={() => {
-                void handleCloudSignOut()
-              }}
+        <div className="cloud-sync-row">
+          <div className="cloud-sync-account">
+            <span
+              className={isCloudSyncing ? 'cloud-sync-avatar syncing' : 'cloud-sync-avatar'}
+              aria-hidden="true"
             >
-              退出
-            </button>
+              <img
+                src={cloudAuthState.user.avatarUrl || '/icon.svg'}
+                alt=""
+                referrerPolicy="no-referrer"
+                decoding="async"
+              />
+            </span>
+            <div className="cloud-sync-copy">
+              <span className="cloud-sync-title">云端同步</span>
+              <span className="cloud-sync-user">{cloudUserLabel}</span>
+            </div>
           </div>
-        ) : (
-          <form
-            className="cloud-login-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void handleCloudSignIn()
+          <button
+            className="cloud-sync-text-button"
+            type="button"
+            onClick={() => {
+              void handleCloudSignOut()
             }}
           >
-            <div className="cloud-login-title">云端同步</div>
-            <Input
-              className="cloud-login-input"
-              type="email"
-              value={cloudEmail}
-              placeholder="邮箱"
-              autoComplete="email"
-              onChange={(event) => setCloudEmail(event.target.value)}
-            />
-            <Input
-              className="cloud-login-input"
-              type="password"
-              value={cloudPassword}
-              placeholder="密码"
-              autoComplete="current-password"
-              onChange={(event) => setCloudPassword(event.target.value)}
-            />
-            <button
-              className="cloud-login-button"
-              type="submit"
-              disabled={isCloudSigningIn}
-            >
-              {isCloudSigningIn ? '登录中...' : '登录同步'}
-            </button>
-          </form>
-        )}
+            退出
+          </button>
+        </div>
         {cloudFeedback ? (
           <div className="cloud-feedback-row">
             <p className={cloudFeedbackIsError ? 'cloud-feedback error' : 'cloud-feedback'}>
