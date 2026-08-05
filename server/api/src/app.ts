@@ -1487,6 +1487,7 @@ export function createApiApp() {
           skill: result.skill,
           draft: result.draft,
           appliedWritingProfile: result.appliedWritingProfile,
+          quality: result.quality,
           usage: result.usage,
         }),
       )

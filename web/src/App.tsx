@@ -20,6 +20,7 @@ import type {
   AiUsage,
   AppliedWritingProfileContext,
   CreateFeedbackMemoryRequest,
+  DraftQualitySnapshot,
   FeedbackMemoryDto,
   NoteLearningStatus,
   ProjectLength,
@@ -37,6 +38,7 @@ import type {
 import {
   appliedWritingProfileContextSchema,
   aiReaderPreviewResultSchema,
+  draftQualitySnapshotSchema,
   isNoteReadyForLearning,
   normalizeNoteUrl,
 } from '@lumos-ai/shared'
@@ -94,6 +96,7 @@ import { LearnWorkspace } from '@/components/learn-workspace'
 import { ConversationIntake } from '@/components/conversation-intake'
 import { LibraryManager } from '@/components/library-manager'
 import { DraftVersionHistory } from '@/components/draft-version-history'
+import { DraftQualitySummary } from '@/components/draft-quality-summary'
 import { WritingProfileDialog } from '@/components/writing-profile-dialog'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
@@ -900,6 +903,9 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       const draftVersionPreferenceSnapshots = isObject(state.draftVersionPreferenceSnapshots)
         ? state.draftVersionPreferenceSnapshots
         : {}
+      const draftVersionQualitySnapshots = isObject(state.draftVersionQualitySnapshots)
+        ? state.draftVersionQualitySnapshots
+        : {}
       const draftVersions = normalizeDraftVersions(
         (conversation.drafts ?? []).length > 0
           ? conversation.drafts
@@ -907,12 +913,19 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
             ? [conversation.draft]
             : [],
       ).map((version) => {
-        const snapshot = appliedWritingProfileContextSchema.safeParse(
+        const preferenceSnapshot = appliedWritingProfileContextSchema.safeParse(
           draftVersionPreferenceSnapshots[version.id],
         )
-        return snapshot.success
-          ? { ...version, appliedWritingProfile: snapshot.data }
-          : version
+        const qualitySnapshot = draftQualitySnapshotSchema.safeParse(
+          draftVersionQualitySnapshots[version.id],
+        )
+        return {
+          ...version,
+          ...(preferenceSnapshot.success
+            ? { appliedWritingProfile: preferenceSnapshot.data }
+            : {}),
+          ...(qualitySnapshot.success ? { qualitySnapshot: qualitySnapshot.data } : {}),
+        }
       })
       if (draftVersions.length > 0) {
         draftVersionsByConversation[conversation.id] = draftVersions
@@ -1045,6 +1058,13 @@ function buildWorkspaceSyncPayload(input: {
               : [],
           ),
         )
+        const draftVersionQualitySnapshots = Object.fromEntries(
+          versions.flatMap((version) =>
+            version.qualitySnapshot
+              ? [[version.id, version.qualitySnapshot] as const]
+              : [],
+          ),
+        )
         const currentVersion =
           versions.find(
             (version) =>
@@ -1077,6 +1097,9 @@ function buildWorkspaceSyncPayload(input: {
                     : null,
                   ...(Object.keys(draftVersionPreferenceSnapshots).length > 0
                     ? { draftVersionPreferenceSnapshots }
+                    : {}),
+                  ...(Object.keys(draftVersionQualitySnapshots).length > 0
+                    ? { draftVersionQualitySnapshots }
                     : {}),
                 }
               : {}),
@@ -1443,11 +1466,14 @@ function normalizeDraftSentence(value: string) {
 }
 
 function getRequiredFactSummary(value: string) {
+  return getRequiredFactStatements(value).join('；')
+}
+
+function getRequiredFactStatements(value: string) {
   return value
     .split(/[\n；;]+/)
     .map((item) => item.trim().replace(/[。！？.!?]+$/, ''))
     .filter(Boolean)
-    .join('；')
 }
 
 function buildInitialDraftCopy(input: {
@@ -3115,27 +3141,39 @@ function App() {
   const activeAppliedPreferenceIds = getAppliedWritingPreferenceIds(
     activeDraftVersion?.appliedWritingProfile,
   )
+  const activeDraftQuality = activeDraftVersion?.qualitySnapshot
+  const canFinalizeDraft =
+    hasDraftReady && activeDraftQuality?.overallStatus !== 'failed'
 
   const creationBrief = useMemo(
-    () => ({
-      objective: activeConversation.writingBrief.objective.trim(),
-      sourceFacts: activeConversation.writingBrief.requiredFacts.trim(),
-      instructions: activeConversation.writingBrief.instructions.trim(),
-      contentMode: 'auto' as const,
-      facts: [],
-      mustInclude: [
-        activeConversation.writingBrief.requiredFacts.trim(),
-        activeConversation.writingBrief.objective.trim()
-          ? `写作目标：${activeConversation.writingBrief.objective.trim()}`
-          : '',
-        activeConversation.writingBrief.instructions.trim()
-          ? `补充要求：${activeConversation.writingBrief.instructions.trim()}`
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      avoidTone: activeConversation.writingBrief.boundaries.trim(),
-    }),
+    () => {
+      const requiredFacts = getRequiredFactStatements(
+        activeConversation.writingBrief.requiredFacts,
+      )
+      return {
+        objective: activeConversation.writingBrief.objective.trim(),
+        sourceFacts: activeConversation.writingBrief.requiredFacts.trim(),
+        instructions: activeConversation.writingBrief.instructions.trim(),
+        contentMode: 'auto' as const,
+        facts: requiredFacts.map((statement, index) => ({
+          id: `brief-${index + 1}`,
+          statement,
+          required: true,
+        })),
+        mustInclude: [
+          activeConversation.writingBrief.requiredFacts.trim(),
+          activeConversation.writingBrief.objective.trim()
+            ? `写作目标：${activeConversation.writingBrief.objective.trim()}`
+            : '',
+          activeConversation.writingBrief.instructions.trim()
+            ? `补充要求：${activeConversation.writingBrief.instructions.trim()}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        avoidTone: activeConversation.writingBrief.boundaries.trim(),
+      }
+    },
     [activeConversation.writingBrief],
   )
 
@@ -3308,6 +3346,7 @@ function App() {
       coalesce?: boolean
       force?: boolean
       appliedWritingProfile?: AppliedWritingProfileContext | null
+      qualitySnapshot?: DraftQualitySnapshot | null
     } = {},
   ) {
     const nextVersions = evolveDraftVersions({
@@ -3318,6 +3357,7 @@ function App() {
       coalesce: options.coalesce,
       force: options.force,
       appliedWritingProfile: options.appliedWritingProfile,
+      qualitySnapshot: options.qualitySnapshot,
     })
     const currentVersion = nextVersions[nextVersions.length - 1]
     const nextVersionsByConversation = {
@@ -3350,6 +3390,7 @@ function App() {
     recordDraftSnapshot(activeConversation.id, restoredDraft, 'restored', {
       force: true,
       appliedWritingProfile: version.appliedWritingProfile ?? null,
+      qualitySnapshot: version.qualitySnapshot ?? null,
     })
     markDraftEdited()
     clearRewriteSelection()
@@ -4705,6 +4746,7 @@ function App() {
         account: null,
         project: null,
       }
+      let qualitySnapshot: DraftQualitySnapshot | null = null
 
       if (isUsingCloudLibrary) {
         if (selectedNotes.length > 0 && cloudLibrary.status !== 'ready') {
@@ -4740,6 +4782,7 @@ function App() {
         }
         nextDraft = response.draft
         appliedWritingProfile = response.appliedWritingProfile
+        qualitySnapshot = response.quality
         setDraftFactGapByConversation((current) => {
           const next = { ...current }
           delete next[conversationId]
@@ -4755,7 +4798,7 @@ function App() {
         conversationId,
         nextDraft,
         isUsingCloudLibrary ? 'ai_generation' : 'demo_generation',
-        { force: true, appliedWritingProfile },
+        { force: true, appliedWritingProfile, qualitySnapshot },
       )
       setDraftBridgeMessagesByConversation((current) => {
         const next = { ...current }
@@ -6442,6 +6485,11 @@ function App() {
   }
 
   async function handleFinalizeReaderPreview(nextStep: 'rewrite' | 'reader' = 'reader') {
+    if (!canFinalizeDraft) {
+      showFinalCopyToast('先修正未通过的篇幅检查，再确认成稿')
+      return
+    }
+
     const wasAlreadyFinalized = Boolean(activeConversation.finalizedAt)
     const copied = await copyTextToClipboard(formatDraftCopyForClipboard(initialDraftCopy))
 
@@ -8079,6 +8127,12 @@ function App() {
                         {hasDraftReady ? (
                           <>
                             <div className="mt-4">
+                              {activeDraftQuality ? (
+                                <DraftQualitySummary
+                                  snapshot={activeDraftQuality}
+                                  className="mb-4"
+                                />
+                              ) : null}
                               {renderInitialDraftCopy('plan')}
                             </div>
                             <div className="mt-3 flex justify-end border-t border-[rgba(31,22,17,0.06)] pt-3">
@@ -8335,7 +8389,11 @@ function App() {
                     <Eye className="h-4 w-4" />
                     <span className="hidden sm:inline">读者预演</span>
                   </Button>
-                  <Button onClick={() => void handleFinalizeReaderPreview('rewrite')}>
+                  <Button
+                    onClick={() => void handleFinalizeReaderPreview('rewrite')}
+                    disabled={!canFinalizeDraft}
+                    tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
+                  >
                     <CheckCircle2 className="h-4 w-4" />
                     {activeConversation.finalizedAt ? '再次复制' : '完成并复制'}
                   </Button>
@@ -8377,6 +8435,12 @@ function App() {
                             圈选后用 AI 修改
                           </span>
                         </div>
+                        {activeDraftQuality ? (
+                          <DraftQualitySummary
+                            snapshot={activeDraftQuality}
+                            className="mb-5"
+                          />
+                        ) : null}
                         {renderInitialDraftCopy('rewrite')}
                       </div>
                       {rewriteSelectionCandidate && typeof document !== 'undefined'
@@ -8778,7 +8842,12 @@ function App() {
                 返回编辑
               </Button>
               {!isReaderPreviewVisible ? (
-                <Button size="sm" onClick={() => void handleFinalizeReaderPreview('reader')}>
+                <Button
+                  size="sm"
+                  onClick={() => void handleFinalizeReaderPreview('reader')}
+                  disabled={!canFinalizeDraft}
+                  tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
+                >
                   <CheckCircle2 className="h-4 w-4" />
                   {activeConversation.finalizedAt ? '再次复制文案' : '确认成稿并复制'}
                 </Button>
@@ -8798,8 +8867,25 @@ function App() {
                 <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-[var(--ui-radius-panel)] border border-[var(--border)] bg-[var(--surface-muted)] shadow-none xl:min-h-0">
                   <div className="shrink-0 border-b border-[var(--border)] px-6 py-4 lg:px-7">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="accent">
-                        {activeConversation.finalizedAt ? '已确认成稿' : '待确认文案'}
+                      <Badge
+                        variant={activeDraftQuality?.overallStatus === 'passed' ? 'accent' : 'outline'}
+                        className={
+                          activeDraftQuality?.overallStatus === 'failed'
+                            ? 'text-[#a3412f]'
+                            : activeDraftQuality?.overallStatus === 'needs_review'
+                              ? 'text-[#8a5a16]'
+                              : undefined
+                        }
+                      >
+                        {activeConversation.finalizedAt
+                          ? '已确认成稿'
+                          : activeDraftQuality?.overallStatus === 'passed'
+                            ? '生成检查通过'
+                            : activeDraftQuality?.overallStatus === 'needs_review'
+                              ? '修改后待确认'
+                              : activeDraftQuality?.overallStatus === 'failed'
+                                ? '检查未通过'
+                                : '待确认文案'}
                       </Badge>
                     </div>
                   </div>
@@ -8869,7 +8955,11 @@ function App() {
                           ? '暂无可带回建议'
                           : '将建议带回编辑'}
                       </Button>
-                      <Button onClick={() => void handleFinalizeReaderPreview('reader')}>
+                      <Button
+                        onClick={() => void handleFinalizeReaderPreview('reader')}
+                        disabled={!canFinalizeDraft}
+                        tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
+                      >
                         <CheckCircle2 className="h-4 w-4" />
                         {activeConversation.finalizedAt ? '再次复制文案' : '确认完成并复制文案'}
                       </Button>

@@ -17,6 +17,7 @@ import { readConfig } from '../src/env.js'
 import {
   assessDraftFactSufficiency,
   buildDraftGroundingAuditUserPrompt,
+  buildDraftQualitySnapshot,
   buildDraftRepairUserPrompt,
   compactDraftSkillInput,
   draftGroundingAuditSystemPrompt,
@@ -27,6 +28,7 @@ import {
   findReferenceReuseIssues,
   getDraftOutputRequirements,
   getDraftGroundingIssues,
+  getDraftRequirementIssues,
   resolveDraftContentMode,
   validateDraftGroundingAuditOutput,
   validateDraftSkillOutput,
@@ -136,7 +138,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'xiaohongshu-draft')
-assert.equal(prepared.metadata.version, '1.9.1')
+assert.equal(prepared.metadata.version, '1.10.0')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
@@ -673,8 +675,32 @@ const groundingAudit = validateDraftGroundingAuditOutput(
         reason: '输入未提供读者的心理状态。',
       },
     ],
+    requirements: [
+      {
+        id: 'fact-socks',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['四双足球主题袜子', '十号元素'],
+        reason: '正文完整覆盖袜子数量、主题和十号元素。',
+      },
+      {
+        id: 'fact-team-status',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['你的主队还在吗？'],
+        reason: '正文只用问题保留未知状态。',
+      },
+      {
+        id: 'boundary-1',
+        kind: 'expression_boundary',
+        status: 'satisfied',
+        evidence: [],
+        reason: '正文没有断言球队已晋级或淘汰。',
+      },
+    ],
   },
   groundingCandidate,
+  groundedAuditInput,
 )
 assert.deepEqual(getDraftGroundingIssues(groundingAudit), [
   {
@@ -683,6 +709,7 @@ assert.deepEqual(getDraftGroundingIssues(groundingAudit), [
     reason: '输入未提供读者的心理状态。',
   },
 ])
+assert.deepEqual(getDraftRequirementIssues(groundingAudit), [])
 assert.deepEqual(
   JSON.parse(
     buildDraftRepairUserPrompt(
@@ -734,6 +761,7 @@ assert.doesNotThrow(() =>
     skill: prepared.metadata,
     draft: expectedOutput,
     appliedWritingProfile: { account: null, project: null },
+    quality: buildDraftQualitySnapshot(input, expectedOutput, null),
     usage: null,
   }),
 )
@@ -888,6 +916,36 @@ const sourceFactsOnlyResponses = [
         reason: 'topic 与 brief.sourceFacts 均未提供读者心理状态。',
       },
     ],
+    requirements: [
+      {
+        id: 'source-fact-1',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['四双足球主题袜子'],
+        reason: '正文覆盖数量与主体。',
+      },
+      {
+        id: 'source-fact-2',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['十号元素'],
+        reason: '正文覆盖十号元素。',
+      },
+      {
+        id: 'source-fact-3',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['你的主队还在吗？'],
+        reason: '正文用问题保留未知状态。',
+      },
+      {
+        id: 'boundary-1',
+        kind: 'expression_boundary',
+        status: 'failed',
+        evidence: ['心里没底'],
+        reason: '正文补写了读者心理状态。',
+      },
+    ],
   },
   sourceFactsOnlyRepairedCandidate,
   {
@@ -896,6 +954,36 @@ const sourceFactsOnlyResponses = [
         quote: '四双足球主题袜子都带有十号元素',
         classification: 'supported',
         reason: 'brief.sourceFacts 明确给出。',
+      },
+    ],
+    requirements: [
+      {
+        id: 'source-fact-1',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['四双足球主题袜子'],
+        reason: '正文覆盖数量与主体。',
+      },
+      {
+        id: 'source-fact-2',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['十号元素'],
+        reason: '正文覆盖十号元素。',
+      },
+      {
+        id: 'source-fact-3',
+        kind: 'required_fact',
+        status: 'satisfied',
+        evidence: ['你的主队还在吗？'],
+        reason: '正文用问题保留未知状态。',
+      },
+      {
+        id: 'boundary-1',
+        kind: 'expression_boundary',
+        status: 'satisfied',
+        evidence: [],
+        reason: '正文不再补写读者心理状态。',
       },
     ],
   },
@@ -997,6 +1085,15 @@ globalThis.fetch = async (_input, init) => {
               quote: '四双足球主题袜子都带有十号元素',
               classification: 'supported',
               reason: 'topic 明确给出。',
+            },
+          ],
+          requirements: [
+            {
+              id: 'boundary-1',
+              kind: 'expression_boundary',
+              status: 'satisfied',
+              evidence: [],
+              reason: '正文没有补写读者心理状态。',
             },
           ],
         }

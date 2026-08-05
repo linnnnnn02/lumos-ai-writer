@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DraftQualitySummary } from '@/components/draft-quality-summary'
 import { CheckCircle2, History, Sparkles, X } from '@/components/ui/icon'
 import type { DraftVersionRecord } from '@/lib/draft-versions'
 
@@ -208,6 +209,19 @@ export function DraftVersionHistory({
                   {selectedVersion.id === currentVersionId ? '正在使用' : '恢复为新版本'}
                 </Button>
               </div>
+
+              {selectedVersion.qualitySnapshot ? (
+                <div className="shrink-0 px-5 sm:px-7">
+                  <DraftQualitySummary
+                    snapshot={selectedVersion.qualitySnapshot}
+                    className="border-t-0"
+                  />
+                </div>
+              ) : (
+                <div className="shrink-0 border-b border-[rgba(15,23,42,0.06)] px-5 py-3 text-xs text-[var(--soft-foreground)] sm:px-7">
+                  此版本尚未保存自动检查结果。
+                </div>
+              )}
 
               {selectedVersion.appliedWritingProfile ? (
                 appliedPreferenceCount > 0 ? (
