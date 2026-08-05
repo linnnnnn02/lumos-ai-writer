@@ -105,6 +105,7 @@ import {
   type WorkflowStepId,
   type WorkflowStepItem,
 } from '@/components/workflow-header-nav'
+import { LearningResult } from '@/features/workspace/analysis/learning-result'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
@@ -3105,18 +3106,6 @@ function App() {
         selectedNoteIds.has(note.id) || snippetNoteUrls.has(normalizeNoteUrl(note.sourceUrl)),
     )
   }, [learningReadyNotes, selectedNoteIds, selectedSnippets])
-
-  const selectedReferenceSummary =
-    selectedNotes.length > 0
-      ? `${selectedNotes.length} 篇参考${
-          selectedSnippets.length > 0 ? `中的 ${selectedSnippets.length} 条重点标注` : ''
-        }`
-      : selectedSnippets.length > 0
-        ? `${selectedSnippets.length} 条重点标注`
-        : ''
-  const draftPreparationSummary = selectedReferenceSummary
-    ? `本轮将结合 ${selectedReferenceSummary}，按“${activeConversation.topic}”这一需求生成一版可编辑初稿。`
-    : `本轮不套用具体参考文案，按“${activeConversation.topic}”这一需求先生成一版可编辑初稿。`
 
   const selectedFolderName = useMemo(() => {
     const folderNames = Array.from(new Set(selectedNotes.map((note) => note.folderName).filter(Boolean)))
@@ -7938,14 +7927,23 @@ function App() {
                 <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 pt-5 md:px-4 [scrollbar-gutter:stable]">
                   <div className="grid gap-5">
                     <section className="border-b border-[var(--border)] px-1 pb-6 md:px-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h2 className="text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">
-                            当前理解
-                          </h2>
-                          <p className="mt-1 max-w-[50rem] text-sm leading-6 text-[var(--muted-foreground)]">
-                            {draftPreparationSummary}
-                          </p>
+                      <LearningResult
+                        analysis={analysis}
+                        isCloudEnabled={isUsingCloudLibrary}
+                        referenceCount={selectedNotes.length}
+                        snippetCount={selectedSnippets.length}
+                      />
+
+                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">{activeConversation.targetAudience}</Badge>
+                          <Badge variant="outline">
+                            {effectiveLength === 'short'
+                              ? '短篇幅'
+                              : effectiveLength === 'medium'
+                                ? '中篇幅'
+                                : '长篇幅'}
+                          </Badge>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
                           <span
@@ -7975,18 +7973,6 @@ function App() {
                             {isWritingBriefOpen ? '收起生成设置' : '检查生成设置'}
                           </Button>
                         </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <Badge variant="outline">{activeConversation.targetAudience}</Badge>
-                        <Badge variant="outline">
-                          {effectiveLength === 'short'
-                            ? '短篇幅'
-                            : effectiveLength === 'medium'
-                              ? '中篇幅'
-                              : '长篇幅'}
-                        </Badge>
-                        <Badge variant="outline">{selectedNotes.length} 篇参考</Badge>
                       </div>
 
                       {isWritingBriefOpen ? (
