@@ -1,5 +1,7 @@
 import type {
   AiContentMode,
+  AppliedWritingProfileContext,
+  AppliedWritingProfileRevision,
   WritingPreference,
   WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
@@ -14,6 +16,46 @@ function isPreferenceApplicable(
       contentMode === 'unclassified' ||
       preference.contentModes.includes(contentMode))
   )
+}
+
+export function getAppliedWritingProfileRevision(
+  revision: WritingProfileRevisionDto | null | undefined,
+  contentMode: AiContentMode,
+): AppliedWritingProfileRevision | null {
+  if (!revision) return null
+
+  const preferences = revision.profile.preferences.filter((preference) =>
+    isPreferenceApplicable(preference, contentMode),
+  )
+  if (preferences.length === 0) return null
+
+  return {
+    revisionId: revision.id,
+    version: revision.version,
+    scope: revision.scope,
+    preferences: preferences.map((preference) => ({
+      id: preference.id,
+      scope: preference.scope,
+      dimension: preference.dimension,
+      statement: preference.statement,
+    })),
+  }
+}
+
+export function getAppliedWritingProfileContext(
+  context:
+    | {
+        accountProfile: WritingProfileRevisionDto | null
+        projectProfile: WritingProfileRevisionDto | null
+      }
+    | null
+    | undefined,
+  contentMode: AiContentMode,
+): AppliedWritingProfileContext {
+  return {
+    account: getAppliedWritingProfileRevision(context?.accountProfile, contentMode),
+    project: getAppliedWritingProfileRevision(context?.projectProfile, contentMode),
+  }
 }
 
 export function compactActiveWritingProfile(

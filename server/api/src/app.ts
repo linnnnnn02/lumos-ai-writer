@@ -1486,6 +1486,7 @@ export function createApiApp() {
           model: result.model,
           skill: result.skill,
           draft: result.draft,
+          appliedWritingProfile: result.appliedWritingProfile,
           usage: result.usage,
         }),
       )
@@ -1602,6 +1603,7 @@ export function createApiApp() {
           model: result.model,
           skill: result.skill,
           rewrite: result.rewrite,
+          appliedWritingProfile: result.appliedWritingProfile,
           usage: result.usage,
         }),
       )

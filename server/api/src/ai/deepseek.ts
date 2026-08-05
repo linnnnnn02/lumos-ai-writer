@@ -6,6 +6,7 @@ import {
   type AiReaderPreviewResult,
   type AiSkillMetadata,
   type AiUsage,
+  type AppliedWritingProfileContext,
   type AnalyzeReferencesRequest,
   type BuildWritingProfileRequest,
   type GenerateDraftRequest,
@@ -24,6 +25,7 @@ import {
   getDraftGroundingIssues,
   draftRepairSystemPrompt,
   draftSkillV1,
+  resolveDraftContentMode,
   validateDraftGroundingAuditOutput,
   validateDraftSkillOutput,
 } from '../skills/draft-v1/index.js'
@@ -47,6 +49,7 @@ import {
   writerModelSkillV1,
 } from '../skills/writer-model-v1/index.js'
 import type { WritingProfileContext } from '../writing-profile.js'
+import { getAppliedWritingProfileContext } from '../skills/shared/writing-profile.js'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
@@ -559,6 +562,7 @@ export async function generateDraftWithDeepSeek(
   draft: AiDraftCopy
   skill: AiSkillMetadata
   model: string
+  appliedWritingProfile: AppliedWritingProfileContext
   usage: AiUsage | null
 }> {
   if (!config.AI_FEATURE_ENABLED) {
@@ -573,6 +577,11 @@ export async function generateDraftWithDeepSeek(
     ...input,
     writingProfileContext,
   })
+  const contentMode = resolveDraftContentMode({ ...input, writingProfileContext })
+  const appliedWritingProfile = getAppliedWritingProfileContext(
+    writingProfileContext,
+    contentMode.usesLegacyFallback ? 'unclassified' : contentMode.resolvedMode,
+  )
 
   const data = await requestDeepSeekChatCompletion(config, {
     model: preparedSkill.model,
@@ -661,6 +670,7 @@ export async function generateDraftWithDeepSeek(
           draft: candidateDraft,
           skill: preparedSkill.metadata,
           model: preparedSkill.model,
+          appliedWritingProfile,
           usage: combinedUsage,
         }
       }
@@ -755,6 +765,7 @@ export async function rewriteDraftWithDeepSeek(
   rewrite: AiRewriteResult
   skill: AiSkillMetadata
   model: string
+  appliedWritingProfile: AppliedWritingProfileContext
   usage: AiUsage | null
 }> {
   if (!config.AI_FEATURE_ENABLED) {
@@ -769,6 +780,10 @@ export async function rewriteDraftWithDeepSeek(
     ...input,
     writingProfileContext,
   })
+  const appliedWritingProfile = getAppliedWritingProfileContext(
+    writingProfileContext,
+    input.analysis?.contentMode.targetMode ?? 'unclassified',
+  )
   const data = await requestDeepSeekChatCompletion(config, {
     model: preparedSkill.model,
     messages: [
@@ -831,6 +846,7 @@ export async function rewriteDraftWithDeepSeek(
           rewrite: candidateRewrite,
           skill: preparedSkill.metadata,
           model: preparedSkill.model,
+          appliedWritingProfile,
           usage: initialUsage,
         }
       } catch {
@@ -900,6 +916,7 @@ export async function rewriteDraftWithDeepSeek(
           rewrite: candidateRewrite,
           skill: preparedSkill.metadata,
           model: preparedSkill.model,
+          appliedWritingProfile,
           usage: combinedUsage,
         }
       } catch (error) {
@@ -918,6 +935,7 @@ export async function rewriteDraftWithDeepSeek(
     rewrite: candidateRewrite,
     skill: preparedSkill.metadata,
     model: preparedSkill.model,
+    appliedWritingProfile,
     usage: initialUsage,
   }
 }
