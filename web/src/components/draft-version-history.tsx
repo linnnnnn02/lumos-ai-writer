@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DraftQualitySummary } from '@/components/draft-quality-summary'
-import { CheckCircle2, History, Sparkles, X } from '@/components/ui/icon'
+import { DraftVersionComparison } from '@/components/draft-version-comparison'
+import { CheckCircle2, History, Layers3, Sparkles, X } from '@/components/ui/icon'
 import type { DraftVersionRecord } from '@/lib/draft-versions'
 
 type DraftVersionHistoryProps = {
@@ -46,11 +47,21 @@ export function DraftVersionHistory({
   onRestore,
 }: DraftVersionHistoryProps) {
   const [selectedVersionId, setSelectedVersionId] = useState('')
-  const orderedVersions = [...versions].sort((first, second) => second.version - first.version)
+  const [viewMode, setViewMode] = useState<'draft' | 'compare'>('draft')
+  const ascendingVersions = [...versions].sort(
+    (first, second) => first.version - second.version,
+  )
+  const orderedVersions = [...ascendingVersions].reverse()
   const selectedVersion =
     orderedVersions.find((version) => version.id === selectedVersionId) ??
     orderedVersions.find((version) => version.id === currentVersionId) ??
     orderedVersions[0]
+  const selectedVersionIndex = selectedVersion
+    ? ascendingVersions.findIndex((version) => version.id === selectedVersion.id)
+    : -1
+  const previousVersion =
+    selectedVersionIndex > 0 ? ascendingVersions[selectedVersionIndex - 1] : undefined
+  const visibleViewMode = previousVersion ? viewMode : 'draft'
   const appliedProfileGroups = selectedVersion?.appliedWritingProfile
     ? [
         { label: '长期偏好', profile: selectedVersion.appliedWritingProfile.account },
@@ -133,7 +144,7 @@ export function DraftVersionHistory({
               </h2>
             </div>
             <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
-              每次生成和关键修改都会保留。恢复旧稿会新建一版，不会覆盖现有记录。
+              每次生成和关键修改都会保留，可核对差异与当时的确认状态。
             </p>
           </div>
           <Button
@@ -151,13 +162,14 @@ export function DraftVersionHistory({
         {selectedVersion ? (
           <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[17rem_minmax(0,1fr)] md:grid-rows-1">
             <nav
-              className="max-h-[13rem] overflow-y-auto border-b border-[rgba(15,23,42,0.07)] bg-[rgba(241,245,249,0.58)] p-3 md:max-h-none md:border-b-0 md:border-r"
+              className="overflow-x-auto border-b border-[rgba(15,23,42,0.07)] bg-[rgba(241,245,249,0.58)] p-3 md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r"
               aria-label="文案版本列表"
             >
-              <div className="grid gap-[var(--ui-gap-related)]">
+              <div className="flex min-w-max gap-2 md:grid md:min-w-0 md:gap-[var(--ui-gap-related)]">
                 {orderedVersions.map((version) => {
                   const isSelected = version.id === selectedVersion.id
                   const isCurrent = version.id === currentVersionId
+                  const isFinalized = Boolean(version.completionSnapshot)
                   return (
                     <button
                       key={version.id}
@@ -165,8 +177,8 @@ export function DraftVersionHistory({
                       onClick={() => setSelectedVersionId(version.id)}
                       className={
                         isSelected
-                          ? 'rounded-[var(--ui-radius-control)] bg-white px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left shadow-[0_8px_24px_rgba(15,23,42,0.06)] ring-1 ring-[rgba(15,23,42,0.08)]'
-                          : 'rounded-[var(--ui-radius-control)] px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left text-[var(--muted-foreground)] hover:bg-white/68 hover:text-[var(--foreground)]'
+                          ? 'w-44 shrink-0 rounded-[var(--ui-radius-control)] bg-white px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left shadow-[0_8px_24px_rgba(15,23,42,0.06)] ring-1 ring-[rgba(15,23,42,0.08)] md:w-auto'
+                          : 'w-44 shrink-0 rounded-[var(--ui-radius-control)] px-[var(--ui-space-3)] py-[var(--ui-space-2)] text-left text-[var(--muted-foreground)] hover:bg-white/68 hover:text-[var(--foreground)] md:w-auto'
                       }
                       aria-current={isSelected ? 'true' : undefined}
                     >
@@ -174,12 +186,17 @@ export function DraftVersionHistory({
                         <span className="text-sm font-semibold text-[var(--foreground)]">
                           版本 {version.version}
                         </span>
-                        {isCurrent ? (
-                          <span className="inline-flex items-center gap-1 text-[0.7rem] font-semibold text-[#17675b]">
-                            <CheckCircle2 className="h-3 w-3" />
-                            当前
-                          </span>
-                        ) : null}
+                        <span className="flex shrink-0 items-center gap-2 text-[0.7rem] font-semibold">
+                          {isFinalized ? (
+                            <span className="inline-flex items-center gap-1 text-[#17675b]">
+                              <CheckCircle2 className="size-3" />
+                              已确认
+                            </span>
+                          ) : null}
+                          {isCurrent ? (
+                            <span className="text-[var(--accent-strong)]">当前</span>
+                          ) : null}
+                        </span>
                       </span>
                       <span className="mt-1 flex items-center justify-between gap-2 text-xs text-[var(--soft-foreground)]">
                         <span>{sourceLabels[version.source] ?? '历史快照'}</span>
@@ -193,21 +210,58 @@ export function DraftVersionHistory({
 
             <div className="flex min-h-0 flex-col bg-white/72">
               <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[rgba(15,23,42,0.06)] px-5 py-3 sm:px-7">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">版本 {selectedVersion.version}</Badge>
                   <span className="text-xs text-[var(--soft-foreground)]">
                     {sourceLabels[selectedVersion.source] ?? '历史快照'} · {formatVersionTime(selectedVersion.updatedAt)}
                   </span>
+                  {selectedVersion.completionSnapshot ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-[#17675b]">
+                      <CheckCircle2 className="size-3.5" />
+                      {formatVersionTime(selectedVersion.completionSnapshot.finalizedAt)} 已确认
+                    </span>
+                  ) : null}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={selectedVersion.id === currentVersionId ? 'secondary' : 'default'}
-                  disabled={selectedVersion.id === currentVersionId}
-                  onClick={() => onRestore(selectedVersion)}
-                >
-                  {selectedVersion.id === currentVersionId ? '正在使用' : '恢复为新版本'}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {previousVersion ? (
+                    <div
+                      role="group"
+                      aria-label="版本查看方式"
+                      className="flex items-center rounded-[var(--ui-radius-control)] bg-[rgba(241,245,249,0.78)] p-1"
+                    >
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={visibleViewMode === 'draft' ? 'secondary' : 'ghost'}
+                        className="h-7 px-2.5 shadow-none"
+                        aria-pressed={visibleViewMode === 'draft'}
+                        onClick={() => setViewMode('draft')}
+                      >
+                        正文
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={visibleViewMode === 'compare' ? 'secondary' : 'ghost'}
+                        className="h-7 px-2.5 shadow-none"
+                        aria-pressed={visibleViewMode === 'compare'}
+                        onClick={() => setViewMode('compare')}
+                      >
+                        <Layers3 className="size-3.5" />
+                        对比上一版
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={selectedVersion.id === currentVersionId ? 'secondary' : 'default'}
+                    disabled={selectedVersion.id === currentVersionId}
+                    onClick={() => onRestore(selectedVersion)}
+                  >
+                    {selectedVersion.id === currentVersionId ? '正在使用' : '恢复为新版本'}
+                  </Button>
+                </div>
               </div>
 
               {selectedVersion.qualitySnapshot ? (
@@ -279,16 +333,22 @@ export function DraftVersionHistory({
               )}
 
               <article className="min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-10 sm:py-8">
-                <div className="mx-auto max-w-[48rem]">
-                  <h3 className="text-2xl font-semibold leading-tight tracking-[-0.04em] text-[var(--foreground)] sm:text-3xl">
-                    {selectedVersion.title || '无标题'}
-                  </h3>
-                  <div className="mt-6 grid gap-4 text-[0.96rem] leading-8 text-[var(--muted-foreground)] sm:text-base">
-                    {selectedVersion.body.map((paragraph, index) => (
-                      <p key={`${selectedVersion.id}-${index}`}>{paragraph || '（空段落）'}</p>
-                    ))}
+                {visibleViewMode === 'compare' && previousVersion ? (
+                  <DraftVersionComparison before={previousVersion} after={selectedVersion} />
+                ) : (
+                  <div className="mx-auto max-w-[48rem]">
+                    <h3 className="text-balance text-2xl font-semibold leading-tight tracking-[-0.04em] text-[var(--foreground)] sm:text-3xl">
+                      {selectedVersion.title || '无标题'}
+                    </h3>
+                    <div className="mt-6 grid gap-4 text-[0.96rem] leading-8 text-[var(--muted-foreground)] sm:text-base">
+                      {selectedVersion.body.map((paragraph, index) => (
+                        <p className="text-pretty" key={`${selectedVersion.id}-${index}`}>
+                          {paragraph || '（空段落）'}
+                        </p>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </article>
             </div>
           </div>

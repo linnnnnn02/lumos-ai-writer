@@ -142,7 +142,9 @@ import {
   ensureBaseDraftVersion,
   evolveDraftVersions,
   getAppliedWritingPreferenceIds,
+  isDraftCompletionSnapshot,
   isSameDraftCopy,
+  markDraftVersionFinalized,
   normalizeDraftVersions,
   type DraftCopy as InitialDraftCopy,
   type DraftVersionRecord,
@@ -911,7 +913,12 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
       const draftVersionQualitySnapshots = isObject(state.draftVersionQualitySnapshots)
         ? state.draftVersionQualitySnapshots
         : {}
-      const draftVersions = normalizeDraftVersions(
+      const draftVersionCompletionSnapshots = isObject(
+        state.draftVersionCompletionSnapshots,
+      )
+        ? state.draftVersionCompletionSnapshots
+        : {}
+      let draftVersions = normalizeDraftVersions(
         (conversation.drafts ?? []).length > 0
           ? conversation.drafts
           : conversation.draft
@@ -924,14 +931,25 @@ function hydrateCloudWorkspace(cloudProjects: WorkspaceProjectDto[]): HydratedCl
         const qualitySnapshot = draftQualitySnapshotSchema.safeParse(
           draftVersionQualitySnapshots[version.id],
         )
+        const completionSnapshot = draftVersionCompletionSnapshots[version.id]
         return {
           ...version,
           ...(preferenceSnapshot.success
             ? { appliedWritingProfile: preferenceSnapshot.data }
             : {}),
+          ...(isDraftCompletionSnapshot(completionSnapshot)
+            ? { completionSnapshot }
+            : {}),
           ...(qualitySnapshot.success ? { qualitySnapshot: qualitySnapshot.data } : {}),
         }
       })
+      if (conversation.finalizedAt && conversation.draft?.id) {
+        draftVersions = markDraftVersionFinalized(
+          draftVersions,
+          conversation.draft.id,
+          conversation.finalizedAt,
+        )
+      }
       if (draftVersions.length > 0) {
         draftVersionsByConversation[conversation.id] = draftVersions
       }
@@ -1070,6 +1088,13 @@ function buildWorkspaceSyncPayload(input: {
               : [],
           ),
         )
+        const draftVersionCompletionSnapshots = Object.fromEntries(
+          versions.flatMap((version) =>
+            version.completionSnapshot
+              ? [[version.id, version.completionSnapshot] as const]
+              : [],
+          ),
+        )
         const currentVersion =
           versions.find(
             (version) =>
@@ -1105,6 +1130,9 @@ function buildWorkspaceSyncPayload(input: {
                     : {}),
                   ...(Object.keys(draftVersionQualitySnapshots).length > 0
                     ? { draftVersionQualitySnapshots }
+                    : {}),
+                  ...(Object.keys(draftVersionCompletionSnapshots).length > 0
+                    ? { draftVersionCompletionSnapshots }
                     : {}),
                 }
               : {}),
@@ -1251,23 +1279,33 @@ function loadGuestWorkspaceSnapshot(): LocalWorkspaceSnapshot | null {
   const storedCurrentVersionIds = record<string>(value.currentDraftVersionIdByConversation)
   const draftVersionsByConversation: Record<string, DraftVersionRecord[]> = {}
   const currentDraftVersionIdByConversation: Record<string, string> = {}
+  const conversationsById = new Map(
+    projects.flatMap((project) =>
+      project.conversations.map((conversation) => [conversation.id, conversation] as const),
+    ),
+  )
 
   for (const conversationId of new Set([
     ...Object.keys(storedDraftVersions),
     ...Object.keys(draftCopyByConversation),
   ])) {
-    const versions = ensureBaseDraftVersion(
+    let versions = ensureBaseDraftVersion(
       normalizeDraftVersions(storedDraftVersions[conversationId]),
       draftCopyByConversation[conversationId],
     )
     if (versions.length === 0) continue
 
-    draftVersionsByConversation[conversationId] = versions
     if (draftReadyByConversation[conversationId]) {
-      currentDraftVersionIdByConversation[conversationId] =
+      const currentVersionId =
         versions.find((version) => version.id === storedCurrentVersionIds[conversationId])?.id ??
         versions[versions.length - 1].id
+      const finalizedAt = conversationsById.get(conversationId)?.finalizedAt
+      if (finalizedAt) {
+        versions = markDraftVersionFinalized(versions, currentVersionId, finalizedAt)
+      }
+      currentDraftVersionIdByConversation[conversationId] = currentVersionId
     }
+    draftVersionsByConversation[conversationId] = versions
   }
 
   return {
@@ -6516,11 +6554,27 @@ function App() {
     }
 
     const wasAlreadyFinalized = Boolean(activeConversation.finalizedAt)
+    const finalizedAt = activeConversation.finalizedAt ?? new Date().toISOString()
     const copied = await copyTextToClipboard(formatDraftCopyForClipboard(initialDraftCopy))
+    const currentVersionId = activeDraftVersion?.id ?? activeCurrentDraftVersionId
+    const currentVersions = draftVersionsRef.current[activeConversation.id] ?? []
+    const nextVersions = markDraftVersionFinalized(
+      currentVersions,
+      currentVersionId,
+      finalizedAt,
+    )
+    if (nextVersions !== currentVersions) {
+      const nextVersionsByConversation = {
+        ...draftVersionsRef.current,
+        [activeConversation.id]: nextVersions,
+      }
+      draftVersionsRef.current = nextVersionsByConversation
+      setDraftVersionsByConversation(nextVersionsByConversation)
+    }
 
     updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
       ...conversation,
-      finalizedAt: new Date().toISOString(),
+      finalizedAt,
       finalDraft: initialDraftCopy,
       step: nextStep,
       workflowStage: 'finalized',
