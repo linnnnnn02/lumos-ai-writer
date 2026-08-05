@@ -47,20 +47,19 @@ export function ConversationIntake({
 
   return (
     <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-      <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-[var(--ui-page-gutter)] py-[var(--ui-space-4)] xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
-        <div className="flex min-w-0 items-center">
+      <header className="flex shrink-0 items-center justify-between gap-3 px-[var(--ui-page-gutter)] py-[var(--ui-space-4)]">
+        <div className="flex min-w-0 items-center gap-2">
           <WorkflowHeaderNav
             onBackToWorkspace={onBackToWorkspace}
             onOpenSidebar={onOpenSidebar}
             showDivider={false}
           />
+          <WorkflowStageNav
+            activeStep="intake"
+            onStepChange={onWorkflowStepChange}
+            steps={workflowSteps}
+          />
         </div>
-        <WorkflowStageNav
-          activeStep="intake"
-          className="order-3 col-span-2 xl:order-none xl:col-span-1"
-          onStepChange={onWorkflowStepChange}
-          steps={workflowSteps}
-        />
         <div className="flex min-w-0 items-center justify-end">
           <span className="hidden max-w-[16rem] truncate text-xs font-medium text-[var(--soft-foreground)] sm:block">
             {projectName}

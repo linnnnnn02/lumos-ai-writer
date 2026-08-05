@@ -7908,7 +7908,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -7917,15 +7917,14 @@ function App() {
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
                 准备初稿
               </h1>
+              <WorkflowStageNav
+                activeStep="draft"
+                className="ml-2"
+                onStepChange={handleWorkflowStepChange}
+                steps={workflowSteps}
+              />
             </div>
-
-            <WorkflowStageNav
-              activeStep="draft"
-              onStepChange={handleWorkflowStepChange}
-              steps={workflowSteps}
-            />
-
-            <div className="flex flex-wrap items-center gap-3 xl:justify-self-end">
+            <div className="flex flex-wrap items-center gap-3">
               <Button variant="secondary" size="sm" onClick={() => void handleOpenWritingProfile()}>
                 <Sparkles className="h-4 w-4" />
                 表达档案
@@ -8384,7 +8383,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -8396,15 +8395,14 @@ function App() {
                 </h1>
                 <div className="mt-0.5">{renderWorkspaceSaveIndicator()}</div>
               </div>
+              <WorkflowStageNav
+                activeStep="review"
+                className="ml-2"
+                onStepChange={handleWorkflowStepChange}
+                steps={workflowSteps}
+              />
             </div>
-
-            <WorkflowStageNav
-              activeStep="review"
-              onStepChange={handleWorkflowStepChange}
-              steps={workflowSteps}
-            />
-
-            <div className="flex w-full flex-nowrap items-center justify-end gap-2 sm:w-auto sm:flex-wrap sm:gap-3 xl:justify-self-end">
+            <div className="flex w-full flex-nowrap items-center justify-end gap-2 sm:w-auto sm:flex-wrap sm:gap-3">
               <Button
                 variant="secondary"
                 size="sm"
@@ -8787,7 +8785,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
+          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -8796,15 +8794,14 @@ function App() {
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
                 读者预演
               </h1>
+              <WorkflowStageNav
+                activeStep="confirm"
+                className="ml-2"
+                onStepChange={handleWorkflowStepChange}
+                steps={workflowSteps}
+              />
             </div>
-
-            <WorkflowStageNav
-              activeStep="confirm"
-              onStepChange={handleWorkflowStepChange}
-              steps={workflowSteps}
-            />
-
-            <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto xl:justify-self-end">
+            <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto">
               <Button
                 variant="secondary"
                 size="sm"

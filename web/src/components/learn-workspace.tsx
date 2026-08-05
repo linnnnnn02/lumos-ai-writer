@@ -1430,7 +1430,7 @@ export function LearnWorkspace({
 
       <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
         {analysisReady || isAnalyzing ? (
-          <header className="grid grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
+          <header className="flex flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
             <div className="flex min-w-0 items-start">
               <WorkflowHeaderNav
                 onBackToWorkspace={onBackToWorkspace}
@@ -1446,14 +1446,13 @@ export function LearnWorkspace({
                   </p>
                 ) : null}
               </div>
+              <WorkflowStageNav
+                activeStep="references"
+                className="ml-2 mt-1"
+                onStepChange={onWorkflowStepChange}
+                steps={workflowSteps}
+              />
             </div>
-            <WorkflowStageNav
-              activeStep="references"
-              className="xl:col-start-2"
-              onStepChange={onWorkflowStepChange}
-              steps={workflowSteps}
-            />
-            <div className="hidden xl:block" aria-hidden="true" />
           </header>
         ) : null}
 
@@ -1497,7 +1496,7 @@ export function LearnWorkspace({
 
               <section className="flex min-h-0 flex-1 flex-col px-3 py-3">
                 <div className="shrink-0">
-                  <div className="grid gap-3 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)] xl:items-center">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-[var(--ui-gap-block)]">
                       <WorkflowHeaderNav
                         onBackToWorkspace={onBackToWorkspace}
@@ -1507,13 +1506,12 @@ export function LearnWorkspace({
                         选择参考
                       </h1>
                       <Badge variant="outline">可选</Badge>
+                      <WorkflowStageNav
+                        activeStep="references"
+                        onStepChange={onWorkflowStepChange}
+                        steps={workflowSteps}
+                      />
                     </div>
-                    <WorkflowStageNav
-                      activeStep="references"
-                      onStepChange={onWorkflowStepChange}
-                      steps={workflowSteps}
-                    />
-                    <div className="hidden xl:block" aria-hidden="true" />
                   </div>
 
                   <div className="mt-3 grid gap-1 border-y border-[rgba(15,23,42,0.07)] py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
