@@ -10,6 +10,10 @@ export type DraftCopy = {
   body: string[]
 }
 
+export type DraftCompletionSnapshot = {
+  finalizedAt: string
+}
+
 export type DraftVersionRecord = DraftCopy & {
   id: string
   version: number
@@ -17,6 +21,7 @@ export type DraftVersionRecord = DraftCopy & {
   createdAt: string
   updatedAt: string
   appliedWritingProfile?: AppliedWritingProfileContext
+  completionSnapshot?: DraftCompletionSnapshot
   qualitySnapshot?: DraftQualitySnapshot
 }
 
@@ -37,6 +42,41 @@ export function getAppliedWritingPreferenceIds(
       ...(context?.project?.preferences.map((preference) => preference.id) ?? []),
     ]),
   )
+}
+
+export function isDraftCompletionSnapshot(
+  value: unknown,
+): value is DraftCompletionSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+
+  const finalizedAt = (value as Record<string, unknown>).finalizedAt
+  return (
+    typeof finalizedAt === 'string' &&
+    finalizedAt.length > 0 &&
+    !Number.isNaN(Date.parse(finalizedAt))
+  )
+}
+
+export function markDraftVersionFinalized(
+  versions: DraftVersionRecord[],
+  versionId: string,
+  finalizedAt: string,
+) {
+  if (!versionId || Number.isNaN(Date.parse(finalizedAt))) return versions
+
+  let changed = false
+  const nextVersions = versions.map((version) => {
+    if (version.id !== versionId) return version
+    if (version.completionSnapshot?.finalizedAt === finalizedAt) return version
+
+    changed = true
+    return {
+      ...version,
+      completionSnapshot: { finalizedAt },
+    }
+  })
+
+  return changed ? nextVersions : versions
 }
 
 export function recheckDraftQualitySnapshot(
@@ -110,6 +150,8 @@ export function isDraftVersionRecord(value: unknown): value is DraftVersionRecor
     typeof candidate.updatedAt === 'string' &&
     (candidate.appliedWritingProfile === undefined ||
       appliedWritingProfileContextSchema.safeParse(candidate.appliedWritingProfile).success) &&
+    (candidate.completionSnapshot === undefined ||
+      isDraftCompletionSnapshot(candidate.completionSnapshot)) &&
     (candidate.qualitySnapshot === undefined ||
       draftQualitySnapshotSchema.safeParse(candidate.qualitySnapshot).success)
   )
@@ -194,6 +236,7 @@ export function evolveDraftVersions(input: {
       ...(qualitySnapshot ? { qualitySnapshot } : {}),
     }
     if (!appliedWritingProfile) delete nextLatest.appliedWritingProfile
+    delete nextLatest.completionSnapshot
     if (!qualitySnapshot) delete nextLatest.qualitySnapshot
     return [...versions.slice(0, -1), nextLatest]
   }
