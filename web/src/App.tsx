@@ -45,7 +45,6 @@ import {
 import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   Clock3,
   Eye,
@@ -53,6 +52,7 @@ import {
   GripVertical,
   Highlighter,
   History,
+  Home,
   Image,
   Layers3,
   Loader2,
@@ -99,7 +99,12 @@ import { DraftVersionHistory } from '@/components/draft-version-history'
 import { DraftQualitySummary } from '@/components/draft-quality-summary'
 import { WritingProfileDialog } from '@/components/writing-profile-dialog'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
-import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
+import {
+  WorkflowHeaderNav,
+  WorkflowStageNav,
+  type WorkflowStepId,
+  type WorkflowStepItem,
+} from '@/components/workflow-header-nav'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
@@ -3236,6 +3241,47 @@ function App() {
   }
   const canUndoDraftMove = draftMoveHistory.undo.length > 0
   const canRedoDraftMove = draftMoveHistory.redo.length > 0
+  const hasWritingRequest = Boolean(
+    activeConversation.writingRequest.trim() || activeConversation.topic.trim(),
+  )
+  const workflowSteps: WorkflowStepItem[] = [
+    {
+      id: 'intake',
+      label: '需求',
+      completed: hasWritingRequest,
+    },
+    {
+      id: 'references',
+      label: '参考',
+      completed: hasLearningResult,
+      disabled: !hasWritingRequest,
+      disabledReason: !hasWritingRequest ? '先填写并确认写作需求' : undefined,
+    },
+    {
+      id: 'draft',
+      label: '初稿',
+      completed: hasDraftReady,
+      disabled: !hasLearningResult,
+      disabledReason: !hasLearningResult ? '先完成参考分析' : undefined,
+    },
+    {
+      id: 'review',
+      label: '编辑',
+      completed:
+        Boolean(activeReaderPreview) ||
+        visibleConversationStage === 'confirm' ||
+        Boolean(activeConversation.finalizedAt),
+      disabled: !hasDraftReady,
+      disabledReason: !hasDraftReady ? '先生成初稿' : undefined,
+    },
+    {
+      id: 'confirm',
+      label: '预演',
+      completed: Boolean(activeConversation.finalizedAt),
+      disabled: !hasDraftReady,
+      disabledReason: !hasDraftReady ? '先生成初稿' : undefined,
+    },
+  ]
 
   const filteredProjects = useMemo(() => {
     const query = projectSearch.trim().toLowerCase()
@@ -3533,16 +3579,6 @@ function App() {
     }
 
     if (nextStep === 'workspace') {
-      setWritingRequestDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
-      })
-      setReferenceSelectionDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
-      })
       setWorkflowContextView(null)
       setNavigationStageOverride(null)
       pendingNavigationTargetRef.current = null
@@ -3551,13 +3587,10 @@ function App() {
       setIsLibraryOpen(false)
       const currentNavigationState: unknown = window.history.state
       if (
-        isAppNavigationHistoryState(currentNavigationState) &&
-        currentNavigationState.view !== 'workspace' &&
-        currentNavigationState.canReturnToWorkspace
+        !isAppNavigationHistoryState(currentNavigationState) ||
+        currentNavigationState.view !== 'workspace'
       ) {
-        window.history.back()
-      } else {
-        writeAppNavigationHistory('replace', {
+        writeAppNavigationHistory('push', {
           lumosNavigation: true,
           view: 'workspace',
         })
@@ -3631,6 +3664,39 @@ function App() {
 
     updateConversationStage(activeProject.id, activeConversation.id, nextStage)
     showConversationRoute(visibleStage)
+  }
+
+  function handleWorkflowStepChange(nextStep: WorkflowStepId) {
+    if (nextStep === 'intake') {
+      setIsChatStreaming(false)
+      showConversationRoute('intake')
+      return
+    }
+
+    if (nextStep === 'references') {
+      if (hasStoredDraft) {
+        setReferenceSelectionDraftByConversation((current) => ({
+          ...current,
+          [activeConversation.id]: [...activeConversation.selectedItemIds],
+        }))
+      }
+      showConversationRoute('references')
+      return
+    }
+
+    if (nextStep === 'draft') {
+      showConversationRoute('draft')
+      return
+    }
+
+    if (nextStep === 'review') {
+      showConversationRoute('review')
+      return
+    }
+
+    setIsReaderPreviewVisible(true)
+    showConversationRoute('confirm')
+    void handleGenerateReaderPreview()
   }
 
   function handleWritingRequestChange(value: string) {
@@ -4856,41 +4922,6 @@ function App() {
 
   async function handleGenerateConservativeDraft() {
     await generateDraftForAnalysis(analysis, true, true)
-  }
-
-  function handleBackToSelection() {
-    setIsChatStreaming(false)
-    showConversationRoute('intake')
-  }
-
-  function handleReturnFromContext() {
-    setWritingRequestDraftByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setReferenceSelectionDraftByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    if (activeConversationStage === 'confirm' && !activeConversation.finalizedAt) {
-      updateConversationStage(activeProject.id, activeConversation.id, 'review')
-    }
-    showConversationRoute(
-      ['review', 'confirm', 'finalized'].includes(activeConversationStage)
-        ? 'review'
-        : activeConversationStage,
-    )
-  }
-
-  function handleReturnToReferences() {
-    setWritingRequestDraftByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    showConversationRoute('references')
   }
 
   async function handleSendChat() {
@@ -6450,12 +6481,6 @@ function App() {
     }
   }
 
-  function handleOpenReaderPreview() {
-    setIsReaderPreviewVisible(true)
-    goToStep('reader')
-    void handleGenerateReaderPreview()
-  }
-
   function handleRetryCloudWorkspace() {
     setDismissedCloudWorkspaceErrorVersion(cloudWorkspaceErrorVersion)
     if (workspaceSyncRetryTimerRef.current) {
@@ -7464,33 +7489,20 @@ function App() {
   function renderIntake() {
     const folderName =
       libraryFolders.find((folder) => folder.id === activeProject.folderId)?.name ?? '未选择文件夹'
-    const canReturnToDraft =
-      hasDraftReady && ['review', 'confirm', 'finalized'].includes(activeConversationStage)
-    const backLabel = canReturnToDraft
-      ? '返回编辑'
-      : activeConversationStage !== 'intake'
-        ? '返回参考'
-        : undefined
 
     return (
       <div className="relative h-[100dvh] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)]">
         {renderWorkflowSidebar()}
         <ConversationIntake
-          backLabel={backLabel}
           folderName={folderName}
           projectName={activeProject.name}
           value={writingRequestDraft}
-          onBack={
-            backLabel
-              ? canReturnToDraft
-                ? handleReturnFromContext
-                : handleReturnToReferences
-              : undefined
-          }
           onBackToWorkspace={() => goToStep('workspace')}
           onChange={handleWritingRequestChange}
           onOpenSidebar={() => setIsConversationSidebarOpen(true)}
           onSubmit={handleSubmitWritingRequest}
+          onWorkflowStepChange={handleWorkflowStepChange}
+          workflowSteps={workflowSteps}
         />
       </div>
     )
@@ -7512,11 +7524,6 @@ function App() {
         libraryError={libraryError}
         analysisError={analysisError}
         analysisWaitSeconds={analysisWaitSeconds}
-        canReturnToDraft={
-          workflowContextView === 'references' &&
-          hasDraftReady &&
-          ['review', 'confirm', 'finalized'].includes(activeConversationStage)
-        }
         isAnalyzing={isAnalyzing}
         isSidebarOpen={isConversationSidebarOpen}
         isStreaming={isChatStreaming}
@@ -7538,14 +7545,14 @@ function App() {
         onToggleConversationPin={handleToggleConversationPin}
         onSwitchConversation={handleSwitchConversation}
         onStartAnalysis={handleStartAnalysis}
-        onBackToSelection={handleBackToSelection}
-        onReturnToDraft={handleReturnFromContext}
         onOpenSidebar={() => setIsConversationSidebarOpen(true)}
         onToggleItems={handleToggleItems}
         onSelectItems={handleSelectItems}
         onDeselectItems={handleDeselectItems}
         onChatInputChange={setChatInput}
         onSendChat={handleSendChat}
+        onWorkflowStepChange={handleWorkflowStepChange}
+        workflowSteps={workflowSteps}
       />
     )
   }
@@ -7737,10 +7744,10 @@ function App() {
                 setIsConversationSidebarOpen(false)
                 goToStep('workspace')
               }}
-              aria-label="返回项目页"
+              aria-label="返回首页"
               className="shrink-0"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <Home className="h-4 w-4" />
             </Button>
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-semibold text-[var(--foreground)]">
@@ -7847,7 +7854,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
+          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -7858,13 +7865,16 @@ function App() {
               </h1>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 lg:justify-self-end">
+            <WorkflowStageNav
+              activeStep="draft"
+              onStepChange={handleWorkflowStepChange}
+              steps={workflowSteps}
+            />
+
+            <div className="flex flex-wrap items-center gap-3 xl:justify-self-end">
               <Button variant="secondary" size="sm" onClick={() => void handleOpenWritingProfile()}>
                 <Sparkles className="h-4 w-4" />
                 表达档案
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => goToStep('learn')}>
-                返回参考
               </Button>
             </div>
           </header>
@@ -8242,15 +8252,6 @@ function App() {
 
                     {draftBridgeMessages.map((message) => renderDraftBridgeMessage(message))}
 
-                    {hasDraftReady ? (
-                      <div className="flex justify-start md:ml-[3.25rem]">
-                        <Button size="sm" onClick={() => goToStep('rewrite')}>
-                          <PenLine className="h-4 w-4" />
-                          返回编辑
-                        </Button>
-                      </div>
-                    ) : null}
-
                     <div className="ml-0 grid gap-3 md:ml-[3.25rem]">
                       {[
                         { label: '补充信息', text: '还有必须保留的真实细节吗？' },
@@ -8329,7 +8330,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
+          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -8343,7 +8344,13 @@ function App() {
               </div>
             </div>
 
-            <div className="flex w-full flex-nowrap items-center justify-end gap-2 sm:w-auto sm:flex-wrap sm:gap-3 lg:justify-self-end">
+            <WorkflowStageNav
+              activeStep="review"
+              onStepChange={handleWorkflowStepChange}
+              steps={workflowSteps}
+            />
+
+            <div className="flex w-full flex-nowrap items-center justify-end gap-2 sm:w-auto sm:flex-wrap sm:gap-3 xl:justify-self-end">
               <Button
                 variant="secondary"
                 size="sm"
@@ -8367,37 +8374,15 @@ function App() {
                   <span className="sm:hidden">{activeDraftVersions.length}</span>
                 </Button>
               ) : null}
-              <Button
-                variant="secondary"
-                size="sm"
-                aria-label="查看需求与参考"
-                tooltip="需求与参考"
-                onClick={() => goToStep('learn')}
-              >
-                <Layers3 className="h-4 w-4" />
-                <span className="hidden sm:inline">需求与参考</span>
-              </Button>
               {hasDraftReady ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    aria-label="打开读者预演"
-                    tooltip="读者预演"
-                    onClick={handleOpenReaderPreview}
-                  >
-                    <Eye className="h-4 w-4" />
-                    <span className="hidden sm:inline">读者预演</span>
-                  </Button>
-                  <Button
-                    onClick={() => void handleFinalizeReaderPreview('rewrite')}
-                    disabled={!canFinalizeDraft}
-                    tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    {activeConversation.finalizedAt ? '再次复制' : '完成并复制'}
-                  </Button>
-                </>
+                <Button
+                  onClick={() => void handleFinalizeReaderPreview('rewrite')}
+                  disabled={!canFinalizeDraft}
+                  tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {activeConversation.finalizedAt ? '再次复制' : '完成并复制'}
+                </Button>
               ) : null}
             </div>
           </header>
@@ -8748,7 +8733,7 @@ function App() {
         {renderWorkflowSidebar()}
 
         <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-transparent px-5 py-4 lg:px-6">
+          <header className="grid shrink-0 grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
@@ -8759,7 +8744,13 @@ function App() {
               </h1>
             </div>
 
-            <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto lg:justify-self-end">
+            <WorkflowStageNav
+              activeStep="confirm"
+              onStepChange={handleWorkflowStepChange}
+              steps={workflowSteps}
+            />
+
+            <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto xl:justify-self-end">
               <Button
                 variant="secondary"
                 size="sm"
@@ -8837,9 +8828,6 @@ function App() {
                   : isReaderPreviewVisible
                     ? '重新预演'
                     : '开始预演'}
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => goToStep('rewrite')}>
-                返回编辑
               </Button>
               {!isReaderPreviewVisible ? (
                 <Button

@@ -2,9 +2,9 @@ import * as React from 'react'
 import type { SavedFolderRecord, SavedNoteRecord, SavedSnippetRecord } from '@lumos-ai/shared'
 import { createPortal } from 'react-dom'
 import {
-  ArrowLeft,
   CheckCircle2,
   Funnel,
+  Home,
   MessageCircle,
   MoreHorizontal,
   Pin,
@@ -24,7 +24,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
+import {
+  WorkflowHeaderNav,
+  WorkflowStageNav,
+  type WorkflowStepId,
+  type WorkflowStepItem,
+} from '@/components/workflow-header-nav'
 import { cn } from '@/lib/utils'
 
 type ChatMessage = {
@@ -63,7 +68,6 @@ type LearnWorkspaceProps = {
   nonLearningNoteCount?: number
   analysisError?: string
   analysisWaitSeconds?: number
-  canReturnToDraft?: boolean
   isAnalyzing?: boolean
   isSidebarOpen: boolean
   isStreaming: boolean
@@ -80,14 +84,14 @@ type LearnWorkspaceProps = {
   onToggleConversationPin: (conversationId: string) => void
   onSwitchConversation: (conversationId: string) => void
   onStartAnalysis: () => void
-  onBackToSelection: () => void
-  onReturnToDraft?: () => void
   onOpenSidebar: () => void
   onToggleItems: (itemIds: string[]) => void
   onSelectItems: (itemIds: string[]) => void
   onDeselectItems: (itemIds: string[]) => void
   onSendChat: () => void
   onChatInputChange: (value: string) => void
+  onWorkflowStepChange: (step: WorkflowStepId) => void
+  workflowSteps: WorkflowStepItem[]
 }
 
 type TagTab = {
@@ -672,7 +676,6 @@ export function LearnWorkspace({
   nonLearningNoteCount = 0,
   analysisError = '',
   analysisWaitSeconds = 0,
-  canReturnToDraft = false,
   isAnalyzing = false,
   isSidebarOpen,
   isStreaming,
@@ -689,14 +692,14 @@ export function LearnWorkspace({
   onToggleConversationPin,
   onSwitchConversation,
   onStartAnalysis,
-  onBackToSelection,
-  onReturnToDraft,
   onOpenSidebar,
   onToggleItems,
   onSelectItems,
   onDeselectItems,
   onSendChat,
   onChatInputChange,
+  onWorkflowStepChange,
+  workflowSteps,
 }: LearnWorkspaceProps) {
   const [activeTab, setActiveTab] = React.useState('all')
   const [folderFilterId, setFolderFilterId] = React.useState('all')
@@ -1208,10 +1211,10 @@ export function LearnWorkspace({
                 onCloseSidebar()
                 onBackToWorkspace()
               }}
-              aria-label="返回项目页"
+              aria-label="返回首页"
               className="shrink-0"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <Home className="h-4 w-4" />
             </Button>
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-semibold text-[var(--foreground)]">
@@ -1427,7 +1430,7 @@ export function LearnWorkspace({
 
       <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
         {analysisReady || isAnalyzing ? (
-          <header className="grid grid-cols-1 items-center gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-6">
+          <header className="grid grid-cols-1 items-center gap-3 bg-transparent px-5 py-4 lg:px-6 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
             <div className="flex min-w-0 items-start">
               <WorkflowHeaderNav
                 onBackToWorkspace={onBackToWorkspace}
@@ -1444,12 +1447,13 @@ export function LearnWorkspace({
                 ) : null}
               </div>
             </div>
-
-            {analysisReady && !isAnalyzing ? (
-              <Button variant="secondary" size="sm" onClick={onBackToSelection}>
-                修改需求
-              </Button>
-            ) : null}
+            <WorkflowStageNav
+              activeStep="references"
+              className="xl:col-start-2"
+              onStepChange={onWorkflowStepChange}
+              steps={workflowSteps}
+            />
+            <div className="hidden xl:block" aria-hidden="true" />
           </header>
         ) : null}
 
@@ -1493,8 +1497,8 @@ export function LearnWorkspace({
 
               <section className="flex min-h-0 flex-1 flex-col px-3 py-3">
                 <div className="shrink-0">
-                  <div className="grid gap-1">
-                    <div className="flex flex-wrap items-center gap-[var(--ui-gap-block)]">
+                  <div className="grid gap-3 xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)] xl:items-center">
+                    <div className="flex min-w-0 items-center gap-[var(--ui-gap-block)]">
                       <WorkflowHeaderNav
                         onBackToWorkspace={onBackToWorkspace}
                         onOpenSidebar={onOpenSidebar}
@@ -1503,28 +1507,13 @@ export function LearnWorkspace({
                         选择参考
                       </h1>
                       <Badge variant="outline">可选</Badge>
-                      {canReturnToDraft && onReturnToDraft ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="ml-auto"
-                          onClick={onReturnToDraft}
-                        >
-                          <ArrowLeft className="h-4 w-4" />
-                          返回编辑
-                        </Button>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className={canReturnToDraft ? undefined : 'ml-auto'}
-                        onClick={onBackToSelection}
-                      >
-                        修改需求
-                      </Button>
                     </div>
+                    <WorkflowStageNav
+                      activeStep="references"
+                      onStepChange={onWorkflowStepChange}
+                      steps={workflowSteps}
+                    />
+                    <div className="hidden xl:block" aria-hidden="true" />
                   </div>
 
                   <div className="mt-3 grid gap-1 border-y border-[rgba(15,23,42,0.07)] py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">

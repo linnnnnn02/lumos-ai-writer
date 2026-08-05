@@ -19,6 +19,7 @@ import {
   FolderOpenIcon,
   GithubIcon,
   HighlighterIcon,
+  Home01Icon,
   Image02Icon,
   Layers02Icon,
   Loading03Icon,
@@ -79,6 +80,7 @@ export const Funnel = createIcon(FilterHorizontalIcon, 'Funnel')
 export const Github = createIcon(GithubIcon, 'Github')
 export const GripVertical = createIcon(DragDropVerticalIcon, 'GripVertical')
 export const Highlighter = createIcon(HighlighterIcon, 'Highlighter')
+export const Home = createIcon(Home01Icon, 'Home')
 export const History = createIcon(WorkHistoryIcon, 'History')
 export const Image = createIcon(Image02Icon, 'Image')
 export const Layers3 = createIcon(Layers02Icon, 'Layers3')

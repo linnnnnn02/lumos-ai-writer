@@ -12,9 +12,9 @@ import { normalizeNoteUrl } from '@lumos-ai/shared'
 import { pinyin } from 'pinyin-pro'
 import {
   AlertTriangle,
-  ArrowLeft,
   Clock3,
   FolderOpen,
+  Home,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -1256,8 +1256,8 @@ export function LibraryManager({
         </div>
 
         <Button type="button" variant="secondary" className="mb-3 w-full" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4" />
-          去 AI 写作台
+          <Home className="h-4 w-4" />
+          返回首页
         </Button>
 
         <Button

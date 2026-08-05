@@ -1,19 +1,24 @@
 import * as React from 'react'
-import { ArrowLeft, FolderOpen, Send, Sparkles } from '@/components/ui/icon'
+import { FolderOpen, Send, Sparkles } from '@/components/ui/icon'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { WorkflowHeaderNav } from '@/components/workflow-header-nav'
+import {
+  WorkflowHeaderNav,
+  WorkflowStageNav,
+  type WorkflowStepId,
+  type WorkflowStepItem,
+} from '@/components/workflow-header-nav'
 
 type ConversationIntakeProps = {
-  backLabel?: string
   folderName: string
   projectName: string
   value: string
-  onBack?: () => void
   onBackToWorkspace: () => void
   onChange: (value: string) => void
   onOpenSidebar: () => void
   onSubmit: () => void
+  onWorkflowStepChange: (step: WorkflowStepId) => void
+  workflowSteps: WorkflowStepItem[]
 }
 
 const requestExamples = [
@@ -23,15 +28,15 @@ const requestExamples = [
 ]
 
 export function ConversationIntake({
-  backLabel,
   folderName,
   projectName,
   value,
-  onBack,
   onBackToWorkspace,
   onChange,
   onOpenSidebar,
   onSubmit,
+  onWorkflowStepChange,
+  workflowSteps,
 }: ConversationIntakeProps) {
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null)
   const canSubmit = value.trim().length >= 4
@@ -42,7 +47,7 @@ export function ConversationIntake({
 
   return (
     <section className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_100%_0%,rgba(148,163,184,0.08),transparent_34%),linear-gradient(180deg,#f6f8fb_0%,#fbfcfd_52%,#ffffff_100%)]">
-      <header className="flex shrink-0 items-center justify-between gap-[var(--ui-gap-group)] px-[var(--ui-page-gutter)] py-[var(--ui-space-4)]">
+      <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-[var(--ui-page-gutter)] py-[var(--ui-space-4)] xl:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,1fr)]">
         <div className="flex min-w-0 items-center">
           <WorkflowHeaderNav
             onBackToWorkspace={onBackToWorkspace}
@@ -50,13 +55,13 @@ export function ConversationIntake({
             showDivider={false}
           />
         </div>
-        <div className="flex min-w-0 items-center justify-end gap-2">
-          {backLabel && onBack ? (
-            <Button type="button" variant="secondary" size="sm" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4" />
-              {backLabel}
-            </Button>
-          ) : null}
+        <WorkflowStageNav
+          activeStep="intake"
+          className="order-3 col-span-2 xl:order-none xl:col-span-1"
+          onStepChange={onWorkflowStepChange}
+          steps={workflowSteps}
+        />
+        <div className="flex min-w-0 items-center justify-end">
           <span className="hidden max-w-[16rem] truncate text-xs font-medium text-[var(--soft-foreground)] sm:block">
             {projectName}
           </span>
