@@ -335,6 +335,59 @@ export const appliedWritingProfileContextSchema = z.object({
   project: appliedWritingProfileRevisionSchema.nullable(),
 })
 
+export const draftQualityCheckIdSchema = z.enum([
+  'length',
+  'required_facts',
+  'expression_boundaries',
+  'factual_grounding',
+])
+
+export const draftQualityCheckStatusSchema = z.enum([
+  'passed',
+  'needs_review',
+  'failed',
+  'not_applicable',
+])
+
+export const draftQualityCheckSchema = z.object({
+  id: draftQualityCheckIdSchema,
+  label: z.string().trim().min(1).max(40),
+  status: draftQualityCheckStatusSchema,
+  summary: z.string().trim().min(1).max(300),
+  details: z.array(z.string().trim().min(1).max(500)).max(20),
+  actual: z
+    .object({
+      bodyCharacters: z.number().int().nonnegative(),
+      paragraphs: z.number().int().nonnegative(),
+    })
+    .optional(),
+  expected: z
+    .object({
+      minBodyCharacters: z.number().int().nonnegative(),
+      maxBodyCharacters: z.number().int().positive(),
+      minParagraphs: z.number().int().nonnegative(),
+      maxParagraphs: z.number().int().positive(),
+    })
+    .optional(),
+})
+
+export const draftQualitySnapshotSchema = z
+  .object({
+    overallStatus: z.enum(['passed', 'needs_review', 'failed']),
+    checkedAt: z.string().datetime(),
+    checks: z.array(draftQualityCheckSchema).length(4),
+  })
+  .superRefine((value, context) => {
+    const checkIds = new Set(value.checks.map((check) => check.id))
+    if (checkIds.size !== 4) {
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message: 'Draft quality snapshots must include each check exactly once.',
+      })
+    }
+  })
+
 export const analyzeReferencesResponseSchema = z.object({
   ok: z.literal(true),
   provider: z.literal('deepseek'),
@@ -367,6 +420,7 @@ const generatedDraftResponseSchema = z.object({
   skill: aiSkillMetadataSchema,
   draft: aiDraftCopySchema,
   appliedWritingProfile: appliedWritingProfileContextSchema,
+  quality: draftQualitySnapshotSchema,
   usage: aiUsageSchema.nullable(),
 })
 
@@ -426,6 +480,10 @@ export type AppliedWritingProfileRevision = z.infer<
 export type AppliedWritingProfileContext = z.infer<
   typeof appliedWritingProfileContextSchema
 >
+export type DraftQualityCheckId = z.infer<typeof draftQualityCheckIdSchema>
+export type DraftQualityCheckStatus = z.infer<typeof draftQualityCheckStatusSchema>
+export type DraftQualityCheck = z.infer<typeof draftQualityCheckSchema>
+export type DraftQualitySnapshot = z.infer<typeof draftQualitySnapshotSchema>
 export type AnalyzeReferencesResponse = z.infer<typeof analyzeReferencesResponseSchema>
 export type GenerateDraftResponse = z.infer<typeof generateDraftResponseSchema>
 export type RewriteDraftResponse = z.infer<typeof rewriteDraftResponseSchema>

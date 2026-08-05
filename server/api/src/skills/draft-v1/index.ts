@@ -2,6 +2,7 @@ import {
   aiDraftCopySchema,
   type AiDraftCopy,
   type DraftFactSufficiencyResult,
+  type DraftQualitySnapshot,
   type GenerateDraftRequest,
   type WritingProfileRevisionDto,
 } from '@lumos-ai/shared'
@@ -164,6 +165,17 @@ export const draftGroundingAuditOutputSchema = z.object({
       }),
     )
     .max(24),
+  requirements: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(120),
+        kind: z.enum(['required_fact', 'expression_boundary']),
+        status: z.enum(['satisfied', 'failed', 'uncertain']),
+        evidence: z.array(z.string().trim().min(1).max(240)).max(3),
+        reason: z.string().trim().min(1).max(240),
+      }),
+    )
+    .max(40),
 })
 
 export type DraftGroundingAuditOutput = z.infer<
@@ -171,6 +183,40 @@ export type DraftGroundingAuditOutput = z.infer<
 >
 
 export type DraftGroundingIssue = DraftGroundingAuditOutput['assertions'][number]
+export type DraftRequirementAudit = DraftGroundingAuditOutput['requirements'][number]
+
+export type DraftAuditRequirement = {
+  id: string
+  kind: DraftRequirementAudit['kind']
+  statement: string
+}
+
+export function getDraftAuditRequirements(
+  input: GenerateDraftRequest,
+): DraftAuditRequirement[] {
+  const requiredFacts = input.brief.facts.filter((fact) => fact.required)
+  const factRequirements =
+    requiredFacts.length > 0
+      ? requiredFacts.map((fact) => ({
+          id: `fact-${fact.id}`,
+          kind: 'required_fact' as const,
+          statement: fact.statement,
+        }))
+      : splitDraftFactStatements(input.brief.sourceFacts).map((statement, index) => ({
+          id: `source-fact-${index + 1}`,
+          kind: 'required_fact' as const,
+          statement,
+        }))
+  const boundaryRequirements = splitDraftFactStatements(input.brief.avoidTone).map(
+    (statement, index) => ({
+      id: `boundary-${index + 1}`,
+      kind: 'expression_boundary' as const,
+      statement,
+    }),
+  )
+
+  return [...factRequirements, ...boundaryRequirements]
+}
 
 export const draftGroundingAuditSystemPrompt = [
   '你是 Lumos AI Writer 的成稿事实审计器。',
@@ -184,12 +230,15 @@ export const draftGroundingAuditSystemPrompt = [
   '边界示例：输入只说“大约一个月”，成稿“第 30 天”中的“第 30 天”是 unknown；输入只说视觉素材展示袜子，成稿“袜子摆在桌上”中的“摆在桌上”是 unknown；输入只说两件产品配合使用，成稿“面膜先行，精华跟进”与“带来更深层舒缓”都是 unknown；输入只说炎热干燥和两件产品，成稿“皮肤易感不适”“两件产品静待探索”和“功效未知”都是 unknown；输入只说主队状态未知，成稿“心里没底”是 unknown；输入只说凌晨 3 点开赛并邀请一起看，成稿“陪你守到天亮”中的“守到天亮”是 unknown。',
   '时间词必须语义保真：输入“今天凌晨 3 点”时，成稿“今晚 3 点”是 contradicted。今天、今晚、明天以及上午、下午、晚上、凌晨不能因口语化而互换。',
   'quote 必须逐字复制候选成稿中的最小充分片段，不能改写、概括或补词。同一个事实不要重复抽取。主观号召和纯修辞若不暗含可核验事实，可以不列出。',
+  'input.requirements 必须逐条返回且 id、kind 不得改写。required_fact 只有在正文语义完整覆盖时才是 satisfied，并提供 1-3 条逐字 evidence；遗漏、改变主体关系或只覆盖一部分时是 failed，无法可靠判断时是 uncertain。',
+  'expression_boundary 只有在全文未出现其禁止的语气、承诺或表达时才是 satisfied；明确违背时是 failed 并提供逐字 evidence，无法可靠判断时是 uncertain。不得因为没有抽取到 assertion 就跳过 requirement。',
+  'requirements.evidence 的每一项都必须逐字来自标题或正文。边界已满足且没有反例时 evidence 返回空数组。',
   '只输出一个 JSON object，不要 Markdown、代码块、解释或思考过程。',
-  'JSON 字段严格为 assertions:{quote:string,classification:"supported"|"contradicted"|"unknown",reason:string}[]。',
+  'JSON 字段严格为 assertions:{quote:string,classification:"supported"|"contradicted"|"unknown",reason:string}[] 和 requirements:{id:string,kind:"required_fact"|"expression_boundary",status:"satisfied"|"failed"|"uncertain",evidence:string[],reason:string}[]。',
 ].join('\n')
 
 export const draftGroundingAuditUserPromptTemplate =
-  'JSON.stringify({ task: "audit_draft_grounding", input: { candidateDraft, allowedSources: { topic, brief } } })'
+  'JSON.stringify({ task: "audit_draft_grounding", input: { candidateDraft, requirements: getDraftAuditRequirements(input), allowedSources: { topic, brief } } })'
 
 export function buildDraftGroundingAuditUserPrompt(
   input: GenerateDraftRequest,
@@ -199,6 +248,7 @@ export function buildDraftGroundingAuditUserPrompt(
     task: 'audit_draft_grounding',
     input: {
       candidateDraft,
+      requirements: getDraftAuditRequirements(input),
       allowedSources: {
         topic: input.topic,
         brief: input.brief,
@@ -210,9 +260,14 @@ export function buildDraftGroundingAuditUserPrompt(
 export function validateDraftGroundingAuditOutput(
   output: unknown,
   candidateDraft: AiDraftCopy,
+  input: GenerateDraftRequest,
 ) {
   const parsed = draftGroundingAuditOutputSchema.parse(output)
   const draftText = [candidateDraft.title, ...candidateDraft.body].join('\n')
+  const expectedRequirements = getDraftAuditRequirements(input)
+  const expectedById = new Map(
+    expectedRequirements.map((requirement) => [requirement.id, requirement]),
+  )
 
   return draftGroundingAuditOutputSchema
     .superRefine((value, context) => {
@@ -222,6 +277,57 @@ export function validateDraftGroundingAuditOutput(
             code: 'custom',
             path: ['assertions', index, 'quote'],
             message: 'Audit quote must be an exact substring of the candidate draft.',
+          })
+        }
+      })
+
+      const seenRequirementIds = new Set<string>()
+      value.requirements.forEach((requirement, index) => {
+        const expected = expectedById.get(requirement.id)
+        if (!expected || expected.kind !== requirement.kind) {
+          context.addIssue({
+            code: 'custom',
+            path: ['requirements', index, 'id'],
+            message: 'Audit requirement must match an input requirement.',
+          })
+        }
+        if (seenRequirementIds.has(requirement.id)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['requirements', index, 'id'],
+            message: 'Audit requirement IDs must be unique.',
+          })
+        }
+        seenRequirementIds.add(requirement.id)
+
+        requirement.evidence.forEach((evidence, evidenceIndex) => {
+          if (!draftText.includes(evidence)) {
+            context.addIssue({
+              code: 'custom',
+              path: ['requirements', index, 'evidence', evidenceIndex],
+              message: 'Requirement evidence must be an exact substring of the candidate draft.',
+            })
+          }
+        })
+        if (
+          requirement.kind === 'required_fact' &&
+          requirement.status === 'satisfied' &&
+          requirement.evidence.length === 0
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['requirements', index, 'evidence'],
+            message: 'Satisfied required facts must include exact draft evidence.',
+          })
+        }
+      })
+
+      expectedRequirements.forEach((requirement) => {
+        if (!seenRequirementIds.has(requirement.id)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['requirements'],
+            message: `Audit omitted requirement ${requirement.id}.`,
           })
         }
       })
@@ -235,6 +341,155 @@ export function getDraftGroundingIssues(
   return output.assertions.filter(
     (assertion) => assertion.classification !== 'supported',
   )
+}
+
+export function getDraftRequirementIssues(
+  output: DraftGroundingAuditOutput,
+): DraftRequirementAudit[] {
+  return output.requirements.filter(
+    (requirement) => requirement.status !== 'satisfied',
+  )
+}
+
+export function buildDraftQualitySnapshot(
+  input: GenerateDraftRequest,
+  draft: AiDraftCopy,
+  audit: DraftGroundingAuditOutput | null,
+  checkedAt = new Date().toISOString(),
+): DraftQualitySnapshot {
+  const requirements = getDraftOutputRequirements(input.length, input)
+  const auditRequirements = getDraftAuditRequirements(input)
+  const requirementById = new Map(
+    auditRequirements.map((requirement) => [requirement.id, requirement]),
+  )
+  const bodyCharacters = Array.from(
+    draft.body.join('').replace(/\s/g, ''),
+  ).length
+  const paragraphs = draft.body.length
+  const lengthPassed =
+    bodyCharacters >= requirements.minBodyCharacters &&
+    bodyCharacters <= requirements.maxBodyCharacters &&
+    paragraphs >= requirements.minParagraphs &&
+    paragraphs <= requirements.maxParagraphs
+  const factRequirements = auditRequirements.filter(
+    (requirement) => requirement.kind === 'required_fact',
+  )
+  const boundaryRequirements = auditRequirements.filter(
+    (requirement) => requirement.kind === 'expression_boundary',
+  )
+  const factAudits = (audit?.requirements ?? []).filter(
+    (requirement) => requirement.kind === 'required_fact',
+  )
+  const boundaryAudits = (audit?.requirements ?? []).filter(
+    (requirement) => requirement.kind === 'expression_boundary',
+  )
+  const groundingIssues = audit ? getDraftGroundingIssues(audit) : []
+  const factStatus: DraftQualitySnapshot['checks'][number]['status'] =
+    factRequirements.length === 0
+      ? 'not_applicable'
+      : !audit
+        ? 'needs_review'
+        : factAudits.every((requirement) => requirement.status === 'satisfied')
+          ? 'passed'
+          : 'failed'
+  const boundaryStatus: DraftQualitySnapshot['checks'][number]['status'] =
+    boundaryRequirements.length === 0
+      ? 'not_applicable'
+      : !audit
+        ? 'needs_review'
+        : boundaryAudits.every((requirement) => requirement.status === 'satisfied')
+          ? 'passed'
+          : 'failed'
+  const groundingStatus: DraftQualitySnapshot['checks'][number]['status'] = !audit
+    ? 'needs_review'
+    : groundingIssues.length === 0
+      ? 'passed'
+      : 'failed'
+
+  const formatRequirementDetail = (requirement: DraftRequirementAudit) => {
+    const statement = requirementById.get(requirement.id)?.statement ?? requirement.id
+    const evidence = requirement.evidence.length > 0
+      ? `｜正文：${requirement.evidence.join('；')}`
+      : ''
+    return `${statement}${evidence}`.slice(0, 500)
+  }
+
+  const checks: DraftQualitySnapshot['checks'] = [
+    {
+      id: 'length',
+      label: '篇幅与段落',
+      status: lengthPassed ? 'passed' : 'failed',
+      summary: lengthPassed
+        ? `正文 ${bodyCharacters} 字、${paragraphs} 段，符合当前篇幅要求。`
+        : `正文 ${bodyCharacters} 字、${paragraphs} 段，不符合当前篇幅要求。`,
+      details: [],
+      actual: { bodyCharacters, paragraphs },
+      expected: {
+        minBodyCharacters: requirements.minBodyCharacters,
+        maxBodyCharacters: requirements.maxBodyCharacters,
+        minParagraphs: requirements.minParagraphs,
+        maxParagraphs: requirements.maxParagraphs,
+      },
+    },
+    {
+      id: 'required_facts',
+      label: '必含事实',
+      status: factStatus,
+      summary:
+        factStatus === 'not_applicable'
+          ? '本次简报没有单独列出必含事实。'
+          : factStatus === 'needs_review'
+            ? `已记录 ${factRequirements.length} 条必含事实，当前需要人工确认正文是否完整覆盖。`
+            : factStatus === 'passed'
+              ? `已核对 ${factAudits.length} 条必含事实，正文均有对应表达。`
+              : '仍有必含事实缺失或无法确认。',
+      details: audit
+        ? factAudits.map(formatRequirementDetail)
+        : factRequirements.map((requirement) => requirement.statement),
+    },
+    {
+      id: 'expression_boundaries',
+      label: '表达边界',
+      status: boundaryStatus,
+      summary:
+        boundaryStatus === 'not_applicable'
+          ? '本次简报没有单独设置表达边界。'
+          : boundaryStatus === 'needs_review'
+            ? `已记录 ${boundaryRequirements.length} 条表达边界，当前需要人工确认正文是否遵守。`
+            : boundaryStatus === 'passed'
+              ? `已核对 ${boundaryAudits.length} 条表达边界，未发现明确违背。`
+              : '仍有表达边界被触发或无法确认。',
+      details: audit
+        ? boundaryAudits.map(formatRequirementDetail)
+        : boundaryRequirements.map((requirement) => requirement.statement),
+    },
+    {
+      id: 'factual_grounding',
+      label: '事实依据',
+      status: groundingStatus,
+      summary:
+        !audit
+          ? '本次未运行事实断言审计，具体事实仍需人工确认。'
+          : groundingIssues.length === 0
+            ? audit.assertions.length > 0
+              ? `已审查 ${audit.assertions.length} 条可核验断言，未发现输入之外或相互矛盾的事实。`
+              : '未发现需要额外核验的具体事实断言。'
+            : `仍有 ${groundingIssues.length} 条事实缺少依据或与简报冲突。`,
+      details: groundingIssues.map((issue) =>
+        `${issue.quote}｜${issue.reason}`.slice(0, 500),
+      ),
+    },
+  ]
+
+  return {
+    overallStatus: checks.some((check) => check.status === 'failed')
+      ? 'failed'
+      : checks.some((check) => check.status === 'needs_review')
+        ? 'needs_review'
+        : 'passed',
+    checkedAt,
+    checks,
+  }
 }
 
 function normalizeReferenceText(text: string) {
@@ -691,6 +946,7 @@ export const draftRepairSystemPrompt = [
   'bannedVerbatimPhrases 中每一项都是最终 JSON 里不得再次出现的禁用字串，必须逐项做字面检查。若禁用字串位于结尾，可以重写整个收束句；当输入没有支持情绪或动作时，直接停在最后一条事实。',
   'metadataLeakageIssues 非空时，删除制作过程词，不得在成稿中提及封面、配图、输入、brief、参考、标注、事实清单或写作要求。只写这些载体承载的产品与事件事实。',
   'groundingIssues 非空时，逐项删除 contradicted 和 unknown 断言，或仅用 topic、brief.sourceFacts、brief.mustInclude 与 brief.facts 已支持的信息改写。bannedGroundingPhrases 中每一项都不得再次逐字出现。不得为了让句子完整而发明替代事实，也不得把未知改写成明确否定。',
+  'requirementIssues 非空时，按 auditRequirements 中同 id 的 statement 修复。required_fact 必须补回完整语义且不得新增事实；expression_boundary 必须删除触发内容并保持其他已确认信息不变。uncertain 也按未通过处理，不得靠换一种模糊说法规避审计。',
   '若 groundingIssue 所在句主要来自 required=false 的可选背景，删除整句或整段，不要尝试换一种修辞保留。可选事实不值得消耗修复次数，也不能压过 required=true 的主线。',
   '不要为了保留所有参考亮点而拼接句子。选择一条信息主线，每段只推进一个新信息，同一品牌母题只表达一次。',
   'required=true 只要求语义覆盖，不要求逐条成句或展开解释。input.outputRequirements.brevityMode=ultra_short 时优先压成一个完整句子；删掉问题铺垫、泛化关怀和总结，只保留主体、关系与一个有依据的判断。',
@@ -703,12 +959,13 @@ export const draftRepairSystemPrompt = [
 ].join('\n')
 
 export const draftRepairUserPromptTemplate =
-  'JSON.stringify({ task: "repair_draft_contract", input: { candidateDraft, actual, outputRequirements, brief, topic, targetAudience } })'
+  'JSON.stringify({ task: "repair_draft_contract", input: { candidateDraft, actual, outputRequirements, groundingIssues, requirementIssues, auditRequirements, brief, topic, targetAudience } })'
 
 export function buildDraftRepairUserPrompt(
   input: GenerateDraftRequest,
   candidateDraft: AiDraftCopy,
   groundingIssues: DraftGroundingIssue[] = [],
+  requirementIssues: DraftRequirementAudit[] = [],
 ) {
   const requirements = getDraftOutputRequirements(input.length, input)
   const preferredCharactersPerParagraph = Math.ceil(
@@ -748,6 +1005,8 @@ export function buildDraftRepairUserPrompt(
       ),
       groundingIssues,
       bannedGroundingPhrases: groundingIssues.map((issue) => issue.quote),
+      requirementIssues,
+      auditRequirements: getDraftAuditRequirements(input),
       brief: input.brief,
       topic: input.topic,
       targetAudience: input.targetAudience,
@@ -864,7 +1123,7 @@ export const draftSkillV1: AiSkillDefinition<
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',
-  version: '1.9.1',
+  version: '1.10.0',
   taskType: 'draft',
   model: 'deepseek-v4-flash',
   maxTokens: 2600,

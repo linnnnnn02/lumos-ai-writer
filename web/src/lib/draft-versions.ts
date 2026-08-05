@@ -1,6 +1,8 @@
 import {
   appliedWritingProfileContextSchema,
+  draftQualitySnapshotSchema,
   type AppliedWritingProfileContext,
+  type DraftQualitySnapshot,
 } from '@lumos-ai/shared'
 
 export type DraftCopy = {
@@ -15,6 +17,7 @@ export type DraftVersionRecord = DraftCopy & {
   createdAt: string
   updatedAt: string
   appliedWritingProfile?: AppliedWritingProfileContext
+  qualitySnapshot?: DraftQualitySnapshot
 }
 
 export function isSameDraftCopy(first: DraftCopy, second: DraftCopy) {
@@ -36,6 +39,60 @@ export function getAppliedWritingPreferenceIds(
   )
 }
 
+export function recheckDraftQualitySnapshot(
+  snapshot: DraftQualitySnapshot | null | undefined,
+  draft: DraftCopy,
+  checkedAt = new Date().toISOString(),
+): DraftQualitySnapshot | undefined {
+  if (!snapshot) return undefined
+
+  const checks: DraftQualitySnapshot['checks'] = snapshot.checks.map((check) => {
+    if (check.id === 'length' && check.expected) {
+      const bodyCharacters = Array.from(draft.body.join('').replace(/\s/g, '')).length
+      const paragraphs = draft.body.length
+      const passed =
+        bodyCharacters >= check.expected.minBodyCharacters &&
+        bodyCharacters <= check.expected.maxBodyCharacters &&
+        paragraphs >= check.expected.minParagraphs &&
+        paragraphs <= check.expected.maxParagraphs
+
+      return {
+        ...check,
+        status: passed ? 'passed' : 'failed',
+        summary: passed
+          ? `正文 ${bodyCharacters} 字、${paragraphs} 段，符合当前篇幅要求。`
+          : `正文 ${bodyCharacters} 字、${paragraphs} 段，不符合当前篇幅要求。`,
+        details: [],
+        actual: { bodyCharacters, paragraphs },
+      }
+    }
+
+    if (check.status === 'not_applicable') return check
+
+    return {
+      ...check,
+      status: 'needs_review',
+      summary:
+        check.id === 'required_facts'
+          ? '正文已修改，需要重新确认必含事实是否仍完整。'
+          : check.id === 'expression_boundaries'
+            ? '正文已修改，需要重新确认是否仍遵守表达边界。'
+            : '正文已修改，需要重新确认新增或改写的事实是否有依据。',
+      details: [],
+    }
+  })
+
+  return {
+    overallStatus: checks.some((check) => check.status === 'failed')
+      ? 'failed'
+      : checks.some((check) => check.status === 'needs_review')
+        ? 'needs_review'
+        : 'passed',
+    checkedAt,
+    checks,
+  }
+}
+
 export function isDraftVersionRecord(value: unknown): value is DraftVersionRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
 
@@ -52,7 +109,9 @@ export function isDraftVersionRecord(value: unknown): value is DraftVersionRecor
     typeof candidate.createdAt === 'string' &&
     typeof candidate.updatedAt === 'string' &&
     (candidate.appliedWritingProfile === undefined ||
-      appliedWritingProfileContextSchema.safeParse(candidate.appliedWritingProfile).success)
+      appliedWritingProfileContextSchema.safeParse(candidate.appliedWritingProfile).success) &&
+    (candidate.qualitySnapshot === undefined ||
+      draftQualitySnapshotSchema.safeParse(candidate.qualitySnapshot).success)
   )
 }
 
@@ -74,6 +133,7 @@ function createDraftVersion(
   version: number,
   timestamp = new Date().toISOString(),
   appliedWritingProfile?: AppliedWritingProfileContext,
+  qualitySnapshot?: DraftQualitySnapshot,
 ): DraftVersionRecord {
   return {
     id: crypto.randomUUID(),
@@ -84,6 +144,7 @@ function createDraftVersion(
     createdAt: timestamp,
     updatedAt: timestamp,
     ...(appliedWritingProfile ? { appliedWritingProfile } : {}),
+    ...(qualitySnapshot ? { qualitySnapshot } : {}),
   }
 }
 
@@ -104,6 +165,7 @@ export function evolveDraftVersions(input: {
   coalesce?: boolean
   force?: boolean
   appliedWritingProfile?: AppliedWritingProfileContext | null
+  qualitySnapshot?: DraftQualitySnapshot | null
 }) {
   const timestamp = new Date().toISOString()
   let versions = ensureBaseDraftVersion(input.versions, input.baseDraft, timestamp)
@@ -112,6 +174,11 @@ export function evolveDraftVersions(input: {
     input.appliedWritingProfile === null
       ? undefined
       : input.appliedWritingProfile ?? latest?.appliedWritingProfile
+  const qualitySnapshot =
+    input.qualitySnapshot === null
+      ? undefined
+      : input.qualitySnapshot ??
+        recheckDraftQualitySnapshot(latest?.qualitySnapshot, input.nextDraft, timestamp)
 
   if (!input.force && latest && isSameDraftCopy(latest, input.nextDraft)) {
     return versions
@@ -124,8 +191,10 @@ export function evolveDraftVersions(input: {
       body: [...input.nextDraft.body],
       updatedAt: timestamp,
       ...(appliedWritingProfile ? { appliedWritingProfile } : {}),
+      ...(qualitySnapshot ? { qualitySnapshot } : {}),
     }
     if (!appliedWritingProfile) delete nextLatest.appliedWritingProfile
+    if (!qualitySnapshot) delete nextLatest.qualitySnapshot
     return [...versions.slice(0, -1), nextLatest]
   }
 
@@ -138,6 +207,7 @@ export function evolveDraftVersions(input: {
       nextVersion,
       timestamp,
       appliedWritingProfile,
+      qualitySnapshot,
     ),
   ]
   return versions

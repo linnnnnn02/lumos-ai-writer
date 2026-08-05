@@ -9,6 +9,7 @@ import {
   type AppliedWritingProfileContext,
   type AnalyzeReferencesRequest,
   type BuildWritingProfileRequest,
+  type DraftQualitySnapshot,
   type GenerateDraftRequest,
   type RewriteDraftRequest,
   type PreviewDraftForReaderRequest,
@@ -19,10 +20,12 @@ import {
   normalizeAnalysisContentMode,
 } from '../skills/analysis-v1/index.js'
 import {
+  buildDraftQualitySnapshot,
   buildDraftGroundingAuditUserPrompt,
   buildDraftRepairUserPrompt,
   draftGroundingAuditSystemPrompt,
   getDraftGroundingIssues,
+  getDraftRequirementIssues,
   draftRepairSystemPrompt,
   draftSkillV1,
   resolveDraftContentMode,
@@ -503,7 +506,9 @@ async function auditDraftGroundingWithDeepSeek(
     !input.brief.allowConservativeDraft
   ) {
     return {
+      audit: null,
       issues: [],
+      requirementIssues: [],
       usage: null,
     }
   }
@@ -546,10 +551,13 @@ async function auditDraftGroundingWithDeepSeek(
   const audit = validateDraftGroundingAuditOutput(
     parseJsonContent(content),
     candidateDraft,
+    input,
   )
 
   return {
+    audit,
     issues: getDraftGroundingIssues(audit),
+    requirementIssues: getDraftRequirementIssues(audit),
     usage: toUsage(data.usage),
   }
 }
@@ -563,6 +571,7 @@ export async function generateDraftWithDeepSeek(
   skill: AiSkillMetadata
   model: string
   appliedWritingProfile: AppliedWritingProfileContext
+  quality: DraftQualitySnapshot
   usage: AiUsage | null
 }> {
   if (!config.AI_FEATURE_ENABLED) {
@@ -638,6 +647,12 @@ export async function generateDraftWithDeepSeek(
     let groundingIssues: Awaited<
       ReturnType<typeof auditDraftGroundingWithDeepSeek>
     >['issues'] = []
+    let requirementIssues: Awaited<
+      ReturnType<typeof auditDraftGroundingWithDeepSeek>
+    >['requirementIssues'] = []
+    let groundingAudit: Awaited<
+      ReturnType<typeof auditDraftGroundingWithDeepSeek>
+    >['audit'] = null
     let contractIsValid = false
 
     try {
@@ -657,6 +672,8 @@ export async function generateDraftWithDeepSeek(
         )
         combinedUsage = mergeAiUsage(combinedUsage, audit.usage)
         groundingIssues = audit.issues
+        requirementIssues = audit.requirementIssues
+        groundingAudit = audit.audit
       } catch (error) {
         throw new DeepSeekOutputValidationError(
           error,
@@ -665,19 +682,21 @@ export async function generateDraftWithDeepSeek(
         )
       }
 
-      if (groundingIssues.length === 0) {
+      if (groundingIssues.length === 0 && requirementIssues.length === 0) {
         return {
           draft: candidateDraft,
           skill: preparedSkill.metadata,
           model: preparedSkill.model,
           appliedWritingProfile,
+          quality: buildDraftQualitySnapshot(input, candidateDraft, groundingAudit),
           usage: combinedUsage,
         }
       }
 
       lastValidationError = new Error(
-        `Draft contains ${groundingIssues.length} unsupported or contradicted assertion(s): ${groundingIssues
+        `Draft contains ${groundingIssues.length} unsupported assertion(s) and ${requirementIssues.length} unmet requirement(s): ${groundingIssues
           .map((issue) => issue.quote)
+          .concat(requirementIssues.map((issue) => issue.id))
           .join(' | ')}`,
       )
     }
@@ -699,6 +718,7 @@ export async function generateDraftWithDeepSeek(
               input,
               candidateDraft,
               groundingIssues,
+              requirementIssues,
             ),
           },
         ],
