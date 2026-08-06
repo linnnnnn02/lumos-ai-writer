@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -92,12 +94,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { LearnWorkspace } from '@/components/learn-workspace'
 import { ConversationIntake } from '@/components/conversation-intake'
-import { LibraryManager } from '@/components/library-manager'
-import { DraftVersionHistory } from '@/components/draft-version-history'
 import { DraftQualitySummary } from '@/components/draft-quality-summary'
-import { WritingProfileDialog } from '@/components/writing-profile-dialog'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
 import {
   WorkflowHeaderNav,
@@ -202,7 +200,58 @@ import {
 } from './lib/draft-versions'
 import { buildFallbackSelectionRewrite } from './lib/rewrite'
 
+const LearnWorkspace = lazy(() =>
+  import('@/components/learn-workspace').then((module) => ({
+    default: module.LearnWorkspace,
+  })),
+)
+const LibraryManager = lazy(() =>
+  import('@/components/library-manager').then((module) => ({
+    default: module.LibraryManager,
+  })),
+)
+const DraftVersionHistory = lazy(() =>
+  import('@/components/draft-version-history').then((module) => ({
+    default: module.DraftVersionHistory,
+  })),
+)
+const WritingProfileDialog = lazy(() =>
+  import('@/components/writing-profile-dialog').then((module) => ({
+    default: module.WritingProfileDialog,
+  })),
+)
+
 type PageStep = 'workspace' | 'library' | ConversationStep
+
+function DeferredPageFallback() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex min-h-[100dvh] w-full items-center justify-center bg-[var(--background)] px-[var(--ui-page-gutter)]"
+    >
+      <div className="flex items-center gap-3 rounded-full border border-white/80 bg-white/86 px-4 py-3 text-sm font-semibold text-[var(--muted-foreground)] shadow-[0_16px_42px_rgba(48,34,22,0.08)] backdrop-blur-xl">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        正在打开工作区
+      </div>
+    </div>
+  )
+}
+
+function DeferredDialogFallback({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="ui-dialog-backdrop fixed inset-0 z-[180] flex items-center justify-center bg-[rgba(28,21,16,0.16)] px-[var(--ui-page-gutter)] backdrop-blur-sm"
+    >
+      <div className="flex items-center gap-3 rounded-full border border-white/80 bg-white/92 px-4 py-3 text-sm font-semibold text-[var(--foreground)] shadow-[var(--shadow-elevated)]">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {label}
+      </div>
+    </div>
+  )
+}
 
 function isLegacyAnalysisErrorMessage(message: ChatMessage) {
   return (
@@ -8801,33 +8850,39 @@ function App() {
           {finalCopyToast}
         </div>
       ) : null}
-      <DraftVersionHistory
-        key={`${activeConversation.id}:${
-          isDraftVersionHistoryOpen ? activeCurrentDraftVersionId || 'invalid' : 'closed'
-        }`}
-        currentVersionId={hasDraftReady ? activeCurrentDraftVersionId : ''}
-        isOpen={isDraftVersionHistoryOpen}
-        versions={activeDraftVersions}
-        onClose={() => setIsDraftVersionHistoryOpen(false)}
-        onRestore={handleRestoreDraftVersion}
-      />
-      <WritingProfileDialog
-        open={isWritingProfileOpen}
-        onOpenChange={setIsWritingProfileOpen}
-        accountProfile={writingProfileContext.accountProfile}
-        projectProfile={writingProfileContext.projectProfile}
-        projectName={activeProject.name}
-        canLearn={cloudWorkspaceStatus === 'ready'}
-        isLoading={isWritingProfileLoading}
-        isSaving={isWritingProfileSaving}
-        error={writingProfileError}
-        onClearError={() => setWritingProfileError('')}
-        onRefresh={() => {
-          void refreshWritingProfiles()
-        }}
-        onAddCorrection={handleAddWritingProfileCorrection}
-        onManagePreference={handleManageWritingPreference}
-      />
+      {isDraftVersionHistoryOpen ? (
+        <Suspense fallback={<DeferredDialogFallback label="正在打开版本记录" />}>
+          <DraftVersionHistory
+            key={`${activeConversation.id}:${activeCurrentDraftVersionId || 'invalid'}`}
+            currentVersionId={hasDraftReady ? activeCurrentDraftVersionId : ''}
+            isOpen
+            versions={activeDraftVersions}
+            onClose={() => setIsDraftVersionHistoryOpen(false)}
+            onRestore={handleRestoreDraftVersion}
+          />
+        </Suspense>
+      ) : null}
+      {isWritingProfileOpen ? (
+        <Suspense fallback={<DeferredDialogFallback label="正在打开写作画像" />}>
+          <WritingProfileDialog
+            open
+            onOpenChange={setIsWritingProfileOpen}
+            accountProfile={writingProfileContext.accountProfile}
+            projectProfile={writingProfileContext.projectProfile}
+            projectName={activeProject.name}
+            canLearn={cloudWorkspaceStatus === 'ready'}
+            isLoading={isWritingProfileLoading}
+            isSaving={isWritingProfileSaving}
+            error={writingProfileError}
+            onClearError={() => setWritingProfileError('')}
+            onRefresh={() => {
+              void refreshWritingProfiles()
+            }}
+            onAddCorrection={handleAddWritingProfileCorrection}
+            onManagePreference={handleManageWritingPreference}
+          />
+        </Suspense>
+      ) : null}
       {showShellHeader ? (
         <header className="sticky top-0 z-30 w-full border-b border-white/70 bg-[rgba(248,250,252,0.82)] backdrop-blur-2xl">
           <div className="flex w-full items-center justify-between gap-[var(--ui-gap-block)] px-[var(--ui-page-gutter)] py-[var(--ui-space-4)]">
@@ -8897,23 +8952,25 @@ function App() {
           </header>
         ) : null}
 
-        {step === 'workspace'
-          ? renderWorkspace()
-          : step === 'library'
-            ? renderLibrary()
-          : step === 'learn'
-            ? visibleConversationStage === 'intake'
-              ? renderIntake()
-              : renderLearn()
-            : step === 'length'
-              ? renderPlan()
-              : step === 'plan'
+        <Suspense fallback={<DeferredPageFallback />}>
+          {step === 'workspace'
+            ? renderWorkspace()
+            : step === 'library'
+              ? renderLibrary()
+            : step === 'learn'
+              ? visibleConversationStage === 'intake'
+                ? renderIntake()
+                : renderLearn()
+              : step === 'length'
                 ? renderPlan()
-                : step === 'rewrite'
-                  ? renderRewrite()
-                  : isReaderPreviewVisible
-                    ? renderReaderPreview()
-                    : renderRewrite()}
+                : step === 'plan'
+                  ? renderPlan()
+                  : step === 'rewrite'
+                    ? renderRewrite()
+                    : isReaderPreviewVisible
+                      ? renderReaderPreview()
+                      : renderRewrite()}
+        </Suspense>
       </div>
     </div>
   )
