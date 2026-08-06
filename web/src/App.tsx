@@ -16,7 +16,6 @@ import {
 import type {
   AiAnalysisResult,
   AiRewriteResult,
-  AiRewriteSuggestion,
   AiReaderPreviewResult,
   AiUsage,
   AppliedWritingProfileContext,
@@ -118,6 +117,11 @@ import {
   workspaceProjectReducer,
 } from '@/features/workspace/model/workspace-project-state'
 import {
+  createWorkspaceReviewState,
+  workspaceReviewReducer,
+  type RewriteChatMessage,
+} from '@/features/workspace/model/workspace-review-state'
+import {
   createWorkspaceDraftState,
   workspaceDraftReducer,
 } from '@/features/workspace/model/workspace-draft-state'
@@ -192,23 +196,6 @@ function isLegacyAnalysisErrorMessage(message: ChatMessage) {
     message.stage === 'setup' &&
     (message.title === '写作画像学习未完成' || message.title === 'AI 暂时不可用')
   )
-}
-
-type RewriteChatMessage = {
-  id: string
-  role: 'assistant' | 'user'
-  selectedText?: string
-  lines: string[]
-  fieldId?: string
-  instruction?: string
-  suggestions?: Array<
-    AiRewriteSuggestion & {
-      id: string
-      status: 'available' | 'accepted' | 'rejected' | 'superseded'
-    }
-  >
-  recommendedIndex?: number
-  appliedWritingProfile?: AppliedWritingProfileContext
 }
 
 function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
@@ -1760,14 +1747,21 @@ function App() {
   const [selectedRewriteFieldId, setSelectedRewriteFieldId] = useState('')
   const [rewriteSelectionCandidate, setRewriteSelectionCandidate] =
     useState<RewriteSelectionCandidate | null>(null)
-  const [rewriteInputByConversation, setRewriteInputByConversation] = useState<
-    Record<string, string>
-  >(restoredGuestWorkspace?.rewriteInputByConversation ?? {})
-  const [rewriteMessagesByConversation, setRewriteMessagesByConversation] = useState<
-    Record<string, RewriteChatMessage[]>
-  >(restoredGuestWorkspace?.rewriteMessagesByConversation ?? {})
-  const [rewritePendingConversationId, setRewritePendingConversationId] = useState('')
-  const [, setRewriteUsageByConversation] = useState<Record<string, AiUsage | null>>({})
+  const [reviewState, dispatchReviewState] = useReducer(
+    workspaceReviewReducer,
+    {
+      rewriteInputByConversation: restoredGuestWorkspace?.rewriteInputByConversation ?? {},
+      rewriteMessagesByConversation:
+        restoredGuestWorkspace?.rewriteMessagesByConversation ?? {},
+      rewritePendingConversationId: '',
+    },
+    createWorkspaceReviewState,
+  )
+  const {
+    rewriteInputByConversation,
+    rewriteMessagesByConversation,
+    rewritePendingConversationId,
+  } = reviewState
   const [planAttachmentsByConversation, setPlanAttachmentsByConversation] = useState<
     Record<string, PlanAttachment[]>
   >(restoredGuestWorkspace?.planAttachmentsByConversation ?? {})
@@ -1989,10 +1983,11 @@ function App() {
   }
 
   function setRewriteChatInput(value: string) {
-    setRewriteInputByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: value,
-    }))
+    dispatchReviewState({
+      type: 'set-input',
+      conversationId: activeConversation.id,
+      input: value,
+    })
   }
 
   useEffect(() => {
@@ -2372,12 +2367,17 @@ function App() {
             restored?.currentDraftVersionIdByConversation ?? {},
         },
       })
-      setRewriteMessagesByConversation(restored?.rewriteMessagesByConversation ?? {})
+      dispatchReviewState({
+        type: 'replace-review',
+        snapshot: {
+          rewriteMessagesByConversation: restored?.rewriteMessagesByConversation ?? {},
+          rewriteInputByConversation: restored?.rewriteInputByConversation ?? {},
+        },
+      })
       setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
       setReaderAudienceByConversation(restored?.readerAudienceByConversation ?? {})
       setReaderPreviewByConversation(restored?.readerPreviewByConversation ?? {})
       setChatInputByConversation(restored?.chatInputByConversation ?? {})
-      setRewriteInputByConversation(restored?.rewriteInputByConversation ?? {})
       setReaderPreviewErrorByConversation({})
       setWorkspaceSaveStatus('saved-local')
       queueNavigationTarget(navigationTarget)
@@ -2425,12 +2425,17 @@ function App() {
           hydrated.currentDraftVersionIdByConversation,
       },
     })
-    setRewriteMessagesByConversation(hydrated.rewriteMessagesByConversation)
+    dispatchReviewState({
+      type: 'replace-review',
+      snapshot: {
+        rewriteMessagesByConversation: hydrated.rewriteMessagesByConversation,
+        rewriteInputByConversation: hydrated.rewriteInputByConversation,
+      },
+    })
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
     setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
     setReaderPreviewByConversation(hydrated.readerPreviewByConversation)
     setChatInputByConversation(hydrated.chatInputByConversation)
-    setRewriteInputByConversation(hydrated.rewriteInputByConversation)
     setReaderPreviewErrorByConversation({})
     setWorkspaceSaveStatus('synced-cloud')
     queueNavigationTarget(navigationTarget)
@@ -5850,14 +5855,12 @@ function App() {
         : ['先在左侧选中要改的内容。']),
     }
 
-    setRewriteMessagesByConversation((current) => {
-      const currentMessages = current[conversationId] ?? []
-      return {
-        ...current,
-        [conversationId]: [...currentMessages, userMessage, assistantMessage],
-      }
+    dispatchReviewState({
+      type: 'append-messages',
+      conversationId,
+      messages: [userMessage, assistantMessage],
+      clearInput: true,
     })
-    setRewriteChatInput('')
     return true
   }
 
@@ -5914,12 +5917,7 @@ function App() {
         .map((line) => line.trim())
         .filter(Boolean),
     }
-    setRewriteMessagesByConversation((current) => ({
-      ...current,
-      [conversationId]: [...(current[conversationId] ?? []), userMessage],
-    }))
-    setRewriteChatInput('')
-    setRewritePendingConversationId(conversationId)
+    dispatchReviewState({ type: 'start-request', conversationId, userMessage })
 
     rememberExplicitFeedback({
       projectId,
@@ -5937,7 +5935,6 @@ function App() {
 
     try {
       let result: AiRewriteResult
-      let usage: AiUsage | null = null
       let appliedWritingProfile: AppliedWritingProfileContext = {
         account: null,
         project: null,
@@ -5971,44 +5968,34 @@ function App() {
           analysis: activeConversation.analysisReady ? analysis : undefined,
         })
         result = response.rewrite
-        usage = response.usage
         appliedWritingProfile = response.appliedWritingProfile
       }
 
-      setRewriteUsageByConversation((current) => ({
-        ...current,
-        [conversationId]: usage,
-      }))
       const assistantMessage = createRewriteAssistantMessage(result, {
         selection,
         fieldId,
         instruction: question,
       }, appliedWritingProfile)
-      setRewriteMessagesByConversation((current) => ({
-        ...current,
-        [conversationId]: [...(current[conversationId] ?? []), assistantMessage],
-      }))
+      dispatchReviewState({
+        type: 'finish-request',
+        conversationId,
+        assistantMessage,
+      })
     } catch (error) {
       const message = getErrorMessage(error)
       const friendlyMessage = message.includes('paused until rewrite-v1 passes evaluation')
         ? 'AI 改写仍在评测阶段，暂未开放真实调用。'
         : message
-      setRewriteMessagesByConversation((current) => ({
-        ...current,
-        [conversationId]: [
-          ...(current[conversationId] ?? []),
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            selectedText: selection,
-            lines: [friendlyMessage],
-          },
-        ],
-      }))
-    } finally {
-      setRewritePendingConversationId((current) =>
-        current === conversationId ? '' : current,
-      )
+      dispatchReviewState({
+        type: 'finish-request',
+        conversationId,
+        assistantMessage: {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          selectedText: selection,
+          lines: [friendlyMessage],
+        },
+      })
     }
   }
 
@@ -6036,24 +6023,12 @@ function App() {
       appliedWritingProfile: message.appliedWritingProfile ?? null,
     })
     markDraftEdited()
-    setRewriteMessagesByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: (current[activeConversation.id] ?? []).map((item) =>
-        item.id === message.id
-          ? {
-              ...item,
-              suggestions: item.suggestions?.map((candidate) => ({
-                ...candidate,
-                status: candidate.id === suggestion.id
-                  ? 'accepted'
-                  : candidate.status === 'available'
-                    ? 'superseded'
-                    : candidate.status,
-              })),
-            }
-          : item,
-      ),
-    }))
+    dispatchReviewState({
+      type: 'accept-suggestion',
+      conversationId: activeConversation.id,
+      messageId: message.id,
+      suggestionId: suggestion.id,
+    })
     rememberExplicitFeedback({
       projectId: activeProject.id,
       conversationId: activeConversation.id,
@@ -6091,21 +6066,12 @@ function App() {
   ) {
     if (suggestion.status !== 'available') return
 
-    setRewriteMessagesByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: (current[activeConversation.id] ?? []).map((item) =>
-        item.id === message.id
-          ? {
-              ...item,
-              suggestions: item.suggestions?.map((candidate) =>
-                candidate.id === suggestion.id
-                  ? { ...candidate, status: 'rejected' }
-                  : candidate,
-              ),
-            }
-          : item,
-      ),
-    }))
+    dispatchReviewState({
+      type: 'reject-suggestion',
+      conversationId: activeConversation.id,
+      messageId: message.id,
+      suggestionId: suggestion.id,
+    })
     rememberExplicitFeedback({
       projectId: activeProject.id,
       conversationId: activeConversation.id,
