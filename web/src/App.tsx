@@ -108,6 +108,16 @@ import {
 } from '@/components/workflow-header-nav'
 import { LearningResult } from '@/features/workspace/analysis/learning-result'
 import {
+  type ChatMessage,
+  type ConversationRecord,
+  type ProjectRecord,
+  type WritingBrief,
+} from '@/features/workspace/model/workspace-model'
+import {
+  createWorkspaceProjectState,
+  workspaceProjectReducer,
+} from '@/features/workspace/model/workspace-project-state'
+import {
   createWorkspaceNavigationState,
   deriveLegacyConversationStage,
   getAppNavigationHash,
@@ -172,27 +182,6 @@ import { buildFallbackSelectionRewrite } from './lib/rewrite'
 
 type PageStep = 'workspace' | 'library' | ConversationStep
 
-type ChatMessage = {
-  id: string
-  role: 'assistant' | 'user'
-  stage: 'setup' | 'analysis' | 'followup'
-  title?: string
-  lines: string[]
-  highlights?: Array<{
-    title: string
-    body: string
-  }>
-  featuredSnippets?: Array<{
-    quote: string
-    noteTitle: string
-    noteUrl: string
-    label: string
-    description: string
-    reason: string
-  }>
-  preferenceQuestion?: string
-}
-
 function isLegacyAnalysisErrorMessage(message: ChatMessage) {
   return (
     message.role === 'assistant' &&
@@ -240,46 +229,9 @@ type PlanAttachment = {
   kind: 'image' | 'document'
 }
 
-type WritingBrief = {
-  objective: string
-  requiredFacts: string
-  boundaries: string
-  instructions: string
-}
-
 type ReferenceRecommendation = {
   noteId: string
   reason: string
-}
-
-type ConversationRecord = {
-  id: string
-  title: string
-  pinned?: boolean
-  finalizedAt?: string
-  finalDraft?: InitialDraftCopy
-  step: ConversationStep
-  workflowStage: ConversationStage
-  writingRequest: string
-  createdAt: string
-  lastOpenedAt: string
-  selectedItemIds: string[]
-  chatMessages: ChatMessage[]
-  analysisReady: boolean
-  length: ProjectLength | null
-  topic: string
-  targetAudience: string
-  writingBrief: WritingBrief
-  updatedAt: string
-}
-
-type ProjectRecord = {
-  id: string
-  name: string
-  folderId: string
-  conversations: ConversationRecord[]
-  activeConversationId: string
-  updatedAt: string
 }
 
 const lengthOptions: Array<{
@@ -1767,12 +1719,15 @@ function App() {
   const [referenceSelectionDraftByConversation, setReferenceSelectionDraftByConversation] = useState<
     Record<string, string[]>
   >({})
-  const [projects, setProjects] = useState<ProjectRecord[]>(
-    restoredGuestWorkspace?.projects ?? initialProjects,
+  const [projectState, dispatchProjectState] = useReducer(
+    workspaceProjectReducer,
+    {
+      projects: restoredGuestWorkspace?.projects ?? initialProjects,
+      activeProjectId: restoredGuestWorkspace?.activeProjectId ?? initialProjects[0].id,
+    },
+    createWorkspaceProjectState,
   )
-  const [activeProjectId, setActiveProjectId] = useState(
-    restoredGuestWorkspace?.activeProjectId ?? initialProjects[0].id,
-  )
+  const { projects, activeProjectId } = projectState
   const [chatInputByConversation, setChatInputByConversation] = useState<Record<string, string>>(
     restoredGuestWorkspace?.chatInputByConversation ?? {},
   )
@@ -2247,18 +2202,15 @@ function App() {
         canReturnToWorkspace: navigationState.canReturnToWorkspace ?? false,
       }
 
-      if (project.activeConversationId !== conversation.id) {
-        setProjects((current) =>
-          current.map((item) =>
-            item.id === project.id ? { ...item, activeConversationId: conversation.id } : item,
-          ),
-        )
-      }
+      dispatchProjectState({
+        type: 'activate-project',
+        projectId: project.id,
+        conversationId: conversation.id,
+      })
       activeConversationRouteRef.current = {
         projectId: project.id,
         conversationId: conversation.id,
       }
-      setActiveProjectId(project.id)
       dispatchNavigation({ type: 'show-conversation', stage })
       setIsReaderPreviewVisible(stage === 'confirm')
       pendingNavigationTargetRef.current = null
@@ -2385,13 +2337,15 @@ function App() {
         window.clearTimeout(workspaceSyncRetryTimerRef.current)
         workspaceSyncRetryTimerRef.current = null
       }
-      setProjects(restoredProjects)
-      setActiveProjectId(
-        navigationTarget.view === 'conversation' &&
+      dispatchProjectState({
+        type: 'replace-projects',
+        projects: restoredProjects,
+        preferredActiveProjectId:
+          navigationTarget.view === 'conversation' &&
           restoredProjects.some((project) => project.id === navigationTarget.projectId)
-          ? navigationTarget.projectId ?? ''
-          : restored?.activeProjectId ?? initialProjects[0].id,
-      )
+            ? navigationTarget.projectId
+            : restored?.activeProjectId ?? initialProjects[0].id,
+      })
       setAnalysisByConversation(restored?.analysisByConversation ?? {})
       setDraftCopyByConversation(restored?.draftCopyByConversation ?? {})
       setDraftReadyByConversation(restored?.draftReadyByConversation ?? {})
@@ -2433,13 +2387,15 @@ function App() {
       window.clearTimeout(workspaceSyncRetryTimerRef.current)
       workspaceSyncRetryTimerRef.current = null
     }
-    setProjects(hydrated.projects)
-    setActiveProjectId(
-      navigationTarget.view === 'conversation' &&
+    dispatchProjectState({
+      type: 'replace-projects',
+      projects: hydrated.projects,
+      preferredActiveProjectId:
+        navigationTarget.view === 'conversation' &&
         hydrated.projects.some((project) => project.id === navigationTarget.projectId)
-        ? navigationTarget.projectId ?? ''
-        : hydrated.projects[0]?.id ?? '',
-    )
+          ? navigationTarget.projectId
+          : hydrated.projects[0]?.id,
+    })
     setAnalysisByConversation(hydrated.analysisByConversation)
     setDraftCopyByConversation(hydrated.draftCopyByConversation)
     setDraftReadyByConversation(hydrated.draftReadyByConversation)
@@ -3146,9 +3102,7 @@ function App() {
   )
 
   function updateProject(projectId: string, updater: (project: ProjectRecord) => ProjectRecord) {
-    setProjects((current) =>
-      current.map((project) => (project.id === projectId ? updater(project) : project)),
-    )
+    dispatchProjectState({ type: 'update-project', projectId, update: updater })
   }
 
   function updateConversation(
@@ -3157,19 +3111,13 @@ function App() {
     updater: (conversation: ConversationRecord) => ConversationRecord,
   ) {
     const now = new Date().toISOString()
-
-    updateProject(projectId, (project) => ({
-      ...project,
-      updatedAt: now,
-      conversations: project.conversations.map((conversation) =>
-        conversation.id === conversationId
-          ? {
-              ...updater(conversation),
-              updatedAt: now,
-            }
-          : conversation,
-      ),
-    }))
+    dispatchProjectState({
+      type: 'update-conversation',
+      projectId,
+      conversationId,
+      now,
+      update: updater,
+    })
   }
 
   function invalidateDraftOutputs(conversationId: string) {
@@ -3596,28 +3544,22 @@ function App() {
     setIsChatStreaming(false)
     resetConversationTransientState()
     setIsReaderPreviewVisible(resumableStage === 'confirm')
-    setProjects((current) =>
-      current.map((project) =>
-        project.id === projectId
-          ? {
-              ...project,
-              conversations: sortConversationsForSidebar(
-                project.conversations.map((conversation) =>
-                  conversation.id === project.activeConversationId
-                    ? {
-                        ...conversation,
-                        lastOpenedAt: now,
-                        step: getStepForStage(getResumableConversationStage(conversation)),
-                        workflowStage: getResumableConversationStage(conversation),
-                      }
-                    : conversation,
-                ),
-              ),
-            }
-          : project,
+    updateProject(projectId, (project) => ({
+      ...project,
+      conversations: sortConversationsForSidebar(
+        project.conversations.map((conversation) =>
+          conversation.id === project.activeConversationId
+            ? {
+                ...conversation,
+                lastOpenedAt: now,
+                step: getStepForStage(getResumableConversationStage(conversation)),
+                workflowStage: getResumableConversationStage(conversation),
+              }
+            : conversation,
+        ),
       ),
-    )
-    setActiveProjectId(projectId)
+    }))
+    dispatchProjectState({ type: 'activate-project', projectId })
     showConversationRoute(resumableStage, {
       mode: 'push',
       projectId,
@@ -3626,17 +3568,10 @@ function App() {
   }
 
   function handleDeleteProject(projectId: string) {
-    setProjects((current) => {
-      const next = current.filter((project) => project.id !== projectId)
-      if (next.length > 0 && activeProjectId === projectId) {
-        setActiveProjectId(next[0].id)
-      }
-      if (next.length === 0) {
-        setActiveProjectId('')
-        dispatchNavigation({ type: 'show-view', view: 'workspace' })
-      }
-      return next
-    })
+    if (projects.length === 1 && projects[0]?.id === projectId) {
+      dispatchNavigation({ type: 'show-view', view: 'workspace' })
+    }
+    dispatchProjectState({ type: 'delete-project', projectId })
   }
 
   function handleRequestDeleteProject(projectId: string) {
@@ -3708,8 +3643,7 @@ function App() {
       conversations: [nextConversation],
     }
 
-    setProjects((current) => [nextProject, ...current])
-    setActiveProjectId(nextProject.id)
+    dispatchProjectState({ type: 'add-project', project: nextProject, activate: true })
     setIsChatStreaming(false)
     resetConversationTransientState()
     setNewProjectName('')
@@ -4178,17 +4112,10 @@ function App() {
     )
     const removedNoteId = `note:${note.id}`
 
-    setProjects((current) =>
-      current.map((project) => ({
-        ...project,
-        conversations: project.conversations.map((conversation) => ({
-          ...conversation,
-          selectedItemIds: conversation.selectedItemIds.filter(
-            (itemId) => itemId !== removedNoteId && !removedSnippetIds.has(itemId),
-          ),
-        })),
-      })),
-    )
+    dispatchProjectState({
+      type: 'remove-selected-items',
+      itemIds: [removedNoteId, ...removedSnippetIds],
+    })
     cloudLibrary.refresh()
   }
 
