@@ -122,6 +122,11 @@ import {
   type RewriteChatMessage,
 } from '@/features/workspace/model/workspace-review-state'
 import {
+  createWorkspaceReaderPreviewState,
+  workspaceReaderPreviewReducer,
+  type ReaderPreviewRecord,
+} from '@/features/workspace/model/workspace-reader-preview-state'
+import {
   createWorkspaceDraftState,
   workspaceDraftReducer,
 } from '@/features/workspace/model/workspace-draft-state'
@@ -532,12 +537,6 @@ type ReaderDraftAnnotation = {
 type ReaderPreviewFeedback = {
   annotations: ReaderDraftAnnotation[]
   blocks: ReaderFeedbackBlock[]
-}
-
-type ReaderPreviewRecord = {
-  audience: string
-  draft: InitialDraftCopy
-  preview: AiReaderPreviewResult
 }
 
 type HydratedCloudWorkspace = {
@@ -1765,19 +1764,24 @@ function App() {
   const [planAttachmentsByConversation, setPlanAttachmentsByConversation] = useState<
     Record<string, PlanAttachment[]>
   >(restoredGuestWorkspace?.planAttachmentsByConversation ?? {})
-  const [readerAudienceByConversation, setReaderAudienceByConversation] = useState<
-    Record<string, string>
-  >(restoredGuestWorkspace?.readerAudienceByConversation ?? {})
-  const [readerPreviewByConversation, setReaderPreviewByConversation] = useState<
-    Record<string, ReaderPreviewRecord>
-  >(restoredGuestWorkspace?.readerPreviewByConversation ?? {})
-  const [readerPreviewPendingConversationId, setReaderPreviewPendingConversationId] = useState('')
-  const [readerPreviewErrorByConversation, setReaderPreviewErrorByConversation] = useState<
-    Record<string, string>
-  >({})
-  const [, setReaderPreviewUsageByConversation] = useState<
-    Record<string, AiUsage | null>
-  >({})
+  const [readerPreviewState, dispatchReaderPreviewState] = useReducer(
+    workspaceReaderPreviewReducer,
+    {
+      readerAudienceByConversation:
+        restoredGuestWorkspace?.readerAudienceByConversation ?? {},
+      readerPreviewByConversation:
+        restoredGuestWorkspace?.readerPreviewByConversation ?? {},
+      readerPreviewPendingConversationId: '',
+      readerPreviewErrorByConversation: {},
+    },
+    createWorkspaceReaderPreviewState,
+  )
+  const {
+    readerAudienceByConversation,
+    readerPreviewByConversation,
+    readerPreviewPendingConversationId,
+    readerPreviewErrorByConversation,
+  } = readerPreviewState
   const [isReaderAudienceOpen, setIsReaderAudienceOpen] = useState(false)
   const [isReaderPreviewVisible, setIsReaderPreviewVisible] = useState(false)
   const [activeReaderAnnotationId, setActiveReaderAnnotationId] = useState('')
@@ -2375,10 +2379,14 @@ function App() {
         },
       })
       setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
-      setReaderAudienceByConversation(restored?.readerAudienceByConversation ?? {})
-      setReaderPreviewByConversation(restored?.readerPreviewByConversation ?? {})
+      dispatchReaderPreviewState({
+        type: 'replace-reader-preview',
+        snapshot: {
+          readerAudienceByConversation: restored?.readerAudienceByConversation ?? {},
+          readerPreviewByConversation: restored?.readerPreviewByConversation ?? {},
+        },
+      })
       setChatInputByConversation(restored?.chatInputByConversation ?? {})
-      setReaderPreviewErrorByConversation({})
       setWorkspaceSaveStatus('saved-local')
       queueNavigationTarget(navigationTarget)
       return
@@ -2433,10 +2441,14 @@ function App() {
       },
     })
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
-    setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
-    setReaderPreviewByConversation(hydrated.readerPreviewByConversation)
+    dispatchReaderPreviewState({
+      type: 'replace-reader-preview',
+      snapshot: {
+        readerAudienceByConversation: hydrated.readerAudienceByConversation,
+        readerPreviewByConversation: hydrated.readerPreviewByConversation,
+      },
+    })
     setChatInputByConversation(hydrated.chatInputByConversation)
-    setReaderPreviewErrorByConversation({})
     setWorkspaceSaveStatus('synced-cloud')
     queueNavigationTarget(navigationTarget)
   }, [cloudWorkspaceProjects, cloudWorkspaceStatus, cloudWorkspaceUserId])
@@ -3150,16 +3162,7 @@ function App() {
 
   function invalidateDraftOutputs(conversationId: string) {
     dispatchDraftState({ type: 'invalidate-draft', conversationId })
-    setReaderPreviewByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
-    setReaderPreviewErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchReaderPreviewState({ type: 'invalidate-preview', conversationId })
   }
 
   function invalidateAnalysisAndDraft(conversationId: string) {
@@ -3178,16 +3181,7 @@ function App() {
 
   function markDraftEdited() {
     const conversationId = activeConversation.id
-    setReaderPreviewByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
-    setReaderPreviewErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchReaderPreviewState({ type: 'invalidate-preview', conversationId })
     updateConversation(activeProject.id, conversationId, (conversation) => ({
       ...conversation,
       finalizedAt: undefined,
@@ -3306,19 +3300,10 @@ function App() {
 
   function handleReaderAudienceChange(value: string) {
     const conversationId = activeConversation.id
-    setReaderAudienceByConversation((current) => ({
-      ...current,
-      [conversationId]: value,
-    }))
-    setReaderPreviewByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
-    setReaderPreviewErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
+    dispatchReaderPreviewState({
+      type: 'set-audience',
+      conversationId,
+      audience: value,
     })
     updateConversation(activeProject.id, conversationId, (conversation) => ({
       ...conversation,
@@ -6130,25 +6115,22 @@ function App() {
       return
     }
 
-    setReaderPreviewErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchReaderPreviewState({ type: 'clear-error', conversationId })
 
     if (cloudWorkspaceStatus === 'guest') {
       if (force) showFinalCopyToast('已按当前目标用户更新演示预演')
       return
     }
     if (cloudWorkspaceStatus !== 'ready') {
-      setReaderPreviewErrorByConversation((current) => ({
-        ...current,
-        [conversationId]: '云端工作区还在连接中，当前先展示演示预演。',
-      }))
+      dispatchReaderPreviewState({
+        type: 'set-error',
+        conversationId,
+        error: '云端工作区还在连接中，当前先展示演示预演。',
+      })
       return
     }
 
-    setReaderPreviewPendingConversationId(conversationId)
+    dispatchReaderPreviewState({ type: 'start-request', conversationId })
     try {
       const accessToken = await getCurrentAccessToken()
       if (!accessToken) {
@@ -6164,31 +6146,25 @@ function App() {
         draft: initialDraftCopy,
         analysis: activeConversation.analysisReady ? analysis : undefined,
       })
-      setReaderPreviewByConversation((current) => ({
-        ...current,
-        [conversationId]: {
+      dispatchReaderPreviewState({
+        type: 'finish-success',
+        conversationId,
+        record: {
           audience: effectiveReaderAudience,
           draft: initialDraftCopy,
           preview: response.preview,
         },
-      }))
-      setReaderPreviewUsageByConversation((current) => ({
-        ...current,
-        [conversationId]: response.usage,
-      }))
+      })
     } catch (error) {
       const message = getErrorMessage(error)
       const friendlyMessage = message.includes('paused until reader-preview-v1 passes evaluation')
         ? 'AI 读者预演仍在评测阶段，当前展示演示预演。'
         : message
-      setReaderPreviewErrorByConversation((current) => ({
-        ...current,
-        [conversationId]: friendlyMessage,
-      }))
-    } finally {
-      setReaderPreviewPendingConversationId((current) =>
-        current === conversationId ? '' : current,
-      )
+      dispatchReaderPreviewState({
+        type: 'finish-error',
+        conversationId,
+        error: friendlyMessage,
+      })
     }
   }
 
