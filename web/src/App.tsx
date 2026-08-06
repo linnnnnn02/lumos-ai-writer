@@ -109,6 +109,11 @@ import {
   type WritingBrief,
 } from '@/features/workspace/model/workspace-model'
 import {
+  buildReferenceRecommendations,
+  inferProjectLengthFromWritingRequest,
+  inferWritingBriefFromRequest,
+} from '@/features/workspace/model/writing-request-intent'
+import {
   createWorkspaceProjectState,
   workspaceProjectReducer,
 } from '@/features/workspace/model/workspace-project-state'
@@ -261,11 +266,6 @@ function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
   })
 }
 
-type ReferenceRecommendation = {
-  noteId: string
-  reason: string
-}
-
 const lengthOptions: Array<{
   value: ProjectLength
   title: string
@@ -402,58 +402,6 @@ function buildConversationTitleFromPrompt(prompt: string) {
 
 function isDefaultConversationTitle(title: string) {
   return !title.trim() || title === defaultConversationTitle || title === '新的小红书文案对话'
-}
-
-const recommendationStopTerms = new Set([
-  '一篇',
-  '一个',
-  '关于',
-  '内容',
-  '希望',
-  '文案',
-  '真实',
-  '可以',
-  '自己',
-  '用户',
-  '这个',
-  '想写',
-])
-
-function buildReferenceRecommendations(
-  writingRequest: string,
-  notes: SavedNoteRecord[],
-): ReferenceRecommendation[] {
-  const normalizedRequest = writingRequest.replace(/\s+/g, '').trim()
-  if (normalizedRequest.length < 4) return []
-
-  const terms = Array.from(
-    new Set(
-      Array.from({ length: Math.max(0, normalizedRequest.length - 1) }, (_, index) =>
-        normalizedRequest.slice(index, index + 2),
-      ).filter((term) => !recommendationStopTerms.has(term) && !/[，。！？、：；,.!?;:]/.test(term)),
-    ),
-  )
-
-  return notes
-    .map((note) => {
-      const source = `${note.title}${note.contentText}`.replace(/\s+/g, '')
-      const matches = terms.filter((term) => source.includes(term))
-      const titleMatches = matches.filter((term) => note.title.includes(term))
-      const score = matches.length + titleMatches.length * 2
-
-      return {
-        noteId: note.id,
-        score,
-        matches: Array.from(new Set([...titleMatches, ...matches])).slice(0, 2),
-      }
-    })
-    .filter((item) => item.score >= 2 && item.matches.length > 0)
-    .sort((first, second) => second.score - first.score)
-    .slice(0, 5)
-    .map((item) => ({
-      noteId: item.noteId,
-      reason: `包含与本次需求相关的“${item.matches.join('、')}”，可作为表达和信息组织参考。`,
-    }))
 }
 
 type DraftDragSelectionSegment = {
@@ -689,30 +637,30 @@ function isInitialDraftCopy(value: unknown): value is InitialDraftCopy {
 }
 
 function getDefaultWritingBrief(topic: string): WritingBrief {
+  const inferredBrief = inferWritingBriefFromRequest(topic)
+
   if (topic.includes('骑行')) {
     return {
-      objective: '帮助目标读者判断这条路线是否适合自己',
-      requiredFacts: '路线距离、难度、沿途补给、最适合停留的一段',
-      boundaries: '避免攻略站口吻，体验表达不夸满',
-      instructions: '',
+      objective: inferredBrief.objective || '帮助目标读者判断这条路线是否适合自己',
+      requiredFacts:
+        inferredBrief.requiredFacts || '路线距离、难度、沿途补给、最适合停留的一段',
+      boundaries: inferredBrief.boundaries || '避免攻略站口吻，体验表达不夸满',
+      instructions: inferredBrief.instructions,
     }
   }
 
   if (topic.includes('数码')) {
     return {
-      objective: '帮助目标读者判断产品是否适合自己的使用场景',
-      requiredFacts: '真实使用场景、开箱体验、上手质感、购买判断',
-      boundaries: '避免参数堆砌、过度承诺和广告腔',
-      instructions: '',
+      objective:
+        inferredBrief.objective || '帮助目标读者判断产品是否适合自己的使用场景',
+      requiredFacts:
+        inferredBrief.requiredFacts || '真实使用场景、开箱体验、上手质感、购买判断',
+      boundaries: inferredBrief.boundaries || '避免参数堆砌、过度承诺和广告腔',
+      instructions: inferredBrief.instructions,
     }
   }
 
-  return {
-    objective: '',
-    requiredFacts: '',
-    boundaries: '',
-    instructions: '',
-  }
+  return inferredBrief
 }
 
 function isWritingBrief(value: unknown): value is WritingBrief {
@@ -2159,7 +2107,7 @@ function App() {
     activeConversationRouteRef.current = { projectId, conversationId }
     pendingNavigationTargetRef.current = null
     dispatchNavigation({ type: 'show-conversation', stage })
-    setIsReaderPreviewVisible(stage === 'confirm')
+    setIsReaderPreviewVisible(stage === 'confirm' || stage === 'finalized')
     setIsReaderAudienceOpen(false)
     setActiveReaderAnnotationId('')
     writeAppNavigationHistory(options.mode ?? 'push', {
@@ -2296,7 +2244,7 @@ function App() {
         conversationId: conversation.id,
       }
       dispatchNavigation({ type: 'show-conversation', stage })
-      setIsReaderPreviewVisible(stage === 'confirm')
+      setIsReaderPreviewVisible(stage === 'confirm' || stage === 'finalized')
       pendingNavigationTargetRef.current = null
 
       if (
@@ -3018,8 +2966,13 @@ function App() {
   }, [selectedNotes])
 
   const referenceRecommendations = useMemo(
-    () => buildReferenceRecommendations(activeConversation.writingRequest, learningReadyNotes),
-    [activeConversation.writingRequest, learningReadyNotes],
+    () =>
+      buildReferenceRecommendations(
+        activeConversation.writingRequest,
+        learningReadyNotes,
+        activeProject.folderId,
+      ),
+    [activeConversation.writingRequest, activeProject.folderId, learningReadyNotes],
   )
 
   const fallbackAnalysis = useMemo(
@@ -3590,14 +3543,15 @@ function App() {
       topic: writingRequest,
       targetAudience:
         conversation.targetAudience.trim() || '会搜索本次主题、重视真实经验和具体信息的读者',
-      length: conversation.length ?? 'medium',
+      length: requestChanged
+        ? inferProjectLengthFromWritingRequest(writingRequest)
+        : conversation.length ?? inferProjectLengthFromWritingRequest(writingRequest),
       selectedItemIds: requestChanged ? [] : conversation.selectedItemIds,
       analysisReady: requestChanged ? false : conversation.analysisReady,
       finalizedAt: requestChanged ? undefined : conversation.finalizedAt,
-      writingBrief:
-        requestChanged && !conversation.topic.trim()
-          ? getDefaultWritingBrief(writingRequest)
-          : conversation.writingBrief,
+      writingBrief: requestChanged
+        ? getDefaultWritingBrief(writingRequest)
+        : conversation.writingBrief,
     }))
     dispatchConversationInputState({
       type: 'clear-writing-request',
@@ -3617,7 +3571,7 @@ function App() {
       : 'intake'
     dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
-    setIsReaderPreviewVisible(resumableStage === 'confirm')
+    setIsReaderPreviewVisible(resumableStage === 'confirm' || resumableStage === 'finalized')
     updateProject(projectId, (project) => ({
       ...project,
       conversations: sortConversationsForSidebar(
@@ -3761,7 +3715,7 @@ function App() {
       : 'intake'
     dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
-    setIsReaderPreviewVisible(resumableStage === 'confirm')
+    setIsReaderPreviewVisible(resumableStage === 'confirm' || resumableStage === 'finalized')
     updateProject(activeProject.id, (project) => ({
       ...project,
       activeConversationId: conversationId,
@@ -7933,12 +7887,12 @@ function App() {
               ) : null}
               {hasDraftReady ? (
                 <Button
-                  onClick={() => void handleFinalizeReaderPreview('rewrite')}
+                  onClick={() => handleWorkflowStepChange('confirm')}
                   disabled={!canFinalizeDraft}
                   tooltip={!canFinalizeDraft ? '先修正未通过的篇幅检查' : undefined}
                 >
-                  <CheckCircle2 className="h-4 w-4" />
-                  {activeConversation.finalizedAt ? '再次复制' : '完成并复制'}
+                  <Eye className="h-4 w-4" />
+                  下一步：读者预演
                 </Button>
               ) : null}
             </div>
