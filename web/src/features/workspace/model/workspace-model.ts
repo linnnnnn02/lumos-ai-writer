@@ -9,6 +9,7 @@ export type ChatMessage = {
   id: string
   role: 'assistant' | 'user'
   stage: 'setup' | 'analysis' | 'followup'
+  source?: 'plan_instruction'
   title?: string
   lines: string[]
   highlights?: Array<{
