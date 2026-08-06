@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
@@ -106,6 +107,23 @@ import {
   type WorkflowStepItem,
 } from '@/components/workflow-header-nav'
 import { LearningResult } from '@/features/workspace/analysis/learning-result'
+import {
+  createWorkspaceNavigationState,
+  deriveLegacyConversationStage,
+  getAppNavigationHash,
+  getConversationStage,
+  getResumableStageFromAvailability,
+  getSafeNavigationStage,
+  getStepForStage,
+  isAppNavigationHistoryState,
+  isConversationStage,
+  readAppNavigationHistory,
+  workspaceNavigationReducer,
+  writeAppNavigationHistory,
+  type AppNavigationHistoryState,
+  type ConversationStage,
+  type ConversationStep,
+} from '@/features/workspace/workflow/workspace-navigation'
 import { useCloudLibrary } from '@/hooks/use-cloud-library'
 import { useCloudWorkspace } from '@/hooks/use-cloud-workspace'
 import {
@@ -152,107 +170,7 @@ import {
 } from './lib/draft-versions'
 import { buildFallbackSelectionRewrite } from './lib/rewrite'
 
-type ConversationStep = 'learn' | 'length' | 'plan' | 'rewrite' | 'reader'
-type ConversationStage =
-  | 'intake'
-  | 'references'
-  | 'draft'
-  | 'review'
-  | 'confirm'
-  | 'finalized'
-type WorkflowContextView = Extract<ConversationStage, 'intake' | 'references'>
 type PageStep = 'workspace' | 'library' | ConversationStep
-type AppNavigationHistoryState = {
-  lumosNavigation: true
-  view: 'workspace' | 'library' | 'conversation'
-  projectId?: string
-  conversationId?: string
-  stage?: ConversationStage
-  canReturnToWorkspace?: boolean
-}
-
-function isAppNavigationHistoryState(value: unknown): value is AppNavigationHistoryState {
-  if (
-    !isObject(value) ||
-    value.lumosNavigation !== true ||
-    (value.view !== 'workspace' && value.view !== 'library' && value.view !== 'conversation')
-  ) {
-    return false
-  }
-
-  if (value.view === 'conversation' && (typeof value.projectId !== 'string' || !value.projectId)) {
-    return false
-  }
-  if (value.conversationId !== undefined && typeof value.conversationId !== 'string') return false
-  if (value.stage !== undefined && !isConversationStage(value.stage)) return false
-  return value.canReturnToWorkspace === undefined || typeof value.canReturnToWorkspace === 'boolean'
-}
-
-function parseAppNavigationHash(hash: string): AppNavigationHistoryState | null {
-  const value = hash.replace(/^#/, '')
-  if (value === 'projects') return { lumosNavigation: true, view: 'workspace' }
-  if (value === 'library') return { lumosNavigation: true, view: 'library' }
-
-  const parameters = new URLSearchParams(value)
-  const projectId = parameters.get('project')?.trim() ?? ''
-  if (!projectId) return null
-
-  const conversationId = parameters.get('conversation')?.trim() || undefined
-  const requestedStage = parameters.get('stage')
-  const stage = requestedStage && isConversationStage(requestedStage) ? requestedStage : undefined
-
-  return {
-    lumosNavigation: true,
-    view: 'conversation',
-    projectId,
-    conversationId,
-    stage,
-  }
-}
-
-function readAppNavigationHistory(state: unknown = window.history.state) {
-  const hashNavigation = parseAppNavigationHash(window.location.hash)
-  if (hashNavigation) {
-    return {
-      ...hashNavigation,
-      canReturnToWorkspace:
-        isAppNavigationHistoryState(state) &&
-        getAppNavigationHash(state) === window.location.hash &&
-        state.canReturnToWorkspace !== undefined
-          ? state.canReturnToWorkspace
-          : hashNavigation.canReturnToWorkspace,
-    }
-  }
-
-  if (window.location.hash) {
-    return { lumosNavigation: true, view: 'workspace' } satisfies AppNavigationHistoryState
-  }
-
-  return isAppNavigationHistoryState(state)
-    ? state
-    : ({ lumosNavigation: true, view: 'workspace' } satisfies AppNavigationHistoryState)
-}
-
-function getAppNavigationHash(state: AppNavigationHistoryState) {
-  if (state.view === 'workspace') return '#projects'
-  if (state.view === 'library') return '#library'
-
-  const parameters = new URLSearchParams({ project: state.projectId ?? '' })
-  if (state.conversationId) parameters.set('conversation', state.conversationId)
-  if (state.stage) parameters.set('stage', state.stage)
-  return `#${parameters.toString()}`
-}
-
-function writeAppNavigationHistory(
-  mode: 'push' | 'replace',
-  state: AppNavigationHistoryState,
-) {
-  window.history[mode === 'push' ? 'pushState' : 'replaceState'](
-    state,
-    '',
-    getAppNavigationHash(state),
-  )
-}
 
 type ChatMessage = {
   id: string
@@ -781,33 +699,6 @@ function buildWritingEditEvidence(
     evidenceCount: 1,
     status: 'candidate',
   }
-}
-
-function isConversationStage(value: unknown): value is ConversationStage {
-  return (
-    typeof value === 'string' &&
-    ['intake', 'references', 'draft', 'review', 'confirm', 'finalized'].includes(value)
-  )
-}
-
-function deriveLegacyConversationStage(input: {
-  analysisReady: boolean
-  finalizedAt?: string
-  step: ConversationStep
-  topic: string
-}): ConversationStage {
-  if (input.finalizedAt) return 'finalized'
-  if (input.step === 'reader') return 'confirm'
-  if (input.step === 'rewrite') return 'review'
-  if (input.step === 'plan' || input.step === 'length') return 'draft'
-  if (!input.topic.trim()) return 'intake'
-  return input.analysisReady ? 'draft' : 'references'
-}
-
-function getConversationStage(conversation: ConversationRecord): ConversationStage {
-  return isConversationStage(conversation.workflowStage)
-    ? conversation.workflowStage
-    : deriveLegacyConversationStage(conversation)
 }
 
 function isInitialDraftCopy(value: unknown): value is InitialDraftCopy {
@@ -1352,55 +1243,6 @@ function getConversationStep(conversation: ConversationRecord) {
   return conversation.step ?? 'learn'
 }
 
-function getStepForStage(stage: ConversationStage): ConversationStep {
-  if (stage === 'intake' || stage === 'references') return 'learn'
-  if (stage === 'draft') return 'plan'
-  if (stage === 'review') return 'rewrite'
-  return 'reader'
-}
-
-function getResumableStageFromAvailability(input: {
-  conversation: ConversationRecord
-  hasAnalysis: boolean
-  hasDraft: boolean
-}): ConversationStage {
-  const { conversation, hasAnalysis, hasDraft } = input
-  const hasWritingRequest = Boolean(
-    conversation.writingRequest.trim() || conversation.topic.trim(),
-  )
-  if (!hasWritingRequest) return 'intake'
-  if (!hasDraft) return hasAnalysis ? 'draft' : 'references'
-  if (conversation.finalizedAt) return 'finalized'
-
-  return getConversationStage(conversation) === 'confirm' ? 'confirm' : 'review'
-}
-
-function getSafeNavigationStage(input: {
-  conversation: ConversationRecord
-  hasAnalysis: boolean
-  hasDraft: boolean
-  requestedStage?: ConversationStage
-}): ConversationStage {
-  const { conversation, hasAnalysis, hasDraft, requestedStage } = input
-  const resumableStage = getResumableStageFromAvailability({
-    conversation,
-    hasAnalysis,
-    hasDraft,
-  })
-
-  if (!requestedStage) return resumableStage
-  if (requestedStage === 'intake') return requestedStage
-  if (requestedStage === 'references') {
-    return conversation.writingRequest.trim() || conversation.topic.trim()
-      ? requestedStage
-      : 'intake'
-  }
-  if (requestedStage === 'draft') return hasAnalysis ? requestedStage : resumableStage
-  if (!hasDraft) return resumableStage
-  if (requestedStage === 'finalized' && !conversation.finalizedAt) return resumableStage
-  return requestedStage
-}
-
 function buildAssistantReply(question: string, context: AiAnalysisResult) {
   if (question.includes('结构')) {
     return {
@@ -1910,17 +1752,18 @@ function ShellStepPills({ step }: { step: PageStep }) {
 function App() {
   const [initialNavigationTarget] = useState(readAppNavigationHistory)
   const [restoredGuestWorkspace] = useState(loadGuestWorkspaceSnapshot)
-  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(
-    initialNavigationTarget.view === 'workspace',
+  const [navigationState, dispatchNavigation] = useReducer(
+    workspaceNavigationReducer,
+    initialNavigationTarget,
+    createWorkspaceNavigationState,
   )
-  const [isLibraryOpen, setIsLibraryOpen] = useState(initialNavigationTarget.view === 'library')
-  const [isConversationSidebarOpen, setIsConversationSidebarOpen] = useState(false)
-  const [workflowContextView, setWorkflowContextView] = useState<WorkflowContextView | null>(null)
-  const [navigationStageOverride, setNavigationStageOverride] = useState<ConversationStage | null>(
-    null,
-  )
-  const [pendingNavigationTarget, setPendingNavigationTarget] =
-    useState<AppNavigationHistoryState | null>(initialNavigationTarget)
+  const isWorkspaceOpen = navigationState.view === 'workspace'
+  const isLibraryOpen = navigationState.view === 'library'
+  const isConversationSidebarOpen = navigationState.isConversationSidebarOpen
+  const navigationStageOverride = navigationState.stageOverride
+  const pendingNavigationTarget = navigationState.pendingTarget
+  const setConversationSidebarOpen = (open: boolean) =>
+    dispatchNavigation({ type: 'set-sidebar-open', open })
   const [referenceSelectionDraftByConversation, setReferenceSelectionDraftByConversation] = useState<
     Record<string, string[]>
   >({})
@@ -2164,8 +2007,7 @@ function App() {
     conversationId: activeConversation.id,
   })
   const activeConversationStage = getResumableConversationStage(activeConversation)
-  const visibleConversationStage =
-    navigationStageOverride ?? workflowContextView ?? activeConversationStage
+  const visibleConversationStage = navigationStageOverride ?? activeConversationStage
   const chatInput = chatInputByConversation[activeConversation.id] ?? ''
   const writingRequestDraft =
     writingRequestDraftByConversation[activeConversation.id] ?? activeConversation.writingRequest
@@ -2261,7 +2103,7 @@ function App() {
 
   function queueNavigationTarget(navigationState: AppNavigationHistoryState) {
     pendingNavigationTargetRef.current = navigationState
-    setPendingNavigationTarget(navigationState)
+    dispatchNavigation({ type: 'queue-target', target: navigationState })
   }
 
   function showConversationRoute(
@@ -2277,14 +2119,10 @@ function App() {
 
     activeConversationRouteRef.current = { projectId, conversationId }
     pendingNavigationTargetRef.current = null
-    setPendingNavigationTarget(null)
-    setNavigationStageOverride(stage)
-    setWorkflowContextView(stage === 'intake' || stage === 'references' ? stage : null)
+    dispatchNavigation({ type: 'show-conversation', stage })
     setIsReaderPreviewVisible(stage === 'confirm')
     setIsReaderAudienceOpen(false)
     setActiveReaderAnnotationId('')
-    setIsWorkspaceOpen(false)
-    setIsLibraryOpen(false)
     writeAppNavigationHistory(options.mode ?? 'push', {
       lumosNavigation: true,
       view: 'conversation',
@@ -2321,14 +2159,11 @@ function App() {
 
     const handleLocationNavigation = (event?: PopStateEvent) => {
       const navigationState = readAppNavigationHistory(event?.state)
-      setWorkflowContextView(null)
-      setNavigationStageOverride(null)
-      setIsConversationSidebarOpen(false)
+      dispatchNavigation({ type: 'location-requested', target: navigationState })
       setIsReaderPreviewVisible(false)
       setIsReaderAudienceOpen(false)
       setActiveReaderAnnotationId('')
       pendingNavigationTargetRef.current = navigationState
-      setPendingNavigationTarget(navigationState)
     }
 
     const handleHashChange = () => handleLocationNavigation()
@@ -2357,22 +2192,14 @@ function App() {
 
     const resolutionTimer = window.setTimeout(() => {
       if (navigationState.view === 'workspace') {
-        setNavigationStageOverride(null)
-        setWorkflowContextView(null)
-        setIsWorkspaceOpen(true)
-        setIsLibraryOpen(false)
+        dispatchNavigation({ type: 'show-view', view: 'workspace' })
         pendingNavigationTargetRef.current = null
-        setPendingNavigationTarget(null)
         return
       }
 
       if (navigationState.view === 'library') {
-        setNavigationStageOverride(null)
-        setWorkflowContextView(null)
-        setIsWorkspaceOpen(false)
-        setIsLibraryOpen(true)
+        dispatchNavigation({ type: 'show-view', view: 'library' })
         pendingNavigationTargetRef.current = null
-        setPendingNavigationTarget(null)
         return
       }
 
@@ -2382,12 +2209,8 @@ function App() {
           lumosNavigation: true,
           view: 'workspace',
         }
-        setNavigationStageOverride(null)
-        setWorkflowContextView(null)
-        setIsWorkspaceOpen(true)
-        setIsLibraryOpen(false)
+        dispatchNavigation({ type: 'show-view', view: 'workspace' })
         pendingNavigationTargetRef.current = null
-        setPendingNavigationTarget(null)
         writeAppNavigationHistory('replace', fallbackState)
         return
       }
@@ -2397,12 +2220,8 @@ function App() {
         project.conversations.find((item) => item.id === project.activeConversationId) ??
         project.conversations[0]
       if (!conversation) {
-        setNavigationStageOverride(null)
-        setWorkflowContextView(null)
-        setIsWorkspaceOpen(true)
-        setIsLibraryOpen(false)
+        dispatchNavigation({ type: 'show-view', view: 'workspace' })
         pendingNavigationTargetRef.current = null
-        setPendingNavigationTarget(null)
         writeAppNavigationHistory('replace', {
           lumosNavigation: true,
           view: 'workspace',
@@ -2440,13 +2259,9 @@ function App() {
         conversationId: conversation.id,
       }
       setActiveProjectId(project.id)
-      setNavigationStageOverride(stage)
-      setWorkflowContextView(stage === 'intake' || stage === 'references' ? stage : null)
+      dispatchNavigation({ type: 'show-conversation', stage })
       setIsReaderPreviewVisible(stage === 'confirm')
-      setIsWorkspaceOpen(false)
-      setIsLibraryOpen(false)
       pendingNavigationTargetRef.current = null
-      setPendingNavigationTarget(null)
 
       if (
         getAppNavigationHash(canonicalState) !== window.location.hash ||
@@ -3592,9 +3407,7 @@ function App() {
     setDraftMovePrompt(null)
     setIsWritingBriefOpen(false)
     setIsReaderPreviewVisible(false)
-    setIsConversationSidebarOpen(false)
-    setWorkflowContextView(null)
-    setNavigationStageOverride(null)
+    dispatchNavigation({ type: 'clear-conversation-context' })
     setWritingRequestDraftByConversation({})
     setReferenceSelectionDraftByConversation({})
   }
@@ -3606,12 +3419,8 @@ function App() {
     }
 
     if (nextStep === 'workspace') {
-      setWorkflowContextView(null)
-      setNavigationStageOverride(null)
       pendingNavigationTargetRef.current = null
-      setPendingNavigationTarget(null)
-      setIsWorkspaceOpen(true)
-      setIsLibraryOpen(false)
+      dispatchNavigation({ type: 'show-view', view: 'workspace' })
       const currentNavigationState: unknown = window.history.state
       if (
         !isAppNavigationHistoryState(currentNavigationState) ||
@@ -3636,12 +3445,8 @@ function App() {
         delete next[activeConversation.id]
         return next
       })
-      setWorkflowContextView(null)
-      setNavigationStageOverride(null)
       pendingNavigationTargetRef.current = null
-      setPendingNavigationTarget(null)
-      setIsWorkspaceOpen(false)
-      setIsLibraryOpen(true)
+      dispatchNavigation({ type: 'show-view', view: 'library' })
       const currentNavigationState: unknown = window.history.state
       if (
         !isAppNavigationHistoryState(currentNavigationState) ||
@@ -3656,8 +3461,6 @@ function App() {
       return
     }
 
-    setIsWorkspaceOpen(false)
-    setIsLibraryOpen(false)
     if (nextStep === 'learn') {
       if (
         hasStoredDraft &&
@@ -3830,8 +3633,7 @@ function App() {
       }
       if (next.length === 0) {
         setActiveProjectId('')
-        setIsWorkspaceOpen(true)
-        setIsLibraryOpen(false)
+        dispatchNavigation({ type: 'show-view', view: 'workspace' })
       }
       return next
     })
@@ -7542,7 +7344,7 @@ function App() {
           value={writingRequestDraft}
           onBackToWorkspace={() => goToStep('workspace')}
           onChange={handleWritingRequestChange}
-          onOpenSidebar={() => setIsConversationSidebarOpen(true)}
+          onOpenSidebar={() => setConversationSidebarOpen(true)}
           onSubmit={handleSubmitWritingRequest}
           onWorkflowStepChange={handleWorkflowStepChange}
           workflowSteps={workflowSteps}
@@ -7582,13 +7384,13 @@ function App() {
         referenceRecommendations={referenceRecommendations}
         onBackToWorkspace={() => goToStep('workspace')}
         onOpenLibrary={() => goToStep('library')}
-        onCloseSidebar={() => setIsConversationSidebarOpen(false)}
+        onCloseSidebar={() => setConversationSidebarOpen(false)}
         onCreateConversation={handleCreateConversation}
         onConversationTitleChange={handleConversationTitleChange}
         onToggleConversationPin={handleToggleConversationPin}
         onSwitchConversation={handleSwitchConversation}
         onStartAnalysis={handleStartAnalysis}
-        onOpenSidebar={() => setIsConversationSidebarOpen(true)}
+        onOpenSidebar={() => setConversationSidebarOpen(true)}
         onToggleItems={handleToggleItems}
         onSelectItems={handleSelectItems}
         onDeselectItems={handleDeselectItems}
@@ -7774,7 +7576,7 @@ function App() {
         <button
           type="button"
           aria-label="关闭对话列表"
-          onClick={() => setIsConversationSidebarOpen(false)}
+          onClick={() => setConversationSidebarOpen(false)}
           className="fixed inset-0 z-[70] bg-[rgba(15,23,42,0.16)] backdrop-blur-[2px]"
         />
         <aside className="fixed inset-y-0 left-0 z-[80] flex w-[min(20rem,calc(100vw-2rem))] min-h-0 flex-col border-r border-[rgba(15,23,42,0.06)] bg-[linear-gradient(180deg,#f4f6f8_0%,#f7f9fb_58%,#fbfcfd_100%)] shadow-[18px_0_60px_rgba(15,23,42,0.12)]">
@@ -7784,7 +7586,7 @@ function App() {
               variant="secondary"
               size="icon"
               onClick={() => {
-                setIsConversationSidebarOpen(false)
+                setConversationSidebarOpen(false)
                 goToStep('workspace')
               }}
               aria-label="返回首页"
@@ -7801,7 +7603,7 @@ function App() {
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setIsConversationSidebarOpen(false)}
+              onClick={() => setConversationSidebarOpen(false)}
               aria-label="关闭对话列表"
             >
               <X className="h-4 w-4" />
@@ -7901,7 +7703,7 @@ function App() {
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
-                onOpenSidebar={() => setIsConversationSidebarOpen(true)}
+                onOpenSidebar={() => setConversationSidebarOpen(true)}
               />
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
                 准备初稿
@@ -8373,7 +8175,7 @@ function App() {
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
-                onOpenSidebar={() => setIsConversationSidebarOpen(true)}
+                onOpenSidebar={() => setConversationSidebarOpen(true)}
               />
               <div className="min-w-0">
                 <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
@@ -8775,7 +8577,7 @@ function App() {
             <div className="flex min-w-0 items-center">
               <WorkflowHeaderNav
                 onBackToWorkspace={() => goToStep('workspace')}
-                onOpenSidebar={() => setIsConversationSidebarOpen(true)}
+                onOpenSidebar={() => setConversationSidebarOpen(true)}
               />
               <h1 className="truncate text-2xl font-semibold tracking-[-0.05em] text-[var(--foreground)]">
                 读者预演
