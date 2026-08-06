@@ -127,6 +127,11 @@ import {
   type ReaderPreviewRecord,
 } from '@/features/workspace/model/workspace-reader-preview-state'
 import {
+  createWorkspaceConversationInputState,
+  workspaceConversationInputReducer,
+  type PlanAttachment,
+} from '@/features/workspace/model/workspace-conversation-input-state'
+import {
   createWorkspaceDraftState,
   workspaceDraftReducer,
 } from '@/features/workspace/model/workspace-draft-state'
@@ -217,12 +222,6 @@ function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
     seen.add(signature)
     return true
   })
-}
-
-type PlanAttachment = {
-  id: string
-  name: string
-  kind: 'image' | 'document'
 }
 
 type ReferenceRecommendation = {
@@ -1706,9 +1705,6 @@ function App() {
   const pendingNavigationTarget = navigationState.pendingTarget
   const setConversationSidebarOpen = (open: boolean) =>
     dispatchNavigation({ type: 'set-sidebar-open', open })
-  const [referenceSelectionDraftByConversation, setReferenceSelectionDraftByConversation] = useState<
-    Record<string, string[]>
-  >({})
   const [projectState, dispatchProjectState] = useReducer(
     workspaceProjectReducer,
     {
@@ -1718,12 +1714,23 @@ function App() {
     createWorkspaceProjectState,
   )
   const { projects, activeProjectId } = projectState
-  const [chatInputByConversation, setChatInputByConversation] = useState<Record<string, string>>(
-    restoredGuestWorkspace?.chatInputByConversation ?? {},
+  const [conversationInputState, dispatchConversationInputState] = useReducer(
+    workspaceConversationInputReducer,
+    {
+      chatInputByConversation: restoredGuestWorkspace?.chatInputByConversation ?? {},
+      planAttachmentsByConversation:
+        restoredGuestWorkspace?.planAttachmentsByConversation ?? {},
+      writingRequestDraftByConversation: {},
+      referenceSelectionDraftByConversation: {},
+    },
+    createWorkspaceConversationInputState,
   )
-  const [writingRequestDraftByConversation, setWritingRequestDraftByConversation] = useState<
-    Record<string, string>
-  >({})
+  const {
+    chatInputByConversation,
+    planAttachmentsByConversation,
+    writingRequestDraftByConversation,
+    referenceSelectionDraftByConversation,
+  } = conversationInputState
   const [isChatStreaming, setIsChatStreaming] = useState(false)
   const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
   const [analysisWaitStartedAt, setAnalysisWaitStartedAt] = useState<number | null>(null)
@@ -1761,9 +1768,6 @@ function App() {
     rewriteMessagesByConversation,
     rewritePendingConversationId,
   } = reviewState
-  const [planAttachmentsByConversation, setPlanAttachmentsByConversation] = useState<
-    Record<string, PlanAttachment[]>
-  >(restoredGuestWorkspace?.planAttachmentsByConversation ?? {})
   const [readerPreviewState, dispatchReaderPreviewState] = useReducer(
     workspaceReaderPreviewReducer,
     {
@@ -1980,10 +1984,11 @@ function App() {
   const rewriteChatInput = rewriteInputByConversation[activeConversation.id] ?? ''
 
   function setChatInput(value: string) {
-    setChatInputByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: value,
-    }))
+    dispatchConversationInputState({
+      type: 'set-chat-input',
+      conversationId: activeConversation.id,
+      input: value,
+    })
   }
 
   function setRewriteChatInput(value: string) {
@@ -2378,7 +2383,13 @@ function App() {
           rewriteInputByConversation: restored?.rewriteInputByConversation ?? {},
         },
       })
-      setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
+      dispatchConversationInputState({
+        type: 'replace-persisted-inputs',
+        snapshot: {
+          planAttachmentsByConversation: restored?.planAttachmentsByConversation ?? {},
+          chatInputByConversation: restored?.chatInputByConversation ?? {},
+        },
+      })
       dispatchReaderPreviewState({
         type: 'replace-reader-preview',
         snapshot: {
@@ -2386,7 +2397,6 @@ function App() {
           readerPreviewByConversation: restored?.readerPreviewByConversation ?? {},
         },
       })
-      setChatInputByConversation(restored?.chatInputByConversation ?? {})
       setWorkspaceSaveStatus('saved-local')
       queueNavigationTarget(navigationTarget)
       return
@@ -2440,7 +2450,13 @@ function App() {
         rewriteInputByConversation: hydrated.rewriteInputByConversation,
       },
     })
-    setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
+    dispatchConversationInputState({
+      type: 'replace-persisted-inputs',
+      snapshot: {
+        planAttachmentsByConversation: hydrated.planAttachmentsByConversation,
+        chatInputByConversation: hydrated.chatInputByConversation,
+      },
+    })
     dispatchReaderPreviewState({
       type: 'replace-reader-preview',
       snapshot: {
@@ -2448,7 +2464,6 @@ function App() {
         readerPreviewByConversation: hydrated.readerPreviewByConversation,
       },
     })
-    setChatInputByConversation(hydrated.chatInputByConversation)
     setWorkspaceSaveStatus('synced-cloud')
     queueNavigationTarget(navigationTarget)
   }, [cloudWorkspaceProjects, cloudWorkspaceStatus, cloudWorkspaceUserId])
@@ -3355,8 +3370,7 @@ function App() {
     setIsWritingBriefOpen(false)
     setIsReaderPreviewVisible(false)
     dispatchNavigation({ type: 'clear-conversation-context' })
-    setWritingRequestDraftByConversation({})
-    setReferenceSelectionDraftByConversation({})
+    dispatchConversationInputState({ type: 'clear-all-transient' })
   }
 
   function goToStep(nextStep: PageStep) {
@@ -3382,15 +3396,9 @@ function App() {
     }
 
     if (nextStep === 'library') {
-      setWritingRequestDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
-      })
-      setReferenceSelectionDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
+      dispatchConversationInputState({
+        type: 'clear-conversation-transient',
+        conversationId: activeConversation.id,
       })
       pendingNavigationTargetRef.current = null
       dispatchNavigation({ type: 'show-view', view: 'library' })
@@ -3413,10 +3421,11 @@ function App() {
         hasStoredDraft &&
         ['review', 'confirm', 'finalized'].includes(activeConversationStage)
       ) {
-        setReferenceSelectionDraftByConversation((current) => ({
-          ...current,
-          [activeConversation.id]: [...activeConversation.selectedItemIds],
-        }))
+        dispatchConversationInputState({
+          type: 'open-reference-selection',
+          conversationId: activeConversation.id,
+          itemIds: activeConversation.selectedItemIds,
+        })
       }
       showConversationRoute('references')
       return
@@ -3452,10 +3461,11 @@ function App() {
 
     if (nextStep === 'references') {
       if (hasStoredDraft) {
-        setReferenceSelectionDraftByConversation((current) => ({
-          ...current,
-          [activeConversation.id]: [...activeConversation.selectedItemIds],
-        }))
+        dispatchConversationInputState({
+          type: 'open-reference-selection',
+          conversationId: activeConversation.id,
+          itemIds: activeConversation.selectedItemIds,
+        })
       }
       showConversationRoute('references')
       return
@@ -3477,10 +3487,11 @@ function App() {
   }
 
   function handleWritingRequestChange(value: string) {
-    setWritingRequestDraftByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: value,
-    }))
+    dispatchConversationInputState({
+      type: 'set-writing-request',
+      conversationId: activeConversation.id,
+      input: value,
+    })
   }
 
   function handleSubmitWritingRequest() {
@@ -3491,10 +3502,9 @@ function App() {
     const shouldResetProgress = requestChanged || activeConversationStage === 'intake'
     if (requestChanged) {
       invalidateAnalysisAndDraft(activeConversation.id)
-      setReferenceSelectionDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
+      dispatchConversationInputState({
+        type: 'clear-reference-selection',
+        conversationId: activeConversation.id,
       })
       setAnalysisErrorByConversation((current) => {
         const next = { ...current }
@@ -3523,10 +3533,9 @@ function App() {
           ? getDefaultWritingBrief(writingRequest)
           : conversation.writingBrief,
     }))
-    setWritingRequestDraftByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
+    dispatchConversationInputState({
+      type: 'clear-writing-request',
+      conversationId: activeConversation.id,
     })
     showConversationRoute('references')
   }
@@ -4265,14 +4274,10 @@ function App() {
 
   function handleToggleItems(itemIds: string[]) {
     if (referenceSelectionDraftByConversation[activeConversation.id] !== undefined) {
-      setReferenceSelectionDraftByConversation((current) => {
-        const nextIds = new Set(current[activeConversation.id] ?? [])
-        const allSelected = itemIds.every((itemId) => nextIds.has(itemId))
-        itemIds.forEach((itemId) => {
-          if (allSelected) nextIds.delete(itemId)
-          else nextIds.add(itemId)
-        })
-        return { ...current, [activeConversation.id]: Array.from(nextIds) }
+      dispatchConversationInputState({
+        type: 'toggle-reference-items',
+        conversationId: activeConversation.id,
+        itemIds,
       })
       return
     }
@@ -4299,12 +4304,11 @@ function App() {
 
   function handleSelectItems(itemIds: string[]) {
     if (referenceSelectionDraftByConversation[activeConversation.id] !== undefined) {
-      setReferenceSelectionDraftByConversation((current) => ({
-        ...current,
-        [activeConversation.id]: Array.from(
-          new Set([...(current[activeConversation.id] ?? []), ...itemIds]),
-        ),
-      }))
+      dispatchConversationInputState({
+        type: 'select-reference-items',
+        conversationId: activeConversation.id,
+        itemIds,
+      })
       return
     }
 
@@ -4334,13 +4338,11 @@ function App() {
 
   function handleDeselectItems(itemIds: string[]) {
     if (referenceSelectionDraftByConversation[activeConversation.id] !== undefined) {
-      const removedIds = new Set(itemIds)
-      setReferenceSelectionDraftByConversation((current) => ({
-        ...current,
-        [activeConversation.id]: (current[activeConversation.id] ?? []).filter(
-          (itemId) => !removedIds.has(itemId),
-        ),
-      }))
+      dispatchConversationInputState({
+        type: 'deselect-reference-items',
+        conversationId: activeConversation.id,
+        itemIds,
+      })
       return
     }
 
@@ -4395,10 +4397,11 @@ function App() {
         ...previousConversationState,
       }))
       if (referenceSelectionDraft !== undefined) {
-        setReferenceSelectionDraftByConversation((current) => ({
-          ...current,
-          [conversationId]: referenceSelectionDraft,
-        }))
+        dispatchConversationInputState({
+          type: 'set-reference-selection',
+          conversationId,
+          itemIds: referenceSelectionDraft,
+        })
       }
     }
 
@@ -4407,10 +4410,9 @@ function App() {
         ...conversation,
         selectedItemIds: referenceSelectionDraft,
       }))
-      setReferenceSelectionDraftByConversation((current) => {
-        const next = { ...current }
-        delete next[conversationId]
-        return next
+      dispatchConversationInputState({
+        type: 'clear-reference-selection',
+        conversationId,
       })
     }
 
@@ -6278,19 +6280,19 @@ function App() {
       }
     })
 
-    setPlanAttachmentsByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: [...(current[activeConversation.id] ?? []), ...nextAttachments],
-    }))
+    dispatchConversationInputState({
+      type: 'add-attachments',
+      conversationId: activeConversation.id,
+      attachments: nextAttachments,
+    })
   }
 
   function handleRemovePlanAttachment(attachmentId: string) {
-    setPlanAttachmentsByConversation((current) => ({
-      ...current,
-      [activeConversation.id]: (current[activeConversation.id] ?? []).filter(
-        (attachment) => attachment.id !== attachmentId,
-      ),
-    }))
+    dispatchConversationInputState({
+      type: 'remove-attachment',
+      conversationId: activeConversation.id,
+      attachmentId,
+    })
   }
 
   function formatProjectUpdatedAt(value: string) {
