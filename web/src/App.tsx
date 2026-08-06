@@ -132,6 +132,10 @@ import {
   type PlanAttachment,
 } from '@/features/workspace/model/workspace-conversation-input-state'
 import {
+  createWorkspaceAnalysisState,
+  workspaceAnalysisReducer,
+} from '@/features/workspace/model/workspace-analysis-state'
+import {
   createWorkspaceDraftState,
   workspaceDraftReducer,
 } from '@/features/workspace/model/workspace-draft-state'
@@ -1731,17 +1735,26 @@ function App() {
     writingRequestDraftByConversation,
     referenceSelectionDraftByConversation,
   } = conversationInputState
-  const [isChatStreaming, setIsChatStreaming] = useState(false)
-  const [analysisPendingConversationId, setAnalysisPendingConversationId] = useState('')
-  const [analysisWaitStartedAt, setAnalysisWaitStartedAt] = useState<number | null>(null)
+  const [analysisState, dispatchAnalysisState] = useReducer(
+    workspaceAnalysisReducer,
+    {
+      analysisByConversation: restoredGuestWorkspace?.analysisByConversation ?? {},
+      analysisPendingConversationId: '',
+      analysisWaitStartedAt: null,
+      analysisErrorByConversation: {},
+      chatReplyPendingConversationId: '',
+    },
+    createWorkspaceAnalysisState,
+  )
+  const {
+    analysisByConversation,
+    analysisPendingConversationId,
+    analysisWaitStartedAt,
+    analysisErrorByConversation,
+    chatReplyPendingConversationId,
+  } = analysisState
   const [draftWaitStartedAt, setDraftWaitStartedAt] = useState<number | null>(null)
   const [aiWaitTick, setAiWaitTick] = useState(Date.now())
-  const [analysisErrorByConversation, setAnalysisErrorByConversation] = useState<
-    Record<string, string>
-  >({})
-  const [, setAnalysisUsageByConversation] = useState<
-    Record<string, AiUsage | null>
-  >({})
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectFolderId, setNewProjectFolderId] = useState(noProjectFolderId)
   const [showCreateProjectCard, setShowCreateProjectCard] = useState(false)
@@ -1847,9 +1860,6 @@ function App() {
     remember: rememberCloudFeedback,
     refresh: refreshCloudWorkspace,
   } = useCloudWorkspace()
-  const [analysisByConversation, setAnalysisByConversation] = useState<
-    Record<string, AiAnalysisResult>
-  >(restoredGuestWorkspace?.analysisByConversation ?? {})
   const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<WorkspaceSaveStatus>(
     cloudWorkspaceStatus === 'guest' ? 'saved-local' : 'synced-cloud',
   )
@@ -1979,6 +1989,9 @@ function App() {
   const activeConversationStage = getResumableConversationStage(activeConversation)
   const visibleConversationStage = navigationStageOverride ?? activeConversationStage
   const chatInput = chatInputByConversation[activeConversation.id] ?? ''
+  const isChatStreaming =
+    analysisPendingConversationId === activeConversation.id ||
+    chatReplyPendingConversationId === activeConversation.id
   const writingRequestDraft =
     writingRequestDraftByConversation[activeConversation.id] ?? activeConversation.writingRequest
   const rewriteChatInput = rewriteInputByConversation[activeConversation.id] ?? ''
@@ -2363,7 +2376,12 @@ function App() {
             ? navigationTarget.projectId
             : restored?.activeProjectId ?? initialProjects[0].id,
       })
-      setAnalysisByConversation(restored?.analysisByConversation ?? {})
+      dispatchAnalysisState({
+        type: 'replace-analyses',
+        snapshot: {
+          analysisByConversation: restored?.analysisByConversation ?? {},
+        },
+      })
       const restoredDraftVersions = restored?.draftVersionsByConversation ?? {}
       draftVersionsRef.current = restoredDraftVersions
       dispatchDraftState({
@@ -2431,7 +2449,10 @@ function App() {
           ? navigationTarget.projectId
           : hydrated.projects[0]?.id,
     })
-    setAnalysisByConversation(hydrated.analysisByConversation)
+    dispatchAnalysisState({
+      type: 'replace-analyses',
+      snapshot: { analysisByConversation: hydrated.analysisByConversation },
+    })
     draftVersionsRef.current = hydrated.draftVersionsByConversation
     dispatchDraftState({
       type: 'replace-drafts',
@@ -3181,11 +3202,7 @@ function App() {
   }
 
   function invalidateAnalysisAndDraft(conversationId: string) {
-    setAnalysisByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchAnalysisState({ type: 'invalidate-analysis', conversationId })
     setDraftFactGapByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
@@ -3454,7 +3471,7 @@ function App() {
 
   function handleWorkflowStepChange(nextStep: WorkflowStepId) {
     if (nextStep === 'intake') {
-      setIsChatStreaming(false)
+      dispatchAnalysisState({ type: 'clear-chat-reply' })
       showConversationRoute('intake')
       return
     }
@@ -3506,11 +3523,6 @@ function App() {
         type: 'clear-reference-selection',
         conversationId: activeConversation.id,
       })
-      setAnalysisErrorByConversation((current) => {
-        const next = { ...current }
-        delete next[activeConversation.id]
-        return next
-      })
     }
 
     updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
@@ -3549,7 +3561,7 @@ function App() {
     const resumableStage = conversationToOpen
       ? getResumableConversationStage(conversationToOpen)
       : 'intake'
-    setIsChatStreaming(false)
+    dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
     setIsReaderPreviewVisible(resumableStage === 'confirm')
     updateProject(projectId, (project) => ({
@@ -3652,7 +3664,7 @@ function App() {
     }
 
     dispatchProjectState({ type: 'add-project', project: nextProject, activate: true })
-    setIsChatStreaming(false)
+    dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
     setNewProjectName('')
     setNewProjectFolderId(noProjectFolderId)
@@ -3668,7 +3680,7 @@ function App() {
     const now = new Date().toISOString()
     const nextConversation = createEmptyConversation({ now })
 
-    setIsChatStreaming(false)
+    dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
     updateProject(activeProject.id, (project) => ({
       ...project,
@@ -3693,7 +3705,7 @@ function App() {
     const resumableStage = conversationToOpen
       ? getResumableConversationStage(conversationToOpen)
       : 'intake'
-    setIsChatStreaming(false)
+    dispatchAnalysisState({ type: 'clear-chat-reply' })
     resetConversationTransientState()
     setIsReaderPreviewVisible(resumableStage === 'confirm')
     updateProject(activeProject.id, (project) => ({
@@ -4313,16 +4325,6 @@ function App() {
     }
 
     invalidateAnalysisAndDraft(activeConversation.id)
-    setAnalysisErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setAnalysisUsageByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
     updateConversation(activeProject.id, activeConversation.id, (conversation) => {
       const currentIds = new Set(conversation.selectedItemIds)
       itemIds.forEach((itemId) => currentIds.add(itemId))
@@ -4347,16 +4349,6 @@ function App() {
     }
 
     invalidateAnalysisAndDraft(activeConversation.id)
-    setAnalysisErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setAnalysisUsageByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
     updateConversation(activeProject.id, activeConversation.id, (conversation) => {
       const currentIds = new Set(conversation.selectedItemIds)
       itemIds.forEach((itemId) => currentIds.delete(itemId))
@@ -4390,7 +4382,11 @@ function App() {
       if (!previousDraftWasReady) return
       dispatchDraftState({ type: 'restore-draft-readiness', conversationId })
       if (previousAnalysis) {
-        setAnalysisByConversation((current) => ({ ...current, [conversationId]: previousAnalysis }))
+        dispatchAnalysisState({
+          type: 'record-analysis',
+          conversationId,
+          analysis: previousAnalysis,
+        })
       }
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
@@ -4416,20 +4412,13 @@ function App() {
       })
     }
 
-    setIsChatStreaming(true)
-    setAnalysisPendingConversationId(conversationId)
-    setAnalysisWaitStartedAt(Date.now())
-    setAiWaitTick(Date.now())
-    setAnalysisErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
+    const analysisStartedAt = Date.now()
+    dispatchAnalysisState({
+      type: 'start-analysis',
+      conversationId,
+      startedAt: analysisStartedAt,
     })
-    setAnalysisUsageByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    setAiWaitTick(analysisStartedAt)
     dispatchDraftState({ type: 'invalidate-draft', conversationId })
     setDraftUsageByConversation((current) => {
       const next = { ...current }
@@ -4461,10 +4450,6 @@ function App() {
             snippets: selectedSnippets,
           })
           nextAnalysis = response.analysis
-          setAnalysisUsageByConversation((current) => ({
-            ...current,
-            [conversationId]: response.usage,
-          }))
         }
 
         // Learning finishes before drafting so this generation can use the newest profile.
@@ -4472,10 +4457,11 @@ function App() {
       }
 
       const analysisMessages = buildAnalysisChat(nextAnalysis)
-      setAnalysisByConversation((current) => ({
-        ...current,
-        [conversationId]: nextAnalysis,
-      }))
+      dispatchAnalysisState({
+        type: 'record-analysis',
+        conversationId,
+        analysis: nextAnalysis,
+      })
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
         analysisReady: true,
@@ -4504,19 +4490,18 @@ function App() {
       const friendlyMessage = message.includes('DeepSeek API key')
         ? 'AI 服务暂时不可用，稍后可直接重试本次分析。'
         : message
-      setAnalysisErrorByConversation((current) => ({
-        ...current,
-        [conversationId]: friendlyMessage,
-      }))
+      dispatchAnalysisState({
+        type: 'fail-analysis',
+        conversationId,
+        error: friendlyMessage,
+      })
       updateConversation(projectId, conversationId, (conversation) => ({
         ...conversation,
         analysisReady: false,
       }))
       restorePreviousDraft()
     } finally {
-      setIsChatStreaming(false)
-      setAnalysisPendingConversationId((current) => (current === conversationId ? '' : current))
-      setAnalysisWaitStartedAt(null)
+      dispatchAnalysisState({ type: 'finish-analysis', conversationId })
     }
   }
 
@@ -4707,7 +4692,7 @@ function App() {
         ? buildAssistantReply(question, analysis)
         : buildSetupReply(question)
 
-    setIsChatStreaming(true)
+    dispatchAnalysisState({ type: 'start-chat-reply', conversationId })
     await sleep(220)
 
     updateConversation(projectId, conversationId, (conversation) => ({
@@ -4724,7 +4709,7 @@ function App() {
       ],
     }))
 
-    setIsChatStreaming(false)
+    dispatchAnalysisState({ type: 'finish-chat-reply', conversationId })
   }
 
   function normalizeDraftSelection(value: string) {
