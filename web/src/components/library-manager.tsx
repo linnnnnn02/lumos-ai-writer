@@ -120,7 +120,7 @@ type LibraryManagerProps = {
     note: SavedNoteRecord,
     drafts: SnippetDraft[],
     existingSnippets: SavedSnippetRecord[],
-  ) => Promise<void>
+  ) => Promise<SavedSnippetRecord[]>
   onUpdateFolder: (folder: SavedFolderRecord, name: string) => Promise<SavedFolderRecord>
   onUpdateNoteLearningStatus: (
     note: SavedNoteRecord,
@@ -922,7 +922,18 @@ export function LibraryManager({
   async function handleSaveDetailSnippets() {
     if (!selectedDetailNote) return
     await runMutation(async () => {
-      await onSaveNoteSnippets(selectedDetailNote, snippetDrafts, existingDetailSnippets)
+      const savedSnippets = await onSaveNoteSnippets(
+        selectedDetailNote,
+        snippetDrafts,
+        existingDetailSnippets,
+      )
+      const savedDrafts = savedSnippets.map(createSnippetDraft)
+      setSnippetDrafts(savedDrafts)
+      setActiveSnippetId((current) =>
+        savedDrafts.some((draft) => draft.id === current)
+          ? current
+          : savedDrafts[0]?.id ?? '',
+      )
       setDetailFeedback('已保存')
     }, '片段已保存。')
   }

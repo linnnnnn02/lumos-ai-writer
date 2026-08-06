@@ -15,6 +15,11 @@ import {
   getTrash,
 } from '@/lib/api-client'
 import { useAuth } from '@/lib/auth-context'
+import {
+  cloudLibraryCacheReducer,
+  type CloudLibraryCacheAction,
+  type CloudLibraryCacheState,
+} from '@/features/library/model/cloud-library-cache-state'
 
 type CloudLibraryStatus = 'initializing' | 'guest' | 'loading' | 'ready' | 'error'
 
@@ -29,9 +34,12 @@ export type CloudLibraryState = {
   isRefreshing: boolean
   refreshedAt: string
   refresh: () => void
+  commitMutation: (action: CloudLibraryCacheAction) => void
 }
 
-const emptyLibrary = {
+type CloudLibraryDataState = Omit<CloudLibraryState, 'commitMutation' | 'refresh'>
+
+const emptyLibrary: CloudLibraryCacheState = {
   folders: [] as SavedFolderRecord[],
   notes: [] as SavedNoteRecord[],
   snippets: [] as SavedSnippetRecord[],
@@ -53,21 +61,45 @@ export function useCloudLibrary(): CloudLibraryState {
   const { status: authStatus, session } = useAuth()
   const accessToken = session?.access_token ?? ''
   const [refreshVersion, setRefreshVersion] = useState(0)
+  const accessTokenRef = useRef('')
+  const requestIdRef = useRef(0)
+  const activeLoadCountRef = useRef(0)
   const refresh = useCallback(() => {
+    requestIdRef.current += 1
     setRefreshVersion((current) => current + 1)
   }, [])
-  const [state, setState] = useState<CloudLibraryState>({
+  const [state, setState] = useState<CloudLibraryDataState>({
     status: 'initializing',
     user: null,
     ...emptyLibrary,
     error: '',
     isRefreshing: false,
     refreshedAt: '',
-    refresh,
   })
-  const accessTokenRef = useRef('')
-  const requestIdRef = useRef(0)
-  const activeLoadCountRef = useRef(0)
+  const commitMutation = useCallback((action: CloudLibraryCacheAction) => {
+    requestIdRef.current += 1
+    setState((current) => {
+      const cache = cloudLibraryCacheReducer(
+        {
+          folders: current.folders,
+          notes: current.notes,
+          snippets: current.snippets,
+          trashGroups: current.trashGroups,
+        },
+        action,
+      )
+
+      return {
+        ...current,
+        ...cache,
+        status: 'ready',
+        error: '',
+        isRefreshing: true,
+        refreshedAt: current.refreshedAt || new Date().toISOString(),
+      }
+    })
+    setRefreshVersion((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     let isMounted = true
@@ -86,7 +118,6 @@ export function useCloudLibrary(): CloudLibraryState {
           ...(hasCachedLibrary ? {} : emptyLibrary),
           error: '',
           isRefreshing: hasCachedLibrary,
-          refresh,
         }
       })
 
@@ -100,18 +131,23 @@ export function useCloudLibrary(): CloudLibraryState {
         ])
 
         if (!isMounted || requestId !== requestIdRef.current) return
+        const cache = cloudLibraryCacheReducer(emptyLibrary, {
+          type: 'replace-cache',
+          cache: {
+            folders: folders.folders,
+            notes: normalizeCloudNotes(notes.notes),
+            snippets: snippets.snippets,
+            trashGroups: trash.groups,
+          },
+        })
 
         setState({
           status: 'ready',
           user: me.user,
-          folders: folders.folders,
-          notes: normalizeCloudNotes(notes.notes),
-          snippets: snippets.snippets,
-          trashGroups: trash.groups,
+          ...cache,
           error: '',
           isRefreshing: false,
           refreshedAt: new Date().toISOString(),
-          refresh,
         })
       } catch (error) {
         if (!isMounted || requestId !== requestIdRef.current) return
@@ -124,7 +160,6 @@ export function useCloudLibrary(): CloudLibraryState {
             ...(hasCachedLibrary ? {} : emptyLibrary),
             error: getErrorMessage(error),
             isRefreshing: false,
-            refresh,
           }
         })
       } finally {
@@ -142,7 +177,6 @@ export function useCloudLibrary(): CloudLibraryState {
         error: '',
         isRefreshing: false,
         refreshedAt: '',
-        refresh,
       })
     }
 
@@ -177,7 +211,7 @@ export function useCloudLibrary(): CloudLibraryState {
       window.removeEventListener('focus', scheduleActivationRefresh)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
-  }, [accessToken, authStatus, refresh, refreshVersion])
+  }, [accessToken, authStatus, refreshVersion])
 
-  return { ...state, refresh }
+  return { ...state, refresh, commitMutation }
 }

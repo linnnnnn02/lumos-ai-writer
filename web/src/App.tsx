@@ -4049,8 +4049,8 @@ function App() {
 
   async function handleCreateLibraryFolder(name: string) {
     const accessToken = await getLibraryAccessToken()
-    await createFolder(accessToken, { name })
-    cloudLibrary.refresh()
+    const response = await createFolder(accessToken, { name })
+    cloudLibrary.commitMutation({ type: 'upsert-folder', folder: response.folder })
   }
 
   async function handleUpdateLibraryFolder(folder: SavedFolderRecord, name: string) {
@@ -4060,16 +4060,22 @@ function App() {
         name,
         expectedUpdatedAt: folder.updatedAt,
       })
+      cloudLibrary.commitMutation({ type: 'upsert-folder', folder: response.folder })
       return response.folder
-    } finally {
+    } catch (error) {
       cloudLibrary.refresh()
+      throw error
     }
   }
 
   async function handleDeleteLibraryFolder(folder: SavedFolderRecord) {
     const accessToken = await getLibraryAccessToken()
     await deleteFolder(accessToken, folder.id)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({
+      type: 'soft-delete-folder',
+      folderId: folder.id,
+      deletedAt: new Date().toISOString(),
+    })
   }
 
   async function handleSaveLibraryNote(
@@ -4102,7 +4108,12 @@ function App() {
           title,
           expectedUpdatedAt: note.updatedAt,
         })
-        return { ...response.note, coverImageUrl: response.note.coverImageUrl ?? '' }
+        const updatedNote = {
+          ...response.note,
+          coverImageUrl: response.note.coverImageUrl ?? '',
+        }
+        cloudLibrary.commitMutation({ type: 'upsert-note', note: updatedNote })
+        return updatedNote
       }
 
       const response = await upsertNote(accessToken, {
@@ -4115,15 +4126,26 @@ function App() {
         sourceUrl: note.sourceUrl,
         title,
       })
-      return { ...response.note, coverImageUrl: response.note.coverImageUrl ?? '' }
-    } finally {
+      const updatedNote = {
+        ...response.note,
+        coverImageUrl: response.note.coverImageUrl ?? '',
+      }
+      cloudLibrary.commitMutation({ type: 'upsert-note', note: updatedNote })
+      return updatedNote
+    } catch (error) {
       cloudLibrary.refresh()
+      throw error
     }
   }
 
   async function handleDeleteLibraryNote(note: SavedNoteRecord) {
     const accessToken = await getLibraryAccessToken()
     await deleteNote(accessToken, note.id)
+    cloudLibrary.commitMutation({
+      type: 'soft-delete-note',
+      noteId: note.id,
+      deletedAt: new Date().toISOString(),
+    })
     const normalizedNoteUrl = normalizeNoteUrl(note.sourceUrl)
     const removedSnippetIds = new Set(
       librarySnippets
@@ -4136,7 +4158,6 @@ function App() {
       type: 'remove-selected-items',
       itemIds: [removedNoteId, ...removedSnippetIds],
     })
-    cloudLibrary.refresh()
   }
 
   async function handleUpdateLibraryNoteLearningStatus(
@@ -4145,37 +4166,49 @@ function App() {
   ) {
     const accessToken = await getLibraryAccessToken()
     await updateNoteLearningStatus(accessToken, note.id, { status })
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({
+      type: 'set-note-learning-status',
+      noteId: note.id,
+      status,
+    })
   }
 
   async function handleRestoreLibraryFolder(folderId: string) {
     const accessToken = await getLibraryAccessToken()
     await restoreFolder(accessToken, folderId)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({
+      type: 'restore-folder',
+      folderId,
+      restoredAt: new Date().toISOString(),
+    })
   }
 
   async function handleRestoreLibraryNote(noteId: string) {
     const accessToken = await getLibraryAccessToken()
     await restoreNote(accessToken, noteId)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({
+      type: 'restore-note',
+      noteId,
+      restoredAt: new Date().toISOString(),
+    })
   }
 
   async function handleDeleteLibraryFolderPermanently(folderId: string) {
     const accessToken = await getLibraryAccessToken()
     await deleteFolderPermanently(accessToken, folderId)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({ type: 'delete-folder-permanently', folderId })
   }
 
   async function handleDeleteLibraryNotePermanently(noteId: string) {
     const accessToken = await getLibraryAccessToken()
     await deleteNotePermanently(accessToken, noteId)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({ type: 'delete-note-permanently', noteId })
   }
 
   async function handleEmptyLibraryTrash() {
     const accessToken = await getLibraryAccessToken()
     await emptyTrash(accessToken)
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({ type: 'empty-trash' })
   }
 
   async function handleSaveLibraryNoteSnippets(
@@ -4192,29 +4225,32 @@ function App() {
     const accessToken = await getLibraryAccessToken()
     const existingIds = new Set(existingSnippets.map((snippet) => snippet.id))
     const savedDraftIds = new Set<string>()
+    const savedSnippets: SavedSnippetRecord[] = []
 
     for (const draft of drafts) {
       const selectedText = draft.selectedText.trim()
       if (!selectedText) continue
 
       if (existingIds.has(draft.id)) {
-        await updateSnippet(accessToken, draft.id, {
+        const response = await updateSnippet(accessToken, draft.id, {
           colorTagName: draft.colorTagName,
           colorValue: draft.colorValue,
           reasonText: draft.reasonText,
           selectedText,
         })
         savedDraftIds.add(draft.id)
+        savedSnippets.push(response.snippet)
         continue
       }
 
-      await createSnippet(accessToken, {
+      const response = await createSnippet(accessToken, {
         noteId: note.id,
         colorTagName: draft.colorTagName,
         colorValue: draft.colorValue,
         reasonText: draft.reasonText,
         selectedText,
       })
+      savedSnippets.push(response.snippet)
     }
 
     for (const snippet of existingSnippets) {
@@ -4222,7 +4258,12 @@ function App() {
       await deleteSnippet(accessToken, snippet.id)
     }
 
-    cloudLibrary.refresh()
+    cloudLibrary.commitMutation({
+      type: 'replace-note-snippets',
+      noteUrl: note.sourceUrl,
+      snippets: savedSnippets,
+    })
+    return savedSnippets
   }
 
   function handleConversationTitleChange(conversationId: string, title: string) {
