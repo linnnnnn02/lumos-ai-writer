@@ -29,6 +29,7 @@
     "test:workspace-project-state": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-project-state.ts",
     "test:workspace-draft-state": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-draft-state.ts",
     "test:workspace-review-state": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-review-state.ts",
+    "test:workspace-reader-preview-state": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-reader-preview-state.ts",
     "test:draft-preference-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-preference-snapshots.ts",
     "test:draft-quality-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-quality-snapshots.ts",
     "test:draft-version-history": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-version-history.ts",
