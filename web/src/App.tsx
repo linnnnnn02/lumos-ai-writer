@@ -118,6 +118,10 @@ import {
   workspaceProjectReducer,
 } from '@/features/workspace/model/workspace-project-state'
 import {
+  createWorkspaceDraftState,
+  workspaceDraftReducer,
+} from '@/features/workspace/model/workspace-draft-state'
+import {
   createWorkspaceNavigationState,
   deriveLegacyConversationStage,
   getAppNavigationHash,
@@ -1787,18 +1791,26 @@ function App() {
   const [dismissedCloudWorkspaceErrorVersion, setDismissedCloudWorkspaceErrorVersion] =
     useState(0)
   const [workspaceSyncRetryVersion, setWorkspaceSyncRetryVersion] = useState(0)
-  const [draftReadyByConversation, setDraftReadyByConversation] = useState<Record<string, boolean>>(
-    restoredGuestWorkspace?.draftReadyByConversation ?? {},
+  const [draftState, dispatchDraftState] = useReducer(
+    workspaceDraftReducer,
+    {
+      draftReadyByConversation: restoredGuestWorkspace?.draftReadyByConversation ?? {},
+      draftCopyByConversation: restoredGuestWorkspace?.draftCopyByConversation ?? {},
+      draftVersionsByConversation:
+        restoredGuestWorkspace?.draftVersionsByConversation ?? {},
+      currentDraftVersionIdByConversation:
+        restoredGuestWorkspace?.currentDraftVersionIdByConversation ?? {},
+      draftGenerationErrorByConversation: {},
+    },
+    createWorkspaceDraftState,
   )
-  const [draftCopyByConversation, setDraftCopyByConversation] = useState<
-    Record<string, InitialDraftCopy>
-  >(restoredGuestWorkspace?.draftCopyByConversation ?? {})
-  const [draftVersionsByConversation, setDraftVersionsByConversation] = useState<
-    Record<string, DraftVersionRecord[]>
-  >(restoredGuestWorkspace?.draftVersionsByConversation ?? {})
-  const [currentDraftVersionIdByConversation, setCurrentDraftVersionIdByConversation] = useState<
-    Record<string, string>
-  >(restoredGuestWorkspace?.currentDraftVersionIdByConversation ?? {})
+  const {
+    draftReadyByConversation,
+    draftCopyByConversation,
+    draftVersionsByConversation,
+    currentDraftVersionIdByConversation,
+    draftGenerationErrorByConversation,
+  } = draftState
   const [isDraftVersionHistoryOpen, setIsDraftVersionHistoryOpen] = useState(false)
   const [isWritingProfileOpen, setIsWritingProfileOpen] = useState(false)
   const [writingProfileContext, setWritingProfileContext] = useState<{
@@ -1813,9 +1825,6 @@ function App() {
     Record<string, AiUsage | null>
   >({})
   const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
-  const [draftGenerationErrorByConversation, setDraftGenerationErrorByConversation] = useState<
-    Record<string, string>
-  >({})
   const [draftFactGapByConversation, setDraftFactGapByConversation] = useState<
     Record<string, DraftFactSufficiencyResult>
   >({})
@@ -1882,6 +1891,10 @@ function App() {
   const workspaceSaveQueueRef = useRef(Promise.resolve())
   const recentFeedbackMemoriesRef = useRef<FeedbackMemoryDto[]>([])
   const draftVersionsRef = useRef(draftVersionsByConversation)
+
+  useEffect(() => {
+    draftVersionsRef.current = draftVersionsByConversation
+  }, [draftVersionsByConversation])
 
   const storedActiveProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
@@ -2347,14 +2360,18 @@ function App() {
             : restored?.activeProjectId ?? initialProjects[0].id,
       })
       setAnalysisByConversation(restored?.analysisByConversation ?? {})
-      setDraftCopyByConversation(restored?.draftCopyByConversation ?? {})
-      setDraftReadyByConversation(restored?.draftReadyByConversation ?? {})
       const restoredDraftVersions = restored?.draftVersionsByConversation ?? {}
       draftVersionsRef.current = restoredDraftVersions
-      setDraftVersionsByConversation(restoredDraftVersions)
-      setCurrentDraftVersionIdByConversation(
-        restored?.currentDraftVersionIdByConversation ?? {},
-      )
+      dispatchDraftState({
+        type: 'replace-drafts',
+        snapshot: {
+          draftCopyByConversation: restored?.draftCopyByConversation ?? {},
+          draftReadyByConversation: restored?.draftReadyByConversation ?? {},
+          draftVersionsByConversation: restoredDraftVersions,
+          currentDraftVersionIdByConversation:
+            restored?.currentDraftVersionIdByConversation ?? {},
+        },
+      })
       setRewriteMessagesByConversation(restored?.rewriteMessagesByConversation ?? {})
       setPlanAttachmentsByConversation(restored?.planAttachmentsByConversation ?? {})
       setReaderAudienceByConversation(restored?.readerAudienceByConversation ?? {})
@@ -2397,11 +2414,17 @@ function App() {
           : hydrated.projects[0]?.id,
     })
     setAnalysisByConversation(hydrated.analysisByConversation)
-    setDraftCopyByConversation(hydrated.draftCopyByConversation)
-    setDraftReadyByConversation(hydrated.draftReadyByConversation)
     draftVersionsRef.current = hydrated.draftVersionsByConversation
-    setDraftVersionsByConversation(hydrated.draftVersionsByConversation)
-    setCurrentDraftVersionIdByConversation(hydrated.currentDraftVersionIdByConversation)
+    dispatchDraftState({
+      type: 'replace-drafts',
+      snapshot: {
+        draftCopyByConversation: hydrated.draftCopyByConversation,
+        draftReadyByConversation: hydrated.draftReadyByConversation,
+        draftVersionsByConversation: hydrated.draftVersionsByConversation,
+        currentDraftVersionIdByConversation:
+          hydrated.currentDraftVersionIdByConversation,
+      },
+    })
     setRewriteMessagesByConversation(hydrated.rewriteMessagesByConversation)
     setPlanAttachmentsByConversation(hydrated.planAttachmentsByConversation)
     setReaderAudienceByConversation(hydrated.readerAudienceByConversation)
@@ -3121,15 +3144,7 @@ function App() {
   }
 
   function invalidateDraftOutputs(conversationId: string) {
-    setDraftReadyByConversation((current) => ({
-      ...current,
-      [conversationId]: false,
-    }))
-    setDraftGenerationErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchDraftState({ type: 'invalidate-draft', conversationId })
     setReaderPreviewByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
@@ -3202,19 +3217,13 @@ function App() {
     }
 
     draftVersionsRef.current = nextVersionsByConversation
-    setDraftVersionsByConversation(nextVersionsByConversation)
-    setCurrentDraftVersionIdByConversation((current) => ({
-      ...current,
-      [conversationId]: currentVersion.id,
-    }))
-    setDraftCopyByConversation((current) => ({
-      ...current,
-      [conversationId]: nextDraft,
-    }))
-    setDraftReadyByConversation((current) => ({
-      ...current,
-      [conversationId]: true,
-    }))
+    dispatchDraftState({
+      type: 'record-draft',
+      conversationId,
+      draft: nextDraft,
+      versions: nextVersions,
+      currentVersionId: currentVersion.id,
+    })
   }
 
   function handleRestoreDraftVersion(version: DraftVersionRecord) {
@@ -4387,7 +4396,7 @@ function App() {
 
     const restorePreviousDraft = () => {
       if (!previousDraftWasReady) return
-      setDraftReadyByConversation((current) => ({ ...current, [conversationId]: true }))
+      dispatchDraftState({ type: 'restore-draft-readiness', conversationId })
       if (previousAnalysis) {
         setAnalysisByConversation((current) => ({ ...current, [conversationId]: previousAnalysis }))
       }
@@ -4429,15 +4438,7 @@ function App() {
       delete next[conversationId]
       return next
     })
-    setDraftReadyByConversation((current) => ({
-      ...current,
-      [conversationId]: false,
-    }))
-    setDraftGenerationErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchDraftState({ type: 'invalidate-draft', conversationId })
     setDraftUsageByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
@@ -4547,15 +4548,7 @@ function App() {
     setDraftGeneratingConversationId(conversationId)
     setDraftWaitStartedAt(Date.now())
     setAiWaitTick(Date.now())
-    setDraftReadyByConversation((current) => ({
-      ...current,
-      [conversationId]: false,
-    }))
-    setDraftGenerationErrorByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
+    dispatchDraftState({ type: 'invalidate-draft', conversationId })
     setDraftUsageByConversation((current) => {
       const next = { ...current }
       delete next[conversationId]
@@ -4653,18 +4646,14 @@ function App() {
       return true
     } catch (error) {
       const message = getErrorMessage(error)
-      setDraftGenerationErrorByConversation((current) => ({
-        ...current,
-        [conversationId]: message.includes('DeepSeek API key')
+      dispatchDraftState({
+        type: 'set-generation-error',
+        conversationId,
+        error: message.includes('DeepSeek API key')
           ? 'AI 服务暂时不可用，请稍后重试。'
           : message,
-      }))
-      if (previousDraftWasReady) {
-        setDraftReadyByConversation((current) => ({
-          ...current,
-          [conversationId]: true,
-        }))
-      }
+        restoreReady: previousDraftWasReady,
+      })
       return false
     } finally {
       setDraftGeneratingConversationId((current) => (current === conversationId ? '' : current))
@@ -6287,7 +6276,11 @@ function App() {
         [activeConversation.id]: nextVersions,
       }
       draftVersionsRef.current = nextVersionsByConversation
-      setDraftVersionsByConversation(nextVersionsByConversation)
+      dispatchDraftState({
+        type: 'update-versions',
+        conversationId: activeConversation.id,
+        versions: nextVersions,
+      })
     }
 
     updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
