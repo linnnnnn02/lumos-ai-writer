@@ -26,6 +26,7 @@
     "test:cloud-trash-reconcile": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-cloud-trash-reconcile.ts",
     "test:workspace-recovery": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-empty-conversation-recovery.ts",
     "test:workspace-navigation": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-navigation.ts",
+    "test:workspace-project-state": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-workspace-project-state.ts",
     "test:draft-preference-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-preference-snapshots.ts",
     "test:draft-quality-snapshots": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-quality-snapshots.ts",
     "test:draft-version-history": "pnpm --filter @lumos-ai/api exec tsx ../../scripts/test-draft-version-history.ts",
