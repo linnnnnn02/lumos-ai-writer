@@ -28,6 +28,7 @@ import {
   getDraftRequirementIssues,
   draftRepairSystemPrompt,
   draftSkillV1,
+  findUnsupportedMindsetIssues,
   resolveDraftContentMode,
   validateDraftGroundingAuditOutput,
   validateDraftSkillOutput,
@@ -671,7 +672,15 @@ export async function generateDraftWithDeepSeek(
           preparedSkill.model,
         )
         combinedUsage = mergeAiUsage(combinedUsage, audit.usage)
-        groundingIssues = audit.issues
+        groundingIssues = [
+          ...audit.issues,
+          ...findUnsupportedMindsetIssues(candidateDraft, input).filter(
+            (issue) =>
+              !audit.issues.some(
+                (auditIssue) => auditIssue.quote === issue.quote,
+              ),
+          ),
+        ]
         requirementIssues = audit.requirementIssues
         groundingAudit = audit.audit
       } catch (error) {

@@ -224,10 +224,11 @@ export const draftGroundingAuditSystemPrompt = [
   '逐条抽取标题和正文中可被外部核验的具体断言，包括人物或读者的情绪与认知、产品属性与效果、物体与数量、时间地点、事件状态、动作关系、因果和先后顺序。',
   '每条断言只能分类为 supported、contradicted 或 unknown：supported 表示 topic 或 brief 明确给出或必然蕴含；contradicted 表示与 brief.sourceFacts、brief.facts 或 brief.avoidTone 冲突；unknown 表示输入既未支持也未否定。',
   'supported 必须覆盖断言里的每个限定词。若主体被支持，但成稿新增了精确数字、位置、表面、动作、程度、结果或心理状态，新增部分仍是 unknown，应把 quote 缩到该最小片段。',
+  '第一人称不降低事实门槛。“没想过别的”“也不着急”“已经够用了”“终于放心了”等自我认知、满意度、情绪和态度，只有 topic 或 brief 明确提供时才是 supported；不能从自动模式、尚未学会设置或写作画像中的克制语气推导出来。',
   '未知不能因为“听起来合理”、符合常识、出现在目标读者画像中或适合品牌语气而判为 supported。输入允许用问题保留未知时，不把不预设答案的问题当作断言；但问题里暗含的情绪、状态或前提仍需单独审计。',
   '逐项读取 brief.avoidTone 里的禁区并反查候选稿。产品名包含“修护、净澈、舒缓”等字样，只能支持名称本身，不能据此推导产品效果；两件产品“配合使用”也不蕴含先后顺序、协同机制、双倍效果或任何新增功效。',
   '输入缺少某项事实，只表示该项不能写，不支持把材料缺口叙述成产品状态。“功效未知、标签难辨、静待探索、更多信息待揭晓”只有在 brief 明确要求悬念叙事时才 supported；不能用“未知”替代被删除的幻觉。季节处境也不自动支持“皮肤易感不适、肌肤需要安抚或关怀”。',
-  '边界示例：输入只说“大约一个月”，成稿“第 30 天”中的“第 30 天”是 unknown；输入只说视觉素材展示袜子，成稿“袜子摆在桌上”中的“摆在桌上”是 unknown；输入只说两件产品配合使用，成稿“面膜先行，精华跟进”与“带来更深层舒缓”都是 unknown；输入只说炎热干燥和两件产品，成稿“皮肤易感不适”“两件产品静待探索”和“功效未知”都是 unknown；输入只说主队状态未知，成稿“心里没底”是 unknown；输入只说凌晨 3 点开赛并邀请一起看，成稿“陪你守到天亮”中的“守到天亮”是 unknown。',
+  '边界示例：输入只说“大约一个月”，成稿“第 30 天”中的“第 30 天”是 unknown；输入只说视觉素材展示袜子，成稿“袜子摆在桌上”中的“摆在桌上”是 unknown；输入只说两件产品配合使用，成稿“面膜先行，精华跟进”与“带来更深层舒缓”都是 unknown；输入只说炎热干燥和两件产品，成稿“皮肤易感不适”“两件产品静待探索”和“功效未知”都是 unknown；输入只说尚未学会所有设置，成稿“也不着急”“已经够用了”“没想过别的”都是 unknown；输入只说主队状态未知，成稿“心里没底”是 unknown；输入只说凌晨 3 点开赛并邀请一起看，成稿“陪你守到天亮”中的“守到天亮”是 unknown。',
   '时间词必须语义保真：输入“今天凌晨 3 点”时，成稿“今晚 3 点”是 contradicted。今天、今晚、明天以及上午、下午、晚上、凌晨不能因口语化而互换。',
   'quote 必须逐字复制候选成稿中的最小充分片段，不能改写、概括或补词。同一个事实不要重复抽取。主观号召和纯修辞若不暗含可核验事实，可以不列出。',
   'input.requirements 必须逐条返回且 id、kind 不得改写。required_fact 只有在正文语义完整覆盖时才是 satisfied，并提供 1-3 条逐字 evidence；遗漏、改变主体关系或只覆盖一部分时是 failed，无法可靠判断时是 uncertain。',
@@ -343,6 +344,38 @@ export function getDraftGroundingIssues(
   )
 }
 
+const unsupportedMindsetPhrases = [
+  '也不着急',
+  '已经够用了',
+  '没想过别的',
+  '终于放心了',
+  '觉得按快门就行',
+  '拍得轻松',
+] as const
+
+export function findUnsupportedMindsetIssues(
+  draft: AiDraftCopy,
+  input: GenerateDraftRequest,
+): DraftGroundingIssue[] {
+  const draftText = [draft.title, ...draft.body].join('\n')
+  const allowedText = [
+    input.topic,
+    input.brief.objective,
+    input.brief.mustInclude,
+    input.brief.sourceFacts,
+    input.brief.instructions,
+    ...input.brief.facts.map((fact) => fact.statement),
+  ].join('\n')
+
+  return unsupportedMindsetPhrases
+    .filter((phrase) => draftText.includes(phrase) && !allowedText.includes(phrase))
+    .map((phrase) => ({
+      quote: phrase,
+      classification: 'unknown' as const,
+      reason: 'topic 和 brief 未提供这一第一人称心态或判断。',
+    }))
+}
+
 export function getDraftRequirementIssues(
   output: DraftGroundingAuditOutput,
 ): DraftRequirementAudit[] {
@@ -383,7 +416,16 @@ export function buildDraftQualitySnapshot(
   const boundaryAudits = (audit?.requirements ?? []).filter(
     (requirement) => requirement.kind === 'expression_boundary',
   )
-  const groundingIssues = audit ? getDraftGroundingIssues(audit) : []
+  const auditedGroundingIssues = audit ? getDraftGroundingIssues(audit) : []
+  const groundingIssues = [
+    ...auditedGroundingIssues,
+    ...findUnsupportedMindsetIssues(draft, input).filter(
+      (issue) =>
+        !auditedGroundingIssues.some(
+          (auditIssue) => auditIssue.quote === issue.quote,
+        ),
+    ),
+  ]
   const factStatus: DraftQualitySnapshot['checks'][number]['status'] =
     factRequirements.length === 0
       ? 'not_applicable'
@@ -400,11 +442,12 @@ export function buildDraftQualitySnapshot(
         : boundaryAudits.every((requirement) => requirement.status === 'satisfied')
           ? 'passed'
           : 'failed'
-  const groundingStatus: DraftQualitySnapshot['checks'][number]['status'] = !audit
-    ? 'needs_review'
-    : groundingIssues.length === 0
-      ? 'passed'
-      : 'failed'
+  const groundingStatus: DraftQualitySnapshot['checks'][number]['status'] =
+    groundingIssues.length > 0
+      ? 'failed'
+      : !audit
+        ? 'needs_review'
+        : 'passed'
 
   const formatRequirementDetail = (requirement: DraftRequirementAudit) => {
     const statement = requirementById.get(requirement.id)?.statement ?? requirement.id
@@ -1084,6 +1127,7 @@ const draftSystemPrompt = [
   'writingProfile.preferences.application 同时描述执行方式和适用条件。账号级偏好不等于跨内容模式通用：只应用与 contentMode.resolvedMode 和当前 brief 条件相符的偏好；其他模式的账号自称、互动动作、句长、分行、双关或结尾习惯必须忽略。',
   '参考是证据，不是句子仓库。参考文案只提供写作机制和可核实的背景事实，不提供可直接挪用的个人经历、产品事实、数据或句子。',
   '当前目标稿的事实只能来自 topic 和 brief。参考笔记中的产品、地点、历史、材质、陈设和动作都不自动属于当前目标；analysis 只用于语气、判断位置和避坑，不得覆盖 brief 的事实边界。',
+  '第一人称心态同样属于事实边界。不得为了让文案像真人而补写输入没有提供的想法、满意度、焦虑缓解或态度，例如“没想过别的”“也不着急”“已经够用了”“终于放心了”；writingProfile 只能决定如何表达已知事实，不能创造用户感受。',
   '输入里的封面、配图、图片、参考、标注、brief、事实清单和目标读者等字段名只是写作材料的来源说明，不是面向读者的内容。除非 topic 本身明确以这些对象为主题，成稿不得提及这些制作过程词，只能写其承载的事实。',
   'brief.facts 是原子事实清单。required=true 的事实必须在正文中得到语义保真的表达；required=false 是可用背景，只有在直接推进 brief.mustInclude 主线时才使用，不得为增加字数、显得具体或另起一条产品线而加入。任何被使用的事实都不得合并步骤、倒置因果、改变先后、扩大范围或把“已发生/进行中/将发生”互换。写完后逐条核对 required fact id。',
   'required=true 表示语义必须覆盖，不表示每条事实都要单独成句、解释或展开。允许把主体、组合关系和一个有依据的判断压进同一句；事实已覆盖后立即停止。产品名称中的功效词只属于名称，不能当作可展开的效果证据；“配合使用”不自动提供使用顺序、协同机制、程度提升或具体效果。',
@@ -1123,7 +1167,7 @@ export const draftSkillV1: AiSkillDefinition<
   AiDraftCopy
 > = {
   id: 'xiaohongshu-draft',
-  version: '1.10.0',
+  version: '1.10.1',
   taskType: 'draft',
   model: 'deepseek-v4-flash',
   maxTokens: 2600,

@@ -61,7 +61,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'user-writing-model')
-assert.equal(prepared.metadata.version, '1.4.3')
+assert.equal(prepared.metadata.version, '1.4.4')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'learn_user_writing_model')
 assert.equal(userPayload.input.scope, 'account')
@@ -85,6 +85,8 @@ assert.ok(prepared.systemPrompt.includes('单条非明确证据必须为 candida
 assert.ok(prepared.systemPrompt.includes('同一篇 note 本身及其全部 snippets 只算一个素材来源'))
 assert.ok(prepared.systemPrompt.includes('至少两篇不同 note'))
 assert.ok(prepared.systemPrompt.includes('纯素材证据无法可靠建立内容模式时使用 unclassified'))
+assert.ok(prepared.systemPrompt.includes('用第一天、第三天、现在推进'))
+assert.ok(prepared.systemPrompt.includes('不得因为拆分导致原本跨独立来源的共性'))
 const manualEditPayload = userPayload.input.feedbackEvidence.find(
   (item) => item.type === 'manual_edit',
 )
