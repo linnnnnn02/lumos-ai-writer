@@ -61,7 +61,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'user-writing-model')
-assert.equal(prepared.metadata.version, '1.4.2')
+assert.equal(prepared.metadata.version, '1.4.3')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'learn_user_writing_model')
 assert.equal(userPayload.input.scope, 'account')
@@ -82,6 +82,9 @@ assert.ok(prepared.systemPrompt.includes('dimension 只能是以下值之一'))
 assert.ok(prepared.systemPrompt.includes('事实修正、名称替换、错别字'))
 assert.ok(prepared.systemPrompt.includes('fact_correction、draft_requirement'))
 assert.ok(prepared.systemPrompt.includes('单条非明确证据必须为 candidate'))
+assert.ok(prepared.systemPrompt.includes('同一篇 note 本身及其全部 snippets 只算一个素材来源'))
+assert.ok(prepared.systemPrompt.includes('至少两篇不同 note'))
+assert.ok(prepared.systemPrompt.includes('纯素材证据无法可靠建立内容模式时使用 unclassified'))
 const manualEditPayload = userPayload.input.feedbackEvidence.find(
   (item) => item.type === 'manual_edit',
 )
@@ -209,6 +212,37 @@ const sameProjectAccountProfile = writingProfileSchema.parse(
   ),
 )
 assert.equal(sameProjectAccountProfile.preferences[0]?.status, 'candidate')
+const weakSecondProjectFeedback = {
+  ...manualFeedback,
+  id: 'feedback-weak-second-project',
+  projectId: '22222222-2222-4222-8222-222222222222',
+  type: 'rewrite_preference' as const,
+  createdAt: '2026-06-10T08:05:00.000Z',
+}
+const weakCrossProjectAccountProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...repeatedPreferenceOutput,
+      preferences: repeatedPreferenceOutput.preferences.map((preference) => ({
+        ...preference,
+        evidenceIds: [
+          ...preference.evidenceIds,
+          weakSecondProjectFeedback.id,
+        ],
+      })),
+    },
+    buildWritingProfileRequestSchema.parse({
+      scope: 'account',
+      previousProfile: null,
+      libraryEvidence: { notes: [], snippets: [] },
+      feedbackEvidence: [
+        ...repeatedSameProjectFeedback,
+        weakSecondProjectFeedback,
+      ],
+    }),
+  ),
+)
+assert.equal(weakCrossProjectAccountProfile.preferences[0]?.status, 'candidate')
 const sameProjectProjectProfile = writingProfileSchema.parse(
   normalizeWriterModelOutput(
     repeatedPreferenceOutput,
@@ -243,6 +277,167 @@ const lowConfidenceProjectProfile = writingProfileSchema.parse(
 )
 assert.equal(lowConfidenceProjectProfile.preferences[0]?.confidence, 0.55)
 assert.equal(lowConfidenceProjectProfile.preferences[0]?.status, 'active')
+
+const secondProjectFeedback = {
+  ...manualFeedback,
+  id: 'feedback-manual-concrete-edit-second-project',
+  projectId: '22222222-2222-4222-8222-222222222222',
+  createdAt: '2026-06-10T08:10:00.000Z',
+}
+const crossProjectAccountProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...expectedOutput,
+      preferences: [
+        {
+          ...expectedOutput.preferences[0],
+          confidence: 0.7,
+          evidenceIds: [manualFeedback.id, secondProjectFeedback.id],
+        },
+      ],
+    },
+    buildWritingProfileRequestSchema.parse({
+      scope: 'account',
+      previousProfile: null,
+      libraryEvidence: { notes: [], snippets: [] },
+      feedbackEvidence: [manualFeedback, secondProjectFeedback],
+    }),
+  ),
+)
+assert.equal(crossProjectAccountProfile.preferences[0]?.status, 'active')
+assert.deepEqual(crossProjectAccountProfile.preferences[0]?.contentModes, ['brand_story'])
+
+const sameNoteLibraryInput = buildWritingProfileRequestSchema.parse({
+  scope: 'account',
+  previousProfile: null,
+  libraryEvidence: {
+    notes: [input.libraryEvidence.notes[0]],
+    snippets: input.libraryEvidence.snippets.filter(
+      (snippet) => snippet.noteId === input.libraryEvidence.notes[0]?.id,
+    ),
+  },
+  feedbackEvidence: [],
+})
+const sameNoteLibraryProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...expectedOutput,
+      preferences: [
+        {
+          ...expectedOutput.preferences[0],
+          confidence: 0.99,
+          evidenceIds: sameNoteLibraryInput.libraryEvidence.snippets.map(
+            (snippet) => snippet.id,
+          ),
+        },
+      ],
+    },
+    sameNoteLibraryInput,
+  ),
+)
+assert.equal(sameNoteLibraryProfile.preferences[0]?.status, 'candidate')
+assert.equal(sameNoteLibraryProfile.preferences[0]?.confidence, 0.45)
+assert.deepEqual(sameNoteLibraryProfile.preferences[0]?.contentModes, ['unclassified'])
+
+const unlinkedSnippetLibraryInput = buildWritingProfileRequestSchema.parse({
+  scope: 'account',
+  previousProfile: null,
+  libraryEvidence: {
+    notes: [input.libraryEvidence.notes[0]],
+    snippets: [
+      input.libraryEvidence.snippets[0],
+      {
+        ...input.libraryEvidence.snippets[2],
+        id: 'legacy-unlinked-snippet',
+        noteId: undefined,
+      },
+    ],
+  },
+  feedbackEvidence: [],
+})
+const unlinkedSnippetLibraryProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...expectedOutput,
+      preferences: [
+        {
+          ...expectedOutput.preferences[0],
+          confidence: 0.7,
+          evidenceIds: ['snippet-concrete-change', 'legacy-unlinked-snippet'],
+        },
+      ],
+    },
+    unlinkedSnippetLibraryInput,
+  ),
+)
+assert.equal(unlinkedSnippetLibraryProfile.preferences[0]?.status, 'candidate')
+
+const distinctNoteLibraryInput = buildWritingProfileRequestSchema.parse({
+  scope: 'account',
+  previousProfile: null,
+  libraryEvidence: input.libraryEvidence,
+  feedbackEvidence: [],
+})
+const distinctNoteLibraryOutput = {
+  ...expectedOutput,
+  preferences: [
+    {
+      ...expectedOutput.preferences[0],
+      confidence: 0.7,
+      evidenceIds: ['snippet-concrete-change', 'snippet-use-sequence'],
+    },
+  ],
+}
+const distinctNoteLibraryProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(distinctNoteLibraryOutput, distinctNoteLibraryInput),
+)
+assert.equal(distinctNoteLibraryProfile.preferences[0]?.status, 'active')
+assert.equal(distinctNoteLibraryProfile.preferences[0]?.confidence, 0.7)
+assert.deepEqual(distinctNoteLibraryProfile.preferences[0]?.contentModes, ['unclassified'])
+
+const distinctNoteLibraryRevision = {
+  id: '12121212-1212-4212-8212-121212121212',
+  scope: 'account' as const,
+  projectId: null,
+  version: 1,
+  profile: distinctNoteLibraryProfile,
+  evidenceIds: distinctNoteLibraryProfile.preferences[0]?.evidenceIds ?? [],
+  skill: prepared.metadata,
+  createdAt: '2026-06-20T08:00:00.000Z',
+}
+assert.equal(
+  compactActiveWritingProfile(distinctNoteLibraryRevision, 'brand_story'),
+  null,
+)
+assert.equal(
+  compactActiveWritingProfile(distinctNoteLibraryRevision, 'unclassified')
+    ?.preferences.length,
+  1,
+)
+
+const contradictedLibraryProfile = writingProfileSchema.parse(
+  normalizeWriterModelOutput(
+    {
+      ...distinctNoteLibraryOutput,
+      preferences: distinctNoteLibraryOutput.preferences.map((preference) => ({
+        ...preference,
+        contradictions: ['另一篇素材使用了相反的推进方式。'],
+      })),
+    },
+    distinctNoteLibraryInput,
+  ),
+)
+assert.equal(contradictedLibraryProfile.preferences[0]?.status, 'candidate')
+assert.equal(
+  compactActiveWritingProfile(
+    {
+      ...distinctNoteLibraryRevision,
+      profile: contradictedLibraryProfile,
+    },
+    'unclassified',
+  ),
+  null,
+)
 
 const factCorrectionInput = buildWritingProfileRequestSchema.parse({
   ...singleManualInput,

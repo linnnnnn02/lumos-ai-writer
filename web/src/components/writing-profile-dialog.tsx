@@ -43,7 +43,7 @@ const dimensionLabels: Record<WritingPreference['dimension'], string> = {
 }
 
 const contentModeLabels: Record<WritingPreference['contentModes'][number], string> = {
-  unclassified: '所有场景',
+  unclassified: '场景待判断',
   brand_story: '品牌叙事',
   product_education: '产品说明',
   campaign_interaction: '活动互动',
@@ -53,8 +53,8 @@ const contentModeLabels: Record<WritingPreference['contentModes'][number], strin
 }
 
 const statusLabels: Record<WritingPreference['status'], string> = {
-  candidate: '待确认',
-  active: '已启用',
+  candidate: '待观察',
+  active: '已验证',
   disabled: '已停用',
   rejected: '已移除',
 }
@@ -245,7 +245,7 @@ export function WritingProfileDialog({
                 ? '已按你的修改更新并启用。'
                 : preference.status === 'rejected'
                   ? '已恢复并重新启用。'
-                  : '已启用，后续写作会参考这条规则。',
+                  : '已采用，后续写作会参考这条规则。',
       })
     } finally {
       setPendingPreferenceId('')
@@ -383,7 +383,7 @@ export function WritingProfileDialog({
                   disabled={!canLearn || isSaving}
                 >
                   {isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                  {isPending ? '正在启用' : '确认启用'}
+                  {isPending ? '正在采用' : '提前采用'}
                 </Button>
               ) : preference.status === 'disabled' ? (
                 <Button
@@ -471,7 +471,7 @@ export function WritingProfileDialog({
               <DialogTitle className="text-balance">表达档案</DialogTitle>
             </div>
             <DialogDescription className="text-pretty">
-              AI 根据你的素材和修改逐步理解你的写作方式。只有已启用的规则会影响生成。
+              AI 会从独立素材和反复修改中验证你的写作方式。稳定规律自动应用，初步判断不会影响写作。
             </DialogDescription>
           </DialogHeader>
 
@@ -531,10 +531,10 @@ export function WritingProfileDialog({
               <section className="pb-[var(--ui-space-4)]">
                 <div className="flex flex-wrap items-center gap-[var(--ui-gap-control)]">
                   <Badge variant="accent" className="tabular-nums">
-                    已启用 {activePreferences.length}
+                    已应用 {activePreferences.length}
                   </Badge>
                   <Badge variant="outline" className="tabular-nums">
-                    待确认 {candidatePreferences.length}
+                    待观察 {candidatePreferences.length}
                   </Badge>
                   <span className="text-xs text-[var(--soft-foreground)] tabular-nums">
                     第 {revision?.version ?? 1} 版 · {profile.evidenceCount} 条证据 ·{' '}
@@ -548,7 +548,7 @@ export function WritingProfileDialog({
                   <div>
                     <h3 className="text-base font-semibold text-[var(--foreground)]">写作规则</h3>
                     <p className="mt-[var(--ui-gap-related)] text-pretty text-xs leading-5 text-[var(--soft-foreground)]">
-                      先确认 AI 的判断，再决定是否用于后续生成和改写。
+                      重复、独立且没有冲突的规律会自动应用，你也可以随时修改或停用。
                     </p>
                   </div>
                   <span className="shrink-0 text-xs text-[var(--soft-foreground)] tabular-nums">
@@ -559,8 +559,8 @@ export function WritingProfileDialog({
                 <div className="mt-[var(--ui-space-5)] grid gap-[var(--ui-space-6)]">
                   {candidatePreferences.length > 0 ? (
                     <PreferenceGroup
-                      title="待确认"
-                      description="AI 的初步判断，确认或修改后才会用于写作。"
+                      title="待观察"
+                      description="证据还不够稳定，不会影响写作；你无需逐条处理，也可提前采用或修改。"
                       count={candidatePreferences.length}
                     >
                       {candidatePreferences.map(renderPreference)}
@@ -568,15 +568,15 @@ export function WritingProfileDialog({
                   ) : null}
 
                   <PreferenceGroup
-                    title="已启用"
-                    description="生成和改写时会参考这些规则。"
+                    title="已验证并应用"
+                    description="由重复独立证据或你的明确设置支持，生成和改写时会参考。"
                     count={activePreferences.length}
                   >
                     {activePreferences.length > 0 ? (
                       activePreferences.map(renderPreference)
                     ) : (
                       <p className="py-[var(--ui-space-4)] text-sm leading-6 text-[var(--soft-foreground)]">
-                        还没有已启用规则。你可以确认上方规则，或在下方直接添加。
+                        还没有已验证规则。系统会继续观察，你也可以提前采用上方规则或直接添加。
                       </p>
                     )}
                   </PreferenceGroup>

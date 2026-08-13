@@ -10,12 +10,9 @@ function isPreferenceApplicable(
   preference: WritingPreference,
   contentMode: AiContentMode,
 ) {
-  return (
-    preference.status === 'active' &&
-    (preference.contentModes.length === 0 ||
-      contentMode === 'unclassified' ||
-      preference.contentModes.includes(contentMode))
-  )
+  if (preference.status !== 'active') return false
+  if (preference.contentModes.length === 0) return true
+  return preference.contentModes.includes(contentMode)
 }
 
 export function getAppliedWritingProfileRevision(
