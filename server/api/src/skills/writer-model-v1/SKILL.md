@@ -1,6 +1,6 @@
 ---
 id: user-writing-model
-version: 1.4.2
+version: 1.4.3
 task: profile-learn
 model: deepseek-v4-flash
 ---
@@ -27,6 +27,9 @@ Learn why a user values selected library material and how the user changes draft
 - Infer reusable decisions, not copied phrases.
 - Keep account preferences separate from project-only requirements.
 - Require feedback-only account rules to have evidence from at least two projects; same-project repetition may activate only in the project profile.
+- Count independent sources rather than raw evidence IDs when deciding maturity; a note and all of its snippets are one source.
+- Activate a contradiction-free library pattern only when it is supported by at least two distinct source notes.
+- Do not use an unlinked legacy snippet as an independent source for automatic activation.
 - Treat account scope as persistence, not universal applicability across content modes.
 - State the applicable content mode and trigger in `application` when evidence comes from only one mode.
 - Promote a preference to a cross-mode default only with evidence from at least two distinct modes or an explicit profile correction.
@@ -43,6 +46,7 @@ Learn why a user values selected library material and how the user changes draft
 - Treat `appliedPreferenceIds` only as supplied context, not proof that a rule caused the output or the subsequent edit.
 - Compare the actual before-to-after change before using an edit to support, refine, or contradict a referenced rule.
 - Record applicable content modes structurally and never treat account scope as automatic cross-mode applicability.
+- Keep a library-only pattern scoped to `unclassified` until feedback or prior verified evidence establishes a content mode.
 - Explain how each preference changes future writing behavior.
 - Learn directional changes in vocabulary, forbidden phrases, sentence rhythm, punctuation, emotional intensity, and certainty when the evidence supports them.
 - Separate reusable style edits from factual corrections, typo fixes, length compliance, and one-off task requirements.
