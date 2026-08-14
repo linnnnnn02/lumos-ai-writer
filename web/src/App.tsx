@@ -250,6 +250,45 @@ function isLegacyAnalysisErrorMessage(message: ChatMessage) {
   )
 }
 
+function getPlanInstructionMessages(messages: ChatMessage[]) {
+  const messageIds = new Set(
+    messages
+      .filter((message) => message.source === 'plan_instruction')
+      .map((message) => message.id),
+  )
+  let latestLegacyDirectionIndex = -1
+
+  messages.forEach((message, index) => {
+    if (message.role === 'assistant' && message.title === '方向已记录') {
+      latestLegacyDirectionIndex = index
+    }
+
+    if (
+      message.role !== 'assistant' ||
+      message.title !== '已加入创作简报'
+    ) {
+      return
+    }
+
+    messageIds.add(message.id)
+    const previousMessage = messages[index - 1]
+    if (previousMessage?.role === 'user') {
+      messageIds.add(previousMessage.id)
+    }
+  })
+
+  if (messageIds.size === 0 && latestLegacyDirectionIndex > 0) {
+    const legacyAssistant = messages[latestLegacyDirectionIndex]
+    const legacyUser = messages[latestLegacyDirectionIndex - 1]
+    if (legacyAssistant && legacyUser?.role === 'user') {
+      messageIds.add(legacyUser.id)
+      messageIds.add(legacyAssistant.id)
+    }
+  }
+
+  return messages.filter((message) => messageIds.has(message.id))
+}
+
 function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
   const seen = new Set<string>()
 
@@ -1163,10 +1202,6 @@ function sortConversationsForSidebar(conversations: ConversationRecord[]) {
         a.index - b.index,
     )
     .map(({ conversation }) => conversation)
-}
-
-function getConversationStep(conversation: ConversationRecord) {
-  return conversation.step ?? 'learn'
 }
 
 function buildAssistantReply(question: string, context: AiAnalysisResult) {
@@ -4476,7 +4511,7 @@ function App() {
 
     const projectId = activeProject.id
     const conversationId = activeConversation.id
-    const isPlanInstruction = getConversationStep(activeConversation) === 'plan'
+    const isPlanInstruction = step === 'plan'
     const shouldGenerateTitle =
       activeConversation.chatMessages.length === 0 &&
       isDefaultConversationTitle(activeConversation.title)
@@ -4484,6 +4519,7 @@ function App() {
       id: crypto.randomUUID(),
       role: 'user',
       stage: activeConversation.analysisReady ? 'followup' : 'setup',
+      source: isPlanInstruction ? 'plan_instruction' : undefined,
       lines: [question],
     }
 
@@ -4508,7 +4544,7 @@ function App() {
       ? {
           stage: 'followup' as const,
           title: '已加入创作简报',
-          lines: ['这条要求会参与下一次生成。简报已变化，当前初稿需要重新生成。'],
+          lines: ['内容已保存。请重新生成初稿，使这条要求应用到文案。'],
         }
       : activeConversation.analysisReady
         ? buildAssistantReply(question, analysis)
@@ -4525,6 +4561,7 @@ function App() {
           id: crypto.randomUUID(),
           role: 'assistant',
           stage: reply.stage,
+          source: isPlanInstruction ? 'plan_instruction' : undefined,
           title: reply.title,
           lines: reply.lines,
         },
@@ -4532,6 +4569,53 @@ function App() {
     }))
 
     dispatchAnalysisState({ type: 'finish-chat-reply', conversationId })
+  }
+
+  function handleApplyHistoricalPlanInstruction(messageId: string) {
+    const messageIndex = activeConversation.chatMessages.findIndex(
+      (message) => message.id === messageId,
+    )
+    const message = activeConversation.chatMessages[messageIndex]
+    const instruction = message?.lines.join('\n').trim() ?? ''
+    if (!instruction || message?.role !== 'user') return
+
+    invalidateDraftOutputs(activeConversation.id)
+    updateConversation(activeProject.id, activeConversation.id, (conversation) => {
+      const existingInstructions = conversation.writingBrief.instructions
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      const nextInstructions = existingInstructions.includes(instruction)
+        ? existingInstructions
+        : [...existingInstructions, instruction]
+
+      return {
+        ...conversation,
+        finalizedAt: undefined,
+        writingBrief: {
+          ...conversation.writingBrief,
+          instructions: nextInstructions.join('\n'),
+        },
+        chatMessages: conversation.chatMessages.map((chatMessage, index) => {
+          if (chatMessage.id === messageId) {
+            return { ...chatMessage, source: 'plan_instruction' }
+          }
+          if (
+            index === messageIndex + 1 &&
+            chatMessage.role === 'assistant' &&
+            chatMessage.title === '方向已记录'
+          ) {
+            return {
+              ...chatMessage,
+              source: 'plan_instruction',
+              title: '已加入创作简报',
+              lines: ['内容已保存。请重新生成初稿，使这条要求应用到文案。'],
+            }
+          }
+          return chatMessage
+        }),
+      }
+    })
   }
 
   function normalizeDraftSelection(value: string) {
@@ -7365,6 +7449,13 @@ function App() {
   }
 
   function renderPlan() {
+    const planInstructionMessages = getPlanInstructionMessages(
+      activeConversation.chatMessages,
+    )
+    const planInstructionCount = planInstructionMessages.filter(
+      (message) => message.role === 'user',
+    ).length
+
     return (
       <div className="relative h-[100dvh] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)]">
         {renderWorkflowSidebar()}
@@ -7763,6 +7854,73 @@ function App() {
                     </div>
 
                     {draftBridgeMessages.map((message) => renderDraftBridgeMessage(message))}
+
+                    {planInstructionMessages.length > 0 ? (
+                      <section
+                        aria-label="已发送的创作补充"
+                        className="ml-0 max-w-[50rem] border-y border-[rgba(31,22,17,0.07)] py-3 md:ml-[3.25rem]"
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                          <p className="text-xs font-semibold text-[var(--muted-foreground)]">
+                            已发送的创作补充
+                          </p>
+                          <span className="text-xs text-[var(--soft-foreground)]">
+                            {planInstructionCount} 条
+                          </span>
+                        </div>
+                        <div className="grid gap-2" aria-live="polite">
+                          {planInstructionMessages.map((message) =>
+                            message.role === 'user' ? (
+                              <article
+                                key={message.id}
+                                className="ml-auto max-w-[88%] rounded-[var(--ui-radius-card)] rounded-br-[0.35rem] bg-[#202428] px-4 py-2.5 text-white shadow-[0_8px_20px_rgba(15,23,42,0.1)] md:max-w-[42rem]"
+                              >
+                                {message.lines.map((line, index) => (
+                                  <p
+                                    key={`${message.id}-${index}`}
+                                    className="text-sm leading-6"
+                                  >
+                                    {line}
+                                  </p>
+                                ))}
+                                {message.source !== 'plan_instruction' ? (
+                                  <div className="mt-2 flex justify-end border-t border-white/10 pt-2">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        handleApplyHistoricalPlanInstruction(message.id)
+                                      }
+                                      className="h-7 px-2 text-xs text-white/72 hover:bg-white/10 hover:text-white"
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5" />
+                                      应用到简报
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </article>
+                            ) : (
+                              <article
+                                key={message.id}
+                                className="flex items-center justify-end gap-1.5 px-1 text-xs leading-5 text-[var(--muted-foreground)]"
+                                role="status"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#17675b]" />
+                                <p>
+                                  <span className="font-semibold text-[var(--foreground)]">
+                                    {message.title ?? '已收到'}
+                                  </span>
+                                  {message.title === '已加入创作简报'
+                                    ? '，重新生成后生效'
+                                    : '，尚未写入简报'}
+                                </p>
+                              </article>
+                            ),
+                          )}
+                        </div>
+                      </section>
+                    ) : null}
 
                     <div className="ml-0 grid gap-3 md:ml-[3.25rem]">
                       {[
