@@ -113,10 +113,30 @@ assert.equal(userPayload.input.instruction, input.instruction)
 assert.equal(userPayload.input.selection.fieldId, input.fieldId)
 assert.equal(userPayload.input.selection.selectedText, input.selectedText)
 assert.deepEqual(userPayload.input.fullDraft, input.draft)
-assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(!userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
 assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
-assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
+assert.equal(userPayload.input.writingProfile.account?.preferences.length, 1)
 assert.equal(userPayload.input.writingProfile.project, null)
+const brandModeRewriteInput = compactRewriteSkillInput({
+  ...input,
+  analysis: {
+    ...draftInput.analysis,
+    contentMode: {
+      ...draftInput.analysis.contentMode,
+      targetMode: 'brand_story',
+    },
+  },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.equal(brandModeRewriteInput.writingProfile.account?.preferences.length, 2)
+assert.ok(
+  brandModeRewriteInput.writingProfile.account?.preferences.some(
+    (preference) => preference.statement === '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 const productModeRewriteInput = compactRewriteSkillInput({
   ...input,
   analysis: {

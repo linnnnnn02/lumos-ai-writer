@@ -106,11 +106,31 @@ assert.equal(userPayload.task, 'preview_draft_as_target_reader')
 assert.equal(userPayload.input.readerAudience, input.readerAudience)
 assert.deepEqual(userPayload.input.draft, input.draft)
 assert.ok(userPayload.input.analysis?.readerView.length)
-assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(!userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
 assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
-assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
+assert.equal(userPayload.input.writingProfile.account?.preferences.length, 1)
 assert.equal(userPayload.input.writingProfile.project, null)
 assert.ok(input.analysis)
+const brandModeReaderInput = compactReaderPreviewSkillInput({
+  ...input,
+  analysis: {
+    ...input.analysis,
+    contentMode: {
+      ...input.analysis.contentMode,
+      targetMode: 'brand_story',
+    },
+  },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.equal(brandModeReaderInput.writingProfile.account?.preferences.length, 2)
+assert.ok(
+  brandModeReaderInput.writingProfile.account?.preferences.some(
+    (preference) => preference.statement === '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 const productModeReaderInput = compactReaderPreviewSkillInput({
   ...input,
   analysis: {
