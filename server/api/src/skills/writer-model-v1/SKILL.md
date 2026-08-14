@@ -1,6 +1,6 @@
 ---
 id: user-writing-model
-version: 1.4.3
+version: 1.4.4
 task: profile-learn
 model: deepseek-v4-flash
 ---
@@ -42,6 +42,8 @@ Learn why a user values selected library material and how the user changes draft
 - Preserve user-disabled and user-rejected rules across later profile revisions.
 - Preserve every previous rule when no relevant new evidence updates it; a model omission is not a user request to forget.
 - Cluster edits with the same direction and application into one preference with all supporting evidence IDs.
+- Cluster by the future writing action, not by surface labels: time markers, usage order, and observable actions belong to one progression rule when they all replace an abstract summary with a concrete sequence.
+- Before keeping candidates separate, verify that each one would produce a meaningfully different instruction for a future draft; merge overlapping manifestations when it would not.
 - Reuse an existing preference ID when new evidence supports the same or a narrower version of that rule.
 - Treat `appliedPreferenceIds` only as supplied context, not proof that a rule caused the output or the subsequent edit.
 - Compare the actual before-to-after change before using an edit to support, refine, or contradict a referenced rule.

@@ -26,6 +26,7 @@ import {
   draftSkillV1,
   findDraftMetaLanguageIssues,
   findReferenceReuseIssues,
+  findUnsupportedMindsetIssues,
   getDraftOutputRequirements,
   getDraftGroundingIssues,
   getDraftRequirementIssues,
@@ -138,7 +139,7 @@ const userPayload = JSON.parse(prepared.userPrompt) as {
 }
 
 assert.equal(prepared.metadata.id, 'xiaohongshu-draft')
-assert.equal(prepared.metadata.version, '1.10.0')
+assert.equal(prepared.metadata.version, '1.10.1')
 assert.match(prepared.metadata.promptHash, /^[a-f0-9]{64}$/)
 assert.equal(userPayload.task, 'generate_xiaohongshu_draft')
 assert.equal(userPayload.input.length, 'medium')
@@ -294,16 +295,36 @@ const legacyAtomicFactInput = generateDraftRequestSchema.parse({
   },
 })
 assert.equal(legacyAtomicFactInput.brief.facts[0]?.required, true)
-assert.ok(userPayload.input.writingProfile.account?.summary.includes('时间节点和具体动作'))
-assert.ok(userPayload.input.writingProfile.account?.summary.includes('结尾突然总结上价值'))
-assert.ok(!userPayload.input.writingProfile.account?.summary.includes('像向朋友复盘'))
+const brandStoryDraftInput = compactDraftSkillInput({
+  ...input,
+  brief: { ...input.brief, contentMode: 'brand_story' },
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.ok(brandStoryDraftInput.writingProfile.account?.summary.includes('时间节点和具体动作'))
+assert.ok(brandStoryDraftInput.writingProfile.account?.summary.includes('结尾突然总结上价值'))
+assert.ok(!brandStoryDraftInput.writingProfile.account?.summary.includes('像向朋友复盘'))
 assert.ok(
-  userPayload.input.writingProfile.account?.mustAvoid.includes(
+  brandStoryDraftInput.writingProfile.account?.mustAvoid.includes(
     '不要追加改变生活、成为更好的自己等拔高句。',
   ),
 )
-assert.equal(userPayload.input.writingProfile.account?.preferences.length, 2)
-assert.equal(userPayload.input.writingProfile.project, null)
+assert.equal(brandStoryDraftInput.writingProfile.account?.preferences.length, 2)
+assert.equal(brandStoryDraftInput.writingProfile.project, null)
+const unclassifiedDraftInput = compactDraftSkillInput({
+  ...input,
+  writingProfileContext: {
+    accountProfile: accountWritingProfileRevision,
+    projectProfile: null,
+  },
+})
+assert.ok(
+  unclassifiedDraftInput.writingProfile.account?.preferences.every(
+    (preference) => preference.statement !== '偏好用时间节点和具体动作证明变化。',
+  ),
+)
 const productModeDraftInput = compactDraftSkillInput({
   ...input,
   brief: { ...input.brief, contentMode: 'product_education' },
@@ -351,6 +372,8 @@ assert.ok(draftGroundingAuditSystemPrompt.includes('“今晚 3 点”是 contra
 assert.ok(draftGroundingAuditSystemPrompt.includes('面膜先行，精华跟进'))
 assert.ok(draftGroundingAuditSystemPrompt.includes('两件产品静待探索'))
 assert.ok(draftGroundingAuditSystemPrompt.includes('功效未知'))
+assert.ok(draftGroundingAuditSystemPrompt.includes('第一人称不降低事实门槛'))
+assert.ok(draftGroundingAuditSystemPrompt.includes('“也不着急”“已经够用了”“没想过别的”'))
 assert.ok(prepared.systemPrompt.includes('不表示每条事实都要单独成句'))
 assert.ok(prepared.systemPrompt.includes('“配合使用”不自动提供使用顺序'))
 assert.ok(prepared.systemPrompt.includes('brevityMode=ultra_short'))
@@ -362,6 +385,58 @@ assert.ok(prepared.systemPrompt.includes('不得完整照抄标注中的短分�
 assert.ok(prepared.systemPrompt.includes('高亮片段换几个近义词'))
 assert.ok(draftRepairSystemPrompt.includes('bannedVerbatimPhrases'))
 assert.ok(prepared.systemPrompt.includes('严禁为了表现风格而补写 brief 未提供的物象或动作'))
+assert.ok(prepared.systemPrompt.includes('第一人称心态同样属于事实边界'))
+const unsupportedMindsetInput = generateDraftRequestSchema.parse({
+  ...input,
+  brief: {
+    ...input.brief,
+    sourceFacts: '使用者还没有学会所有设置。',
+  },
+})
+assert.deepEqual(
+  findUnsupportedMindsetIssues(
+    {
+      title: '相机使用复盘',
+      body: ['其他设置还没学会，也不着急，觉得按快门就行。'],
+    },
+    unsupportedMindsetInput,
+  ).map((issue) => issue.quote),
+  ['也不着急', '觉得按快门就行'],
+)
+assert.deepEqual(
+  findUnsupportedMindsetIssues(
+    {
+      title: '相机使用复盘',
+      body: ['其他设置还没学会，也不着急。'],
+    },
+    {
+      ...unsupportedMindsetInput,
+      brief: {
+        ...unsupportedMindsetInput.brief,
+        sourceFacts: '使用者还没有学会所有设置，也不着急。',
+      },
+    },
+  ),
+  [],
+)
+const unsupportedMindsetQuality = buildDraftQualitySnapshot(
+  unsupportedMindsetInput,
+  {
+    title: '相机使用复盘',
+    body: ['其他设置还没学会，也不着急，觉得按快门就行。'],
+  },
+  null,
+)
+assert.equal(
+  unsupportedMindsetQuality.checks.find((check) => check.id === 'factual_grounding')
+    ?.status,
+  'failed',
+)
+assert.ok(
+  unsupportedMindsetQuality.checks
+    .find((check) => check.id === 'factual_grounding')
+    ?.details.some((detail) => detail.includes('也不着急')),
+)
 assert.ok(prepared.systemPrompt.includes('不要把短句、口语词和网络语当作真人感的替代品'))
 
 const mismatchedModeInput = generateDraftRequestSchema.parse({
@@ -896,7 +971,7 @@ const sourceFactsOnlyInput = generateDraftRequestSchema.parse({
 const sourceFactsOnlyCandidate = aiDraftCopySchema.parse({
   title: '今晚还看球吗',
   body: [
-    '四双足球主题袜子都带有十号元素。你的主队还在吗？心里没底也没关系。',
+    '四双足球主题袜子都带有十号元素。你的主队还在吗？也不着急。',
   ],
 })
 const sourceFactsOnlyRepairedCandidate = aiDraftCopySchema.parse({
@@ -911,9 +986,9 @@ const sourceFactsOnlyResponses = [
   {
     assertions: [
       {
-        quote: '心里没底',
-        classification: 'unknown',
-        reason: 'topic 与 brief.sourceFacts 均未提供读者心理状态。',
+        quote: '四双足球主题袜子都带有十号元素',
+        classification: 'supported',
+        reason: 'brief.sourceFacts 明确给出。',
       },
     ],
     requirements: [
@@ -941,9 +1016,9 @@ const sourceFactsOnlyResponses = [
       {
         id: 'boundary-1',
         kind: 'expression_boundary',
-        status: 'failed',
-        evidence: ['心里没底'],
-        reason: '正文补写了读者心理状态。',
+        status: 'satisfied',
+        evidence: [],
+        reason: '模拟 AI 审计漏报主观心态，由确定性兜底继续拦截。',
       },
     ],
   },
@@ -1053,7 +1128,7 @@ try {
   ) as {
     input: { bannedGroundingPhrases: string[] }
   }
-  assert.deepEqual(repairPayload.input.bannedGroundingPhrases, ['心里没底'])
+  assert.deepEqual(repairPayload.input.bannedGroundingPhrases, ['也不着急'])
 } finally {
   globalThis.fetch = originalFetch
 }

@@ -608,6 +608,8 @@ const writerModelSystemPrompt = [
   '每条 preference 都要判断迁移边界。若证据只来自一种内容模式，application 必须明确写出适用模式和触发条件；只有证据覆盖至少两种不同内容模式，或用户通过 profile_correction 明确说明是长期通用习惯，才可写成跨模式默认规则。',
   '事实准确、不得编造、不得照抄参考等正确性约束可以跨模式成立；账号自称、互动动作、句长、分行、双关和结尾方式默认是模式相关偏好，除非有跨模式证据。',
   '输出前先按“同一方向、同一适用条件、同一未来动作”聚类证据。多条修改共享同一种表层变化时，应由一条 preference 引用全部支持证据；不得把重叠结论拆成多条各自只有一个 evidenceId 的候选。',
+  '聚类必须发生在“未来写作动作”层，而不是素材标签层。比如“用第一天、第三天、现在推进”“按实际使用顺序讲”“用时间点和可观察动作代替逐渐熟练”都要求未来草稿用具体过程承载变化，应合并为一条 progression preference，并引用各自真实证据；不能拆成时间、顺序、动作三条候选。反常识开头若要求的是不同写作动作，可以单独保留。',
+  '保留两条 candidate 之前，必须检查它们的 application 是否会让未来草稿执行实质不同的操作。若只是同一机制的主题、标签、例子或表层表现不同，合并而不是分别等待验证；不得因为拆分导致原本跨独立来源的共性永远停留在 candidate。',
   '单条非明确纠正证据只能形成待验证偏好，confidence 不得高于 0.45；单条 profile_correction 可达到 0.85；两条一致独立证据不得高于 0.7；三条以上且包含明确纠正、手动改稿或最终选择时才可高于 0.8。',
   '两条以上一致的手动修改或最终选择被同一条 preference 引用、没有 contradictions 且已满足当前 scope 的晋级门槛时，confidence 不应低于 0.55；不得为凑数量重复引用同一证据。',
   'supportCount 必须等于该偏好引用的去重 evidenceIds 数量；晋级门槛另按独立来源判断，同一篇 note 的多个 evidenceIds 不能重复计为多个来源。出现冲突时保留在 contradictions，不要平均成模糊结论。',
@@ -629,7 +631,7 @@ export const writerModelSkillV1: AiSkillDefinition<
   WritingProfile
 > = {
   id: 'user-writing-model',
-  version: '1.4.3',
+  version: '1.4.4',
   taskType: 'profile-learn',
   model: 'deepseek-v4-flash',
   maxTokens: 3200,

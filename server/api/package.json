@@ -14,6 +14,7 @@
     "eval:rewrite": "tsx scripts/eval-rewrite-skill.ts",
     "eval:reader-preview": "tsx scripts/eval-reader-preview-skill.ts",
     "eval:ai-pilot": "tsx scripts/eval-ai-pilot.ts",
+    "benchmark:writing-profile": "tsx scripts/benchmark-writing-profile-forward.ts",
     "eval:skills": "pnpm eval:analysis && pnpm eval:writer-model && pnpm eval:draft && pnpm eval:rewrite && pnpm eval:reader-preview && pnpm eval:ai-pilot",
     "test:cors": "tsx scripts/test-cors.ts",
     "test:annotation-sync": "tsx scripts/test-annotation-sync.ts",
