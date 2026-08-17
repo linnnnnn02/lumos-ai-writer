@@ -62,9 +62,7 @@ import {
   Paperclip,
   PenLine,
   Pin,
-  Plus,
   Redo2,
-  Search,
   Send,
   Sparkles,
   ThumbsUp,
@@ -95,6 +93,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ConversationIntake } from '@/components/conversation-intake'
 import { DraftQualitySummary } from '@/components/draft-quality-summary'
 import { AuthStatus, type AuthCloudSummary } from '@/components/auth-status'
+import { ProductHome } from '@/components/product-home'
 import {
   WorkflowHeaderNav,
   WorkflowStageNav,
@@ -6755,174 +6754,171 @@ function App() {
   }
 
   function renderWorkspace() {
-    return (
-      <main className="relative flex h-screen min-h-0 flex-col overflow-hidden px-[var(--ui-page-gutter)] pb-[var(--ui-page-gutter)] pt-[var(--ui-space-5)]">
-        <section className="relative z-10 mx-auto w-full max-w-6xl shrink-0 pb-[var(--ui-gap-block)]">
-          <div className="pointer-events-none absolute inset-x-[-12%] top-[-7rem] h-64 bg-[radial-gradient(circle_at_18%_18%,rgba(103,199,255,0.2),transparent_28%),radial-gradient(circle_at_78%_0%,rgba(148,163,184,0.16),transparent_30%)] blur-xl" />
-          <div className="relative grid gap-[var(--ui-gap-section)]">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h1 className="text-xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">
-                  Lumos AI Writer
-                </h1>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                {renderWorkspaceSaveIndicator()}
-                <AuthStatus cloudSummary={authCloudSummary} />
-              </div>
-            </div>
+    const recentProjectRecord = [...projects].sort(
+      (first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt),
+    )[0]
+    const recentConversation = recentProjectRecord
+      ? (recentProjectRecord.conversations.find(
+          (conversation) => conversation.id === recentProjectRecord.activeConversationId,
+        ) ?? recentProjectRecord.conversations[0])
+      : undefined
+    const recentProject =
+      recentProjectRecord && recentConversation
+        ? {
+            name: recentProjectRecord.name,
+            stage: conversationStageLabels[getResumableConversationStage(recentConversation)],
+            updatedAt: formatProjectUpdatedAt(recentProjectRecord.updatedAt),
+          }
+        : undefined
+    const displayName =
+      cloudLibrary.user?.displayName || cloudLibrary.user?.email?.split('@')[0] || ''
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto_auto]">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--soft-foreground)]" />
-                <Input
-                  controlSize="xl"
-                  className="rounded-[var(--ui-field-radius)] border-[var(--border)] bg-[var(--surface-raised)] pl-11 shadow-none"
-                  value={projectSearch}
-                  onChange={(event) => setProjectSearch(event.target.value)}
-                  placeholder="搜索项目或参考文件夹"
+    const projectList = (
+      <Card className="overflow-hidden rounded-[var(--ui-radius-panel)] bg-[var(--surface-muted)] shadow-none">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] bg-transparent px-5 py-3.5 lg:px-6">
+          <span className="text-sm font-medium tracking-[0] text-[var(--muted-foreground)]">
+            {filteredProjects.length} 个项目
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-[0] text-[var(--soft-foreground)]">
+            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+            按最近更新排序
+          </span>
+        </div>
+
+        <div className="hidden grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)] items-center gap-6 border-b border-[var(--border)] bg-[rgba(241,243,246,0.72)] py-3 pl-6 pr-16 text-xs font-semibold tracking-[0] text-[var(--soft-foreground)] lg:grid">
+          <div>项目</div>
+          <div>参考文件夹</div>
+          <div>最近更新</div>
+        </div>
+
+        <div className="max-h-[34rem] divide-y divide-[var(--border)] overflow-y-auto">
+          {filteredProjects.map((project, index) => {
+            const folder = libraryFolders.find((item) => item.id === project.folderId)
+            const projectConversation =
+              project.conversations.find(
+                (conversation) => conversation.id === project.activeConversationId,
+              ) ?? project.conversations[0]
+            const recentStep = conversationStageLabels[getResumableConversationStage(projectConversation)]
+
+            return (
+              <article
+                key={project.id}
+                style={{ animationDelay: `${index * 35}ms` }}
+                className="group ui-list-item-motion relative grid cursor-pointer gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)] lg:items-center lg:gap-6 lg:pl-6 lg:pr-16"
+              >
+                <button
+                  type="button"
+                  aria-label={`进入项目 ${project.name}`}
+                  onClick={() => handleOpenProject(project.id)}
+                  className="absolute inset-0 z-0 rounded-[var(--ui-radius-item)] bg-transparent outline-none transition hover:bg-white/34 focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--ring)]"
                 />
-              </div>
-              <Button size="xl" variant="secondary" onClick={() => goToStep('library')}>
-                <Highlighter className="h-4 w-4" />
-                文案库
-              </Button>
-              <Button size="xl" onClick={handleOpenCreateProject}>
-                <Plus className="h-4 w-4" />
-                新建项目
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto flex min-h-0 w-full max-w-6xl flex-1">
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--ui-radius-panel)] bg-[var(--surface-muted)] shadow-none">
-            <div className="flex shrink-0 flex-wrap items-end justify-between gap-[var(--ui-gap-group)] border-b border-[var(--border)] bg-transparent px-[var(--ui-inset-panel)] py-[var(--ui-inset-card)] lg:px-[var(--ui-space-6)]">
-              <div>
-                <h2 className="text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]">
-                  项目列表
-                </h2>
-              </div>
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--soft-foreground)]">
-                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-                按最近更新排序
-              </span>
-            </div>
-
-            <div className="hidden shrink-0 grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)] items-center gap-6 bg-[rgba(241,243,246,0.72)] py-4 pl-6 pr-16 text-sm font-semibold text-[var(--soft-foreground)] lg:grid">
-              <div>项目</div>
-              <div>参考文件夹</div>
-              <div>最近更新</div>
-            </div>
-
-            <div className="min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto">
-              {filteredProjects.map((project, index) => {
-                const folder = libraryFolders.find((item) => item.id === project.folderId)
-                const projectConversation =
-                  project.conversations.find(
-                    (conversation) => conversation.id === project.activeConversationId,
-                  ) ?? project.conversations[0]
-                const recentStep = conversationStageLabels[getResumableConversationStage(projectConversation)]
-
-                return (
-                  <article
-                    key={project.id}
-                    style={{ animationDelay: `${index * 35}ms` }}
-                    className="group ui-list-item-motion relative grid cursor-pointer gap-4 bg-transparent px-5 py-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(9rem,0.42fr)_minmax(10.5rem,0.48fr)] lg:items-center lg:gap-6 lg:pl-6 lg:pr-16"
-                  >
-                    <button
-                      type="button"
-                      aria-label={`进入项目 ${project.name}`}
-                      onClick={() => handleOpenProject(project.id)}
-                      className="absolute inset-0 z-0 rounded-[var(--ui-radius-item)] bg-transparent outline-none transition hover:bg-white/34 focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--ring)]"
-                    />
-                    <div className="pointer-events-none relative z-10 min-w-0">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
-                          <FolderOpen className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          {renamingProjectId === project.id ? (
-                            <Input
-                              autoFocus
-                              className="pointer-events-auto max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 font-semibold"
-                              value={renamingProjectName}
-                              aria-label={`重命名 ${project.name}`}
-                              onBlur={() => handleSaveRenameProject(project.id)}
-                              onChange={(event) => setRenamingProjectName(event.target.value)}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                event.stopPropagation()
-                                if (event.key === 'Enter') {
-                                  event.currentTarget.blur()
-                                }
-                                if (event.key === 'Escape') {
-                                  handleCancelRenameProject()
-                                }
-                              }}
-                            />
-                          ) : (
-                            <div className="flex min-w-0 items-center gap-2">
-                              <p className="truncate text-base font-semibold text-[var(--foreground)]">
-                                {project.name}
-                              </p>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="pointer-events-auto shrink-0 text-[var(--soft-foreground)] hover:bg-transparent hover:text-[var(--muted-foreground)]"
-                                aria-label={`重命名 ${project.name}`}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  handleStartRenameProject(project)
-                                }}
-                              >
-                                <PenLine className="size-3.5" />
-                              </Button>
-                            </div>
-                          )}
-                          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                            {project.conversations.length} 个对话
-                            {recentStep ? ` · 最近：${recentStep}` : ''}
+                <div className="pointer-events-none relative z-10 min-w-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--ui-radius-card)] bg-[var(--panel)] text-[var(--accent-strong)] shadow-none">
+                      <FolderOpen className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      {renamingProjectId === project.id ? (
+                        <Input
+                          autoFocus
+                          className="pointer-events-auto max-w-sm rounded-[var(--ui-radius-control)] bg-white/90 font-semibold"
+                          value={renamingProjectName}
+                          aria-label={`重命名 ${project.name}`}
+                          onBlur={() => handleSaveRenameProject(project.id)}
+                          onChange={(event) => setRenamingProjectName(event.target.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.key === 'Enter') event.currentTarget.blur()
+                            if (event.key === 'Escape') handleCancelRenameProject()
+                          }}
+                        />
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="truncate text-base font-semibold tracking-[0] text-[var(--foreground)]">
+                            {project.name}
                           </p>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="pointer-events-auto shrink-0 text-[var(--soft-foreground)] hover:bg-transparent hover:text-[var(--muted-foreground)]"
+                            aria-label={`重命名 ${project.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleStartRenameProject(project)
+                            }}
+                          >
+                            <PenLine className="size-3.5" />
+                          </Button>
                         </div>
-                      </div>
+                      )}
+                      <p className="mt-1 text-sm tracking-[0] text-[var(--muted-foreground)]">
+                        {project.conversations.length} 个对话
+                        {recentStep ? ` · 最近：${recentStep}` : ''}
+                      </p>
                     </div>
-                    <div className="pointer-events-none relative z-10 flex min-w-0 items-center">
-                      <Badge variant="outline">{folder?.name || '未设置'}</Badge>
-                    </div>
-                    <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-2 text-sm text-[var(--muted-foreground)]">
-                      <Clock3 className="h-4 w-4 text-[var(--soft-foreground)]" />
-                      <span className="whitespace-nowrap">{formatProjectUpdatedAt(project.updatedAt)}</span>
-                    </div>
-                    <div className="relative z-10 flex items-center gap-2 lg:absolute lg:right-5 lg:top-1/2 lg:-translate-y-1/2">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="bg-transparent text-[rgba(214,90,60,0.58)] shadow-none transition-opacity hover:bg-[rgba(214,90,60,0.055)] hover:text-[rgba(214,90,60,0.82)] lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100"
-                        aria-label={`删除 ${project.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          handleRequestDeleteProject(project.id)
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </article>
-                )
-              })}
-
-              {filteredProjects.length === 0 ? (
-                <div className="ui-surface-enter bg-transparent px-6 py-14 text-center">
-                  <p className="text-base font-semibold text-[var(--foreground)]">当前没有匹配到项目</p>
-                  <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-                    换一个关键词，或者新建项目继续。
-                  </p>
+                  </div>
                 </div>
-              ) : null}
+                <div className="pointer-events-none relative z-10 flex min-w-0 items-center">
+                  <Badge variant="outline">{folder?.name || '未设置'}</Badge>
+                </div>
+                <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-2 text-sm tracking-[0] text-[var(--muted-foreground)]">
+                  <Clock3 className="h-4 w-4 text-[var(--soft-foreground)]" />
+                  <span className="whitespace-nowrap">{formatProjectUpdatedAt(project.updatedAt)}</span>
+                </div>
+                <div className="relative z-10 flex items-center gap-2 lg:absolute lg:right-5 lg:top-1/2 lg:-translate-y-1/2">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="bg-transparent text-[rgba(214,90,60,0.58)] shadow-none transition-opacity hover:bg-[rgba(214,90,60,0.055)] hover:text-[rgba(214,90,60,0.82)] lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100"
+                    aria-label={`删除 ${project.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleRequestDeleteProject(project.id)
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </article>
+            )
+          })}
+
+          {filteredProjects.length === 0 ? (
+            <div className="ui-surface-enter bg-transparent px-6 py-14 text-center">
+              <p className="text-base font-semibold tracking-[0] text-[var(--foreground)]">
+                当前没有匹配到项目
+              </p>
+              <p className="mt-2 text-sm tracking-[0] text-[var(--muted-foreground)]">
+                换一个关键词，或者新建项目继续。
+              </p>
             </div>
-          </Card>
-        </section>
+          ) : null}
+        </div>
+      </Card>
+    )
+
+    return (
+      <>
+        <ProductHome
+          mode={cloudWorkspaceStatus === 'guest' ? 'guest' : 'member'}
+          authSlot={<AuthStatus cloudSummary={authCloudSummary} />}
+          saveStatusSlot={renderWorkspaceSaveIndicator()}
+          displayName={displayName}
+          projectCount={projects.length}
+          noteCount={isUsingCloudLibrary ? cloudLibrary.notes.length : 0}
+          snippetCount={isUsingCloudLibrary ? cloudLibrary.snippets.length : 0}
+          recentProject={recentProject}
+          projectSearch={projectSearch}
+          projectList={projectList}
+          onProjectSearchChange={setProjectSearch}
+          onCreateProject={handleOpenCreateProject}
+          onOpenLibrary={() => goToStep('library')}
+          onOpenWritingProfile={() => void handleOpenWritingProfile()}
+          onOpenRecentProject={() => {
+            if (recentProjectRecord) handleOpenProject(recentProjectRecord.id)
+          }}
+        />
 
         {showCreateProjectCard ? (
           <div
@@ -7052,7 +7048,7 @@ function App() {
             </Card>
           </div>
         ) : null}
-      </main>
+      </>
     )
   }
 
