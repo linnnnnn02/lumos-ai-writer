@@ -1,260 +1,172 @@
 # Lumos AI Writer
 
-Lumos AI Writer 是一个面向小红书内容创作的 AI 写作工作台。它帮助创作者把优秀笔记沉淀成自己的参考库，再基于标注片段、写作偏好和目标读者，完成文案拆解、初稿生成、局部改写和读者视角检查。
+Lumos AI Writer 是一个面向小红书内容创作者的个人化 AI 写作工具。它由浏览器插件和 Web 创作工作台组成：先收集、分类并标注用户真正喜欢的内容，再从素材选择、标注理由、修改过程和最终选稿中提炼有证据的写作偏好，并把这些偏好应用到后续创作。
 
-它的核心目标不是简单生成一篇文案，而是让 AI 先理解“什么样的表达值得学习”，再辅助写出更像真实创作者、更贴合账号风格的内容。
+**在线体验：[lumos-ai-writer.pages.dev](https://lumos-ai-writer.pages.dev/)**
 
-## 核心流程
+> 项目仍在持续验证中。偏好学习、场景过滤和下游应用链路已经跑通，但现有评测尚不能证明它能稳定、显著地提升文案质量。相关结果见[表达档案前向评测](./docs/writing-profile-forward-eval-2026-08-13.md)和[语言偏好盲评](./docs/writing-profile-blind-eval-2026-08-14.md)。
 
-1. 采集参考笔记：在小红书网页中抓取标题、作者、链接、封面和正文。
-2. 标注关键片段：选中值得学习的句子，记录标签和喜欢它的原因。
-3. 沉淀参考库：按文件夹管理笔记、片段和标签，形成长期可复用的写作素材库。
-4. 学习写作偏好：选择参考素材后，系统拆解表达方式、结构节奏、读者关系和避坑点。
-5. 设置文案篇幅：在短篇、中篇、长篇之间选择适合当前选题的内容长度。
-6. 生成结构初稿：根据主题、目标读者、篇幅和参考片段生成分段式草稿。
-7. 局部改写细调：选中草稿中的任意文本，围绕具体段落继续改写和讨论。
-8. 读者预演检查：模拟读者阅读时的停留点、疑问点和可能划走的位置。
+## 为什么做
 
-## 核心功能
+通用 AI 写作通常只理解当前提示词，容易输出模板化表达，也很难解释它为什么认为某种写法“更像用户”。Lumos 尝试把个人素材库变成可追溯的学习证据：
 
-### 参考笔记采集
+- 不只收藏全文，还记录用户具体喜欢哪个片段、为什么喜欢。
+- 不把单次要求直接当作长期风格，而是区分账号偏好、项目偏好和本次任务约束。
+- 从人工修改、接受或拒绝的改写、最终确认版本中继续学习。
+- 每条长期偏好保留证据、适用范围、状态和置信度，候选偏好不会直接影响生成。
+- 生成时优先遵守当前明确要求和真实事实，写作偏好只能改变表达方式，不能补写经历。
 
-浏览器插件可以在小红书笔记页读取当前内容，包括标题、作者、原文链接、封面图和正文。采集结果可以在插件侧边栏中预览、编辑文件名，并保存到指定文件夹。
+## 产品流程
 
-这个功能用于把零散看到的好文案快速收进自己的资料库，避免只靠截图或复制粘贴保存灵感。
+1. **收集与标注素材**：通过 Chrome 插件保存小红书笔记，按文件夹分类，并为关键片段添加标签和喜欢它的理由。
+2. **描述本次需求**：在 Web 端创建项目和文案对话，由系统识别主题、目标读者、写作目标、必含事实和表达边界。
+3. **选择参考文案**：从个人素材库中选择整篇笔记或标注片段，系统也可以结合当前意图帮助缩小参考范围。
+4. **查看学习结论**：确认 AI 提炼的核心判断、可迁移写法、原文证据、适用边界和待确认项。
+5. **生成并编辑初稿**：根据创作简报、参考素材和有效写作偏好生成初稿，通过手动编辑或局部 AI 改写继续校对。
+6. **检查与确认**：查看篇幅、事实和表达边界检查，可选用读者预演发现阅读阻力，最后确认当前版本。
 
-### 片段标注与偏好记录
+每次生成和关键修改都会保留版本。上游需求或参考发生变化时，下游结果会被标记为需要更新，而不是静默覆盖旧稿。
 
-在小红书正文里选中文字后，可以直接保存为标注片段。每个片段支持：
+## 核心能力
 
-- 颜色标签
-- 两字标签名，例如“开头”“语气”“结构”
-- 标注理由
-- 来源笔记标题、作者和链接
+### Chrome 插件
 
-标注理由是整个产品的重要输入。它告诉 AI 你为什么喜欢这句话，是因为开头有钩子、语气真实、场景具体，还是结构值得复用。
+- 采集笔记标题、作者、正文、封面和原文链接。
+- 选中文本后保存标注片段、两字标签和标注理由。
+- 按文件夹管理素材，支持搜索、排序、重命名、删除和回收站。
+- 登录后将素材库同步到 Supabase，并通过本地缓存提供即时反馈和失败恢复。
 
-### 笔记库管理
+### Web 创作工作台
 
-插件管理页提供完整的本地笔记库视图，可以对保存过的内容进行整理：
+- 使用项目管理长期内容方向，使用对话管理单篇文案生命周期。
+- 将自然语言需求整理为结构化创作简报，并在信息不足时明确提示缺失项。
+- 选择参考素材，查看带原文证据和适用范围的学习结论。
+- 生成初稿、局部改写、手动编辑、版本对比和历史恢复。
+- 保存每个版本的偏好依据与质量检查快照，支持读者预演和最终确认。
 
-- 新建和删除文件夹
-- 查看文件夹下的笔记
-- 搜索标题、作者、正文和片段
-- 按保存时间或文件名排序
-- 按标签筛选片段
-- 查看笔记详情和原文链接
-- 编辑片段标签与理由
-- 将删除内容放入回收站
+### 版本化 AI Skills
 
-这个模块承担的是“长期素材库”的角色，让参考内容可以被反复查找、整理和复用。
+后端使用版本化 Skill 管理模型工作规则，而不是把提示词散落在业务代码中：
 
-### 项目化创作工作台
+- `user-writing-model`：从素材、标注理由、修改反馈和最终选择中更新用户表达档案。
+- `reference-analysis`：提炼本次参考素材的共性、证据和适用边界。
+- `xiaohongshu-draft`：在事实约束和有效偏好下生成初稿。
+- `selection-rewrite`：只改写用户选中的局部内容。
+- `target-reader-preview`：从目标读者视角检查理解成本和阅读阻力。
 
-网页端以“项目”和“对话”为单位组织创作任务。一个项目可以对应一个长期选题、账号方向或内容系列，每个项目下可以继续创建多轮文案对话。
+每个 Skill 都有稳定 ID、语义版本、类型化输入、Zod 输出契约、提示词哈希和离线评测。详细规则见 [Application Skills](./server/api/src/skills/README.md)。
 
-当前工作台包含五个主要步骤：
+## 技术架构
 
-- 学习拆解
-- 篇幅设置
-- 文案创作
-- 编辑细调
-- 读者预演
+```mermaid
+flowchart LR
+  A["Chrome 插件<br/>WXT + React"] -->|采集与同步| C["Hono API<br/>Node / Cloudflare"]
+  B["Web 工作台<br/>React + Vite"] -->|项目、创作与 AI 请求| C
+  C --> D["Supabase<br/>Auth + Postgres"]
+  C --> E["DeepSeek API<br/>版本化 Skills"]
+```
 
-这样每篇文案都能保留自己的参考素材、分析过程、初稿和修改上下文。
+- **前端**：React 19、TypeScript、Vite、Tailwind CSS 4、Radix UI / shadcn 组件模式
+- **浏览器插件**：WXT、React、Chrome Manifest V3
+- **API**：Hono、Zod、Node.js / Cloudflare Pages Functions
+- **数据与认证**：Supabase Auth、Postgres、Row Level Security
+- **AI**：DeepSeek、版本化 Skill、调用审计与费用限制
+- **工程**：pnpm workspace、ESLint、TypeScript、Cloudflare Pages
 
-### AI 学习拆解
+## 本地开发
 
-在“学习拆解”阶段，用户可以从参考库中选择笔记和标注片段。系统会基于这些素材整理：
+### 1. 准备环境
 
-- 这批文案的核心写作判断
-- 可复用的表达机制
-- 开头、结构、语气和收尾方式
-- 用户标注中体现出的偏好
-- 后续写作应该避免的模板感和硬广感
-- 下一步写初稿时应该采用的推进路径
-
-当前阶段这部分已经接入后端 `/api/v1/ai/analyze`，登录后会基于云端参考库调用 DeepSeek；未登录或配置缺失时仍保留前端兜底体验。
-
-### 篇幅与节奏选择
-
-产品内置短篇、中篇、长篇三种文案长度模式：
-
-- 短篇：适合快速种草、轻量判断和强钩子表达。
-- 中篇：适合完整说明，有开头、主体、技巧和自然收尾。
-- 长篇：适合深度展开，需要更多细节、步骤、理由和情绪推进。
-
-篇幅选择会影响后续初稿的信息密度、段落数量和表达节奏。
-
-### 用户写作模型
-
-系统会把素材库中的文案共性、片段标注理由，以及用户后续的改写要求、手动修改和最终选稿整理成长期写作模型。每条偏好都保留证据、适用范围和置信度，单次项目要求不会直接污染账号级风格。
-
-账号级模型用于保留跨项目稳定的判断与表达习惯，项目级模型只覆盖当前选题。初稿和后续改写是写作模型的执行器，会优先遵守用户当前明确要求，再应用项目偏好和长期偏好。
-
-### 结构化初稿生成
-
-进入“文案创作”后，系统会结合主题、目标读者、篇幅和参考片段，生成分块草稿。当前初稿结构包括：
-
-- 开头钩子
-- 主体展开
-- 情绪与态度
-- 收尾互动
-
-每个块都有自己的功能说明和语气提示，方便用户先看整体结构，再决定从哪里开始修改。
-
-### 局部改写与细调
-
-在“编辑细调”阶段，用户可以选中草稿中的具体文本，围绕这一小段继续让系统给出改写建议。
-
-这部分更适合处理细节问题，例如：
-
-- 开头不够自然
-- 某句话太像广告
-- 段落之间衔接不顺
-- 想把表达改得更口语
-- 想保留意思但换一种说法
-
-产品的改写目标是帮助用户逐段打磨，而不是一次性覆盖整篇文案。
-
-### 读者预演
-
-“读者预演”会从阅读者视角检查草稿，模拟用户刷到这篇内容时可能发生的反应：
-
-- 标题是否能让人快速判断相关性
-- 开头是否有停留理由
-- 哪些位置可能让读者读不下去
-- 读者可能产生什么疑问
-- 优先应该修改哪一段
-
-这个功能用于在发布前反向检查文案，减少“作者自己觉得清楚，但读者没有耐心看完”的问题。
-
-## 当前产品状态
-
-Lumos AI Writer 当前已经具备完整的前端产品、浏览器插件采集链路、标注系统、云端文案库、云端项目工作区、Supabase 账号体系和受控的 DeepSeek AI 调用链路。
-
-目前需要注意：
-
-- 插件可以本地保存，也可以登录云端同步到 Supabase。
-- 网页端登录后会读取云端文案库；未登录时展示本地 demo 数据。
-- 网页端登录后会自动保存项目、对话、消息、当前步骤、工作草稿和明确反馈；未登录时不会上传 demo 项目。
-- DeepSeek 密钥已接入后端，用户写作模型、学习拆解与初稿生成均已使用版本化 Skill；`AI_FEATURE_ENABLED=false` 时所有接口都会在调用模型前被拦截。
-- API 已允许本地网页端和 Chrome 插件来源跨域调用；线上域名可以通过 `CORS_ALLOWED_ORIGINS` 补充。
-- 后续需要补充预算、限流和线上部署策略。
-- Chrome 里如果还看到旧的 `XHS AI Studio`，那是旧扩展残留；当前代码构建出的插件名是 `Lumos AI Writer`。
-
-## 本地运行
-
-安装依赖：
+需要 Node.js、Corepack 和 pnpm 10。安装依赖：
 
 ```bash
+corepack enable
 pnpm install
 ```
 
-第一次接入真实后端前：
+复制环境变量模板：
 
-1. 把 `.env.example` 复制为 `.env`。
-2. 填入 Supabase 和 DeepSeek key。
-3. 在 Supabase SQL Editor 按文件名顺序执行 `server/api/migrations` 中的全部 SQL 文件：
-   - `001_initial_schema.sql`
-   - `002_workspace_persistence.sql`
-   - `003_writing_profiles.sql`
+```bash
+cp .env.example .env
+```
 
-一键启动 API 和网页端：
+在 `.env` 中填写 Supabase 配置；需要调用真实 AI 时再填写 `DEEPSEEK_API_KEY`。`AI_FEATURE_ENABLED` 默认保持 `false`，可以通过 `AI_PILOT_USER_IDS` 只为测试账号开放。
+
+### 2. 初始化 Supabase
+
+在 Supabase SQL Editor 中按顺序执行：
+
+1. `server/api/migrations/001_initial_schema.sql`
+2. `server/api/migrations/002_workspace_persistence.sql`
+3. `server/api/migrations/003_writing_profiles.sql`
+4. `server/api/migrations/004_note_learning_review.sql`
+
+这些迁移会创建素材库、项目工作区、表达档案及学习确认所需的表和权限规则。
+
+### 3. 启动 Web 与 API
 
 ```bash
 pnpm dev
 ```
 
-启动后访问：
-
-- 网页：`http://localhost:5173`
+- Web：`http://localhost:5173`
 - API 健康检查：`http://localhost:8788/api/health`
 
-检查 P0 后端链路是否健康：
+也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`。
 
-```bash
-pnpm check:p0
-```
-
-这一步会检查本地 API、Supabase 表结构、DeepSeek 配置，以及网页端/插件访问 API 所需的 CORS 预检。
-
-跑一次真实账号和写入链路：
-
-```bash
-pnpm smoke:p0
-```
-
-如果还想顺手验证 DeepSeek 真调用：
-
-```bash
-pnpm smoke:p0:ai
-```
-
-运行付费 AI 测试前，必须先通过用户写作模型、学习拆解与初稿 Skill 的离线评测：
-
-```bash
-pnpm eval:skills
-```
-
-`AI_FEATURE_ENABLED` 默认是 `false`。只有当前 Skill 的离线评测通过并确认允许产生费用后，才可以将它设为 `true`。`smoke:p0` 会临时创建一个已确认测试账号，登录、调用 `/api/v1/me`、创建一个文件夹，然后自动删除测试账号。`smoke:p0:ai` 会额外消耗一次很小的 AI 请求。
-
-查看最近 AI 用量：
-
-```bash
-pnpm report:ai
-```
-
-如果设置了 `AI_DEEPSEEK_INPUT_CNY_PER_1M_TOKENS` 和 `AI_DEEPSEEK_OUTPUT_CNY_PER_1M_TOKENS`，这一步会按 `ai_runs` 里的 token 记录估算人民币成本，并对照 `AI_DAILY_BUDGET_CNY` 提醒预算占用。
-
-检查 Cloudflare Pages 部署入口：
-
-```bash
-pnpm check:deploy
-```
-
-Cloudflare Pages 推荐配置：
-
-- 项目根目录：仓库根目录
-- 构建命令：`pnpm build:pages`
-- 输出目录：`web/dist`
-- API 入口：`functions/api/[[path]].ts`
-- Pages 配置文件：`wrangler.toml`
-
-线上环境变量至少需要配置：
-
-```text
-PUBLIC_APP_URL=https://app.yourdomain.com
-SUPABASE_URL=...
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-DEEPSEEK_API_KEY=...
-AI_FEATURE_ENABLED=false
-CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,chrome-extension://<extension-id>
-```
-
-单独启动网页端：
-
-```bash
-pnpm dev:web
-```
-
-单独启动 API：
-
-```bash
-pnpm dev:api
-```
-
-启动浏览器插件：
+### 4. 加载 Chrome 插件
 
 ```bash
 pnpm dev:extension
 ```
 
-开发命令默认连接 `http://localhost:8788/api`。正式构建默认连接
-`https://lumos-ai-writer.pages.dev/api`，也可以通过
-`WXT_PUBLIC_API_BASE_URL` 覆盖；扩展清单已同时允许本地与线上 API 域名。
+在 `chrome://extensions` 打开“开发者模式”，选择“加载已解压的扩展程序”，加载 `extension/.output/chrome-mv3`。开发构建默认连接本地 API；正式构建默认连接 `https://lumos-ai-writer.pages.dev/api`，可通过 `WXT_PUBLIC_API_BASE_URL` 覆盖。
 
-生成插件产物后，在 Chrome 扩展程序页面打开“开发者模式”，加载 WXT 输出的 `extension/.output/chrome-mv3` 目录。
+## 验证与部署
 
-如果 Chrome 里同时存在旧插件和新插件，建议禁用或删除旧的 `XHS AI Studio`，只保留 `Lumos AI Writer`，避免保存到旧本地库或点错入口。
+```bash
+# 类型、代码规范、Web 构建和产物体积预算
+pnpm check:deploy
+
+# 所有 AI Skills 的离线契约评测，不调用付费模型
+pnpm eval:skills
+
+# 本地 API、Supabase、DeepSeek 配置和 CORS 检查
+pnpm check:p0
+
+# 真实账号与写入链路；会创建并自动清理测试账号
+pnpm smoke:p0
+
+# 额外进行一次小额真实 AI 调用
+pnpm smoke:p0:ai
+
+# 查看近期 AI token 与估算费用
+pnpm report:ai
+```
+
+Cloudflare Pages 使用仓库根目录作为项目根目录，构建命令为 `pnpm build:pages`，输出目录为 `web/dist`，API 入口位于 `functions/api/[[path]].ts`。生产配置见 [`wrangler.toml`](./wrangler.toml)。
+
+## 目录结构
+
+```text
+extension/       Chrome 插件
+web/             Web 创作工作台
+server/api/      Hono API、AI Skills 与 Supabase 迁移
+functions/       Cloudflare Pages Functions 入口
+packages/shared/ Web、插件和 API 共用类型与逻辑
+scripts/         部署检查、烟雾测试与回归测试
+docs/            产品重构记录、基准测试与评测报告
+```
+
+## 安全说明
+
+- 不要提交 `.env`、Supabase `service_role` key、DeepSeek key 或任何真实用户数据。
+- `SUPABASE_SERVICE_ROLE_KEY` 只能由服务端使用，不能暴露在 Web 或插件代码中。
+- 运行真实 AI 测试前先通过离线 Skill 评测，并确认预算与测试账号范围。
+- 如果发现安全问题，请不要在公开 Issue 中粘贴密钥或用户数据。
+
+## 项目状态与许可
+
+这是一个持续开发和评测中的个人产品项目，欢迎通过 Issue 或 Pull Request 讨论产品、交互、工程实现和评测方法。
+
+仓库当前未声明开源许可证。代码公开可见不等于自动授予复制、分发或商用权限。
