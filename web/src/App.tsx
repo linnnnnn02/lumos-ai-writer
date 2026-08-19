@@ -216,6 +216,43 @@ const WritingProfileDialog = lazy(() =>
 
 type PageStep = 'workspace' | 'library' | ConversationStep
 
+const clipboardImageExtensionByMimeType: Record<string, string> = {
+  'image/avif': 'avif',
+  'image/bmp': 'bmp',
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/tiff': 'tiff',
+  'image/webp': 'webp',
+}
+
+async function readClipboardImageFiles() {
+  if (!navigator.clipboard?.read) return []
+
+  try {
+    const clipboardItems = await navigator.clipboard.read()
+    const imageFiles: File[] = []
+
+    for (const clipboardItem of clipboardItems) {
+      for (const mimeType of clipboardItem.types.filter((type) => type.startsWith('image/'))) {
+        const blob = await clipboardItem.getType(mimeType)
+        const extension = clipboardImageExtensionByMimeType[mimeType] ?? 'png'
+        imageFiles.push(
+          new File(
+            [blob],
+            `clipboard-${Date.now()}-${imageFiles.length + 1}.${extension}`,
+            { type: mimeType },
+          ),
+        )
+      }
+    }
+
+    return imageFiles
+  } catch {
+    return []
+  }
+}
+
 function DeferredPageFallback() {
   return (
     <div
@@ -1888,6 +1925,7 @@ function App() {
   const readerCommentRefs = useRef(new Map<string, HTMLElement>())
   const readerAudiencePopoverRef = useRef<HTMLDivElement | null>(null)
   const finalCopyToastTimerRef = useRef<number | null>(null)
+  const lastPlanPasteEventAtRef = useRef(0)
   const projectDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const rewriteInputRef = useRef<HTMLTextAreaElement | null>(null)
   const draftMovePromptToolbarRef = useRef<HTMLDivElement | null>(null)
@@ -6124,8 +6162,8 @@ function App() {
     })
   }
 
-  function handleAddPlanAttachments(files: FileList | null) {
-    if (!files?.length) return
+  function handleAddPlanAttachments(files: FileList | File[]) {
+    if (!files.length) return
 
     const nextAttachments: PlanAttachment[] = Array.from(files).map((file) => {
       const kind: PlanAttachment['kind'] = file.type.startsWith('image/') ? 'image' : 'document'
@@ -6141,6 +6179,46 @@ function App() {
       type: 'add-attachments',
       conversationId: activeConversation.id,
       attachments: nextAttachments,
+    })
+  }
+
+  async function handlePastePlanAttachments(event: React.ClipboardEvent<HTMLElement>) {
+    lastPlanPasteEventAtRef.current = Date.now()
+    const plainText = event.clipboardData.getData('text/plain')
+    const itemImageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+    let imageFiles = itemImageFiles.length > 0
+      ? itemImageFiles
+      : Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'))
+
+    if (imageFiles.length === 0 && plainText) return
+    if (!plainText) event.preventDefault()
+
+    if (imageFiles.length === 0) {
+      imageFiles = await readClipboardImageFiles()
+    }
+
+    if (imageFiles.length === 0) {
+      showFinalCopyToast('未读取到剪贴板图片，请重新复制图片后再粘贴')
+      return
+    }
+
+    handleAddPlanAttachments(imageFiles)
+    showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
+  }
+
+  function handlePlanComposerPasteShortcut(event: React.KeyboardEvent<HTMLElement>) {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'v') return
+
+    const shortcutAt = Date.now()
+    void readClipboardImageFiles().then((imageFiles) => {
+      window.setTimeout(() => {
+        if (lastPlanPasteEventAtRef.current >= shortcutAt || imageFiles.length === 0) return
+        handleAddPlanAttachments(imageFiles)
+        showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
+      }, 0)
     })
   }
 
@@ -7650,32 +7728,11 @@ function App() {
                 </div>
 
               <div className="shrink-0 bg-transparent px-1 pt-3 md:px-4">
-                <div className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
-                  {planAttachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-2 px-6 pb-1 pt-4">
-                      {planAttachments.map((attachment) => (
-                        <span
-                          key={attachment.id}
-                          className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-muted)] py-1 pl-3 pr-1.5 text-xs font-semibold text-[var(--muted-foreground)]"
-                        >
-                          {attachment.kind === 'image' ? (
-                            <Image className="h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <Paperclip className="h-3.5 w-3.5 shrink-0" />
-                          )}
-                          <span className="max-w-[16rem] truncate">{attachment.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePlanAttachment(attachment.id)}
-                            className="flex size-[var(--ui-control-height-sm)] items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-white/70 hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
-                            aria-label={`移除附件 ${attachment.name}`}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                <div
+                  className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]"
+                  onKeyDownCapture={handlePlanComposerPasteShortcut}
+                  onPasteCapture={(event) => void handlePastePlanAttachments(event)}
+                >
                   <Textarea
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
@@ -7685,32 +7742,73 @@ function App() {
                         handleSendChat()
                       }
                     }}
-                    className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
+                    aria-describedby="plan-attachment-help"
+                    className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
                     placeholder="补充具体信息或调整方向（选填）"
                   />
-                  <label className="absolute bottom-4 left-6 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
-                    <Paperclip className="h-4 w-4" />
-                    <span className="sr-only">添加附件</span>
-                    <input
-                      type="file"
-                      accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.xlsx"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => {
-                        handleAddPlanAttachments(event.target.files)
-                        event.target.value = ''
-                      }}
-                    />
-                  </label>
-                  <Button
-                    className="absolute bottom-4 right-8"
-                    onClick={handleSendChat}
-                    disabled={isChatStreaming || !chatInput.trim()}
-                    aria-label="发送文案信息"
-                  >
-                    <Send className="h-4 w-4" />
-                    发送
-                  </Button>
+                  <p id="plan-attachment-help" className="sr-only">
+                    可点击回形针添加附件，或直接粘贴剪贴板图片
+                  </p>
+                  <div className="absolute inset-x-6 bottom-4 flex min-w-0 items-center gap-2">
+                    <label className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
+                      <Paperclip className="h-4 w-4" />
+                      <span className="sr-only">添加附件</span>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.xlsx"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          if (event.target.files) handleAddPlanAttachments(event.target.files)
+                          event.target.value = ''
+                        }}
+                      />
+                    </label>
+                    {planAttachments.length > 0 ? (
+                      <div
+                        className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                        aria-label="已添加附件"
+                        aria-live="polite"
+                        role="list"
+                      >
+                        {planAttachments.map((attachment) => (
+                          <span
+                            key={attachment.id}
+                            className="inline-flex h-8 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full bg-white/78 py-1 pl-2.5 pr-1 text-xs font-semibold text-[var(--muted-foreground)] shadow-[0_4px_12px_rgba(15,23,42,0.04)]"
+                            role="listitem"
+                          >
+                            {attachment.kind === 'image' ? (
+                              <Image className="h-3.5 w-3.5 shrink-0" />
+                            ) : (
+                              <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                            <span className="truncate">{attachment.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePlanAttachment(attachment.id)}
+                              className="flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                              aria-label={`移除附件 ${attachment.name}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="min-w-0 flex-1 truncate text-xs text-[var(--soft-foreground)]">
+                        可点击添加，或直接粘贴剪贴板图片
+                      </p>
+                    )}
+                    <Button
+                      className="ml-auto shrink-0"
+                      onClick={handleSendChat}
+                      disabled={isChatStreaming || !chatInput.trim()}
+                      aria-label="发送文案信息"
+                    >
+                      <Send className="h-4 w-4" />
+                      发送
+                    </Button>
+                  </div>
                 </div>
               </div>
             </section>
