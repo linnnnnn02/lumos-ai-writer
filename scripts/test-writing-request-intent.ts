@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
 import type { SavedNoteRecord } from '@lumos-ai/shared'
 import {
+  DEFAULT_TARGET_AUDIENCE,
+  buildOptionalBriefQuestions,
   buildReferenceRecommendations,
+  hasExplicitLengthPreference,
   inferProjectLengthFromWritingRequest,
+  inferTargetAudienceFromWritingRequest,
   inferWritingBriefFromRequest,
+  isDirectGenerationReply,
+  isOptionalBriefSkipReply,
 } from '../web/src/features/workspace/model/writing-request-intent.js'
 
 function createNote(
@@ -33,6 +39,21 @@ assert.equal(inferProjectLengthFromWritingRequest(request), 'short')
 assert.equal(inferProjectLengthFromWritingRequest('写一篇 300 字左右的体验'), 'medium')
 assert.equal(inferProjectLengthFromWritingRequest('写一篇 800 字的完整复盘'), 'long')
 assert.equal(inferProjectLengthFromWritingRequest('用一句话说清楚重点'), 'short')
+assert.equal(inferProjectLengthFromWritingRequest('现在太短了，写长一些、详细一些'), 'medium')
+assert.equal(hasExplicitLengthPreference('默认生成就好'), false)
+assert.equal(hasExplicitLengthPreference('写长一些、详细一些'), true)
+
+assert.equal(
+  inferTargetAudienceFromWritingRequest(
+    '宣传勋章盲盒。目标读者：王俊凯粉丝，以及喜欢数字收藏的用户。写作目标：介绍玩法。',
+  ),
+  '王俊凯粉丝，以及喜欢数字收藏的用户',
+)
+assert.equal(isOptionalBriefSkipReply('不需要'), true)
+assert.equal(isOptionalBriefSkipReply('不需要补充'), true)
+assert.equal(isOptionalBriefSkipReply('必须保留活动截止时间'), false)
+assert.equal(isDirectGenerationReply('我不补充了，直接生成文案'), true)
+assert.equal(isDirectGenerationReply('先不要直接生成'), false)
 
 const brief = inferWritingBriefFromRequest(request)
 assert.match(brief.requiredFacts, /轻盈、吸收快和第二天皮肤更柔软/u)
@@ -40,6 +61,34 @@ assert.match(brief.requiredFacts, /使用后/u)
 assert.match(brief.boundaries, /克制、有留白/u)
 assert.match(brief.boundaries, /不要夸张功效/u)
 assert.match(brief.instructions, /80字以内/u)
+
+const campaignQuestions = buildOptionalBriefQuestions({
+  writingRequest: '帮我写一篇勋章盲盒活动文案',
+  targetAudience: DEFAULT_TARGET_AUDIENCE,
+  brief: {
+    objective: '',
+    requiredFacts: '',
+    boundaries: '',
+    instructions: '',
+  },
+})
+assert.deepEqual(
+  campaignQuestions.map((question) => question.id),
+  ['facts', 'audience'],
+)
+
+const completeCampaignQuestions = buildOptionalBriefQuestions({
+  writingRequest:
+    '为王俊凯粉丝写勋章盲盒活动文案，活动截至2026年8月10日，集齐全套有机会抽签名照，中篇幅。',
+  targetAudience: '王俊凯粉丝',
+  brief: {
+    objective: '',
+    requiredFacts: '活动截至2026年8月10日；集齐全套有机会抽签名照',
+    boundaries: '不能写成集齐后必得签名照',
+    instructions: '',
+  },
+})
+assert.deepEqual(completeCampaignQuestions, [])
 
 const recommendations = buildReferenceRecommendations(
   request,
