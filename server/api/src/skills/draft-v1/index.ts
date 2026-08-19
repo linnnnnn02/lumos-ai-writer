@@ -1,7 +1,6 @@
 import {
   aiDraftCopySchema,
   type AiDraftCopy,
-  type DraftFactSufficiencyResult,
   type DraftQualitySnapshot,
   type GenerateDraftRequest,
   type WritingProfileRevisionDto,
@@ -189,6 +188,13 @@ export type DraftAuditRequirement = {
   id: string
   kind: DraftRequirementAudit['kind']
   statement: string
+}
+
+function splitDraftFactStatements(value: string) {
+  return value
+    .split(/[\n；;]+/u)
+    .map((statement) => statement.trim().replace(/^[-*•]\s*/u, ''))
+    .filter(Boolean)
 }
 
 export function getDraftAuditRequirements(
@@ -768,149 +774,6 @@ export function resolveDraftContentMode(input: DraftSkillInput) {
     compatibleReferenceIds,
     stableVoiceSignals: input.analysis.contentMode.stableVoiceSignals,
     modeSpecificGuidance,
-  }
-}
-
-const concreteFactRelationPattern =
-  /(?:是|为|有|含|包含|采用|使用|配合|支持|提供|适合|面向|位于|来自|将在|已经|现已|开始|结束|开放|举办|获得|抽取|减少|增加|达到|约为|可(?:以|供|用于)?)/u
-const productIdentityPattern =
-  /(?:名为|名称|型号|系列|组合|这款|本款|面膜|精华|乳液|乳霜|面霜|洁面|洗发|护发|唇膏|卸妆|咖啡|饮品|鞋|袜|服装|设备|工具|课程|服务|[A-Za-z][A-Za-z0-9-]{2,})/u
-const productEvidencePattern =
-  /(?:成分|材质|工艺|机制|质地|规格|功能|功效|用途|场景|条件|配合|采用|包含|适合|支持|提供|可用于|使用时|使用后)/u
-const campaignBasicsPattern =
-  /(?:活动|联名|抽奖|竞猜|征集|挑战|直播|福利|礼包|奖品|优惠|上新|发布|开启|主题)/u
-const participationPattern =
-  /(?:参与|关注|点赞|评论|收藏|转发|报名|预约|搜索|进入|提交|领取|购买|兑换|抽取|获得|截止)/u
-const timeOrLocationPattern =
-  /(?:\d{1,4}[年月日号点时分:%：./-]|今天|明天|本周|周[一二三四五六日天]|上午|下午|晚上|凌晨|时间|日期|地点|地址|门店|展厅|线上|线下)/u
-
-function splitDraftFactStatements(value: string) {
-  return value
-    .split(/[\n；;]+/u)
-    .map((statement) => statement.trim().replace(/^[-*•]\s*/u, ''))
-    .filter(Boolean)
-}
-
-function isConcreteFactStatement(statement: string) {
-  const compact = statement.replace(/\s/g, '')
-  if (compact.length < 4) return false
-  return (
-    /\d/u.test(compact) ||
-    /[:：]/u.test(compact) ||
-    concreteFactRelationPattern.test(compact)
-  )
-}
-
-export function assessDraftFactSufficiency(
-  input: DraftSkillInput,
-): DraftFactSufficiencyResult | null {
-  if (input.brief.allowConservativeDraft) return null
-
-  const { resolvedMode } = resolveDraftContentMode(input)
-  if (
-    resolvedMode !== 'product_education' &&
-    resolvedMode !== 'campaign_interaction' &&
-    resolvedMode !== 'event_announcement'
-  ) {
-    return null
-  }
-
-  const sourceStatements = [
-    ...splitDraftFactStatements(input.brief.sourceFacts),
-    ...input.brief.facts
-      .filter((fact) => fact.required)
-      .map((fact) => fact.statement.trim())
-      .filter(Boolean),
-  ]
-  const topicStatement = input.topic.trim()
-  const candidateStatements = [topicStatement, ...sourceStatements]
-  const concreteFacts = Array.from(
-    new Set(candidateStatements.filter(isConcreteFactStatement)),
-  )
-  const evidenceText = candidateStatements.join('\n')
-  const missingFacts: DraftFactSufficiencyResult['missingFacts'] = []
-
-  if (resolvedMode === 'product_education') {
-    if (!productIdentityPattern.test(evidenceText)) {
-      missingFacts.push({
-        id: 'product_identity',
-        label: '产品或组合',
-        question: '这篇具体写哪个产品、系列或组合？请补充准确名称和主体关系。',
-        reason: '主体不明确时，模型容易把参考产品或封面物体误写成本篇对象。',
-        targetField: 'source_facts',
-      })
-    }
-    if (
-      concreteFacts.length === 0 ||
-      !productEvidencePattern.test(sourceStatements.join('\n'))
-    ) {
-      missingFacts.push({
-        id: 'product_evidence',
-        label: '可确认的产品事实',
-        question: '可以确认的功能、机制、使用条件或组合价值是什么？没有功效依据时也请明确说明。',
-        reason: '缺少事实支点时，短稿也容易用泛化关怀、画面氛围或名称里的功效词补位。',
-        targetField: 'source_facts',
-      })
-    }
-  }
-
-  if (resolvedMode === 'campaign_interaction') {
-    if (!campaignBasicsPattern.test(evidenceText) || !timeOrLocationPattern.test(evidenceText)) {
-      missingFacts.push({
-        id: 'campaign_basics',
-        label: '活动基本信息',
-        question: '活动是什么、何时发生？请补充活动名称、时间或有效期限。',
-        reason: '没有事件和时间，活动文案会只剩通用号召。',
-        targetField: 'source_facts',
-      })
-    }
-    if (!participationPattern.test(sourceStatements.join('\n'))) {
-      missingFacts.push({
-        id: 'participation_path',
-        label: '参与路径',
-        question: '用户需要做什么，完成后会得到什么结果或奖励？',
-        reason: '参与动作和结果必须来自明确规则，不能根据其他活动参考推断。',
-        targetField: 'source_facts',
-      })
-    }
-  }
-
-  if (resolvedMode === 'event_announcement') {
-    if (!timeOrLocationPattern.test(sourceStatements.join('\n'))) {
-      missingFacts.push({
-        id: 'event_time_location',
-        label: '时间与地点',
-        question: '事件在什么时间、什么地点发生？线上活动请补充入口或平台。',
-        reason: '时间地点缺失时，事件通知无法承担实际到场或参与任务。',
-        targetField: 'source_facts',
-      })
-    }
-    if (!participationPattern.test(sourceStatements.join('\n'))) {
-      missingFacts.push({
-        id: 'event_action',
-        label: '到场或参与方式',
-        question: '读者需要报名、预约、到店，还是直接前往？',
-        reason: '行动方式必须明确，不能用模糊号召代替流程。',
-        targetField: 'source_facts',
-      })
-    }
-  }
-
-  if (missingFacts.length === 0) return null
-
-  const modeLabel =
-    resolvedMode === 'product_education'
-      ? '产品说明'
-      : resolvedMode === 'campaign_interaction'
-        ? '活动文案'
-        : '事件通知'
-
-  return {
-    summary: `这篇${modeLabel}还缺少支撑正文的关键信息，补充后再生成会更准确。`,
-    missingFacts: missingFacts.slice(0, 3),
-    confirmedFacts: concreteFacts.slice(0, 6),
-    canGenerateConservative:
-      topicStatement.length >= 4 && concreteFacts.length > 0,
   }
 }
 

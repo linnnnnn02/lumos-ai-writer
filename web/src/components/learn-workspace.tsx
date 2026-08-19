@@ -1674,14 +1674,14 @@ export function LearnWorkspace({
                         {isAnalyzing ? (
                           <>
                             <span className="draft-thinking-dot h-2 w-2 rounded-full bg-current" />
-                            正在生成...
+                            正在分析...
                           </>
                         ) : (
                           analysisError
-                            ? '重试生成'
+                            ? '重试分析'
                             : selectedReferenceNotes.length > 0
-                              ? `用 ${selectedReferenceNotes.length} 篇参考生成`
-                              : '直接生成初稿'
+                              ? `用 ${selectedReferenceNotes.length} 篇参考继续`
+                              : '不使用参考，继续'
                         )}
                       </Button>
                     </div>

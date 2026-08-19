@@ -163,7 +163,6 @@ export const generateDraftRequestSchema = z.object({
     objective: z.string().trim().max(500).default(''),
     sourceFacts: z.string().trim().max(1600).default(''),
     instructions: z.string().trim().max(800).default(''),
-    allowConservativeDraft: z.boolean().default(false),
     contentMode: draftContentModeSchema.default('auto'),
     facts: z
       .array(
@@ -397,22 +396,7 @@ export const analyzeReferencesResponseSchema = z.object({
   usage: aiUsageSchema.nullable(),
 })
 
-export const draftMissingFactSchema = z.object({
-  id: z.string().trim().min(1).max(80),
-  label: z.string().trim().min(1).max(40),
-  question: z.string().trim().min(1).max(240),
-  reason: z.string().trim().min(1).max(240),
-  targetField: z.enum(['objective', 'source_facts', 'instructions']),
-})
-
-export const draftFactSufficiencyResultSchema = z.object({
-  summary: z.string().trim().min(1).max(300),
-  missingFacts: z.array(draftMissingFactSchema).min(1).max(3),
-  confirmedFacts: z.array(z.string().trim().min(1).max(300)).max(6),
-  canGenerateConservative: z.boolean(),
-})
-
-const generatedDraftResponseSchema = z.object({
+export const generateDraftResponseSchema = z.object({
   ok: z.literal(true),
   status: z.literal('generated'),
   provider: z.literal('deepseek'),
@@ -423,17 +407,6 @@ const generatedDraftResponseSchema = z.object({
   quality: draftQualitySnapshotSchema,
   usage: aiUsageSchema.nullable(),
 })
-
-const insufficientFactsDraftResponseSchema = z.object({
-  ok: z.literal(true),
-  status: z.literal('insufficient_facts'),
-  assessment: draftFactSufficiencyResultSchema,
-})
-
-export const generateDraftResponseSchema = z.discriminatedUnion('status', [
-  generatedDraftResponseSchema,
-  insufficientFactsDraftResponseSchema,
-])
 
 export const rewriteDraftResponseSchema = z.object({
   ok: z.literal(true),
@@ -458,10 +431,6 @@ export type AiFeaturedSnippet = z.infer<typeof aiFeaturedSnippetSchema>
 export type AiContentMode = z.infer<typeof aiContentModeSchema>
 export type AiAnalysisResult = z.infer<typeof aiAnalysisResultSchema>
 export type AiDraftCopy = z.infer<typeof aiDraftCopySchema>
-export type DraftMissingFact = z.infer<typeof draftMissingFactSchema>
-export type DraftFactSufficiencyResult = z.infer<
-  typeof draftFactSufficiencyResultSchema
->
 export type AiRewriteSuggestion = z.infer<typeof aiRewriteSuggestionSchema>
 export type AiRewriteResult = z.infer<typeof aiRewriteResultSchema>
 export type AiReaderPreviewAnnotation = z.infer<typeof aiReaderPreviewAnnotationSchema>

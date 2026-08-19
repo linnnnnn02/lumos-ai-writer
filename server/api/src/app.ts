@@ -65,7 +65,6 @@ import {
   rewriteDraftWithDeepSeek,
   previewDraftForReaderWithDeepSeek,
 } from './ai/deepseek.js'
-import { assessDraftFactSufficiency } from './skills/draft-v1/index.js'
 import { getAiSkillMetadata } from './skills/runtime.js'
 import { writerModelSkillV1 } from './skills/writer-model-v1/index.js'
 import {
@@ -1448,17 +1447,6 @@ export function createApiApp() {
     if (user instanceof Response) return user
     const aiConfig = await requireAiExecutionConfig(c, user)
     if (aiConfig instanceof Response) return aiConfig
-
-    const factAssessment = assessDraftFactSufficiency(body)
-    if (factAssessment) {
-      return c.json(
-        generateDraftResponseSchema.parse({
-          ok: true,
-          status: 'insufficient_facts',
-          assessment: factAssessment,
-        }),
-      )
-    }
 
     const startedAt = Date.now()
     try {

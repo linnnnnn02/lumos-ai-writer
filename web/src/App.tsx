@@ -28,7 +28,6 @@ import type {
   SavedNoteRecord,
   SavedSnippetRecord,
   SyncWorkspaceRequest,
-  DraftFactSufficiencyResult,
   WritingEditEvidence,
   WritingPreference,
   WritingProfileRevisionDto,
@@ -1856,9 +1855,6 @@ function App() {
     Record<string, AiUsage | null>
   >({})
   const [draftGeneratingConversationId, setDraftGeneratingConversationId] = useState('')
-  const [draftFactGapByConversation, setDraftFactGapByConversation] = useState<
-    Record<string, DraftFactSufficiencyResult>
-  >({})
   const [draftDragSelection, setDraftDragSelection] = useState<DraftDragSelection | null>(null)
   const [draftPointerDrag, setDraftPointerDrag] = useState<DraftPointerDrag | null>(null)
   const [draftDropTarget, setDraftDropTarget] = useState<DraftDropTarget | null>(null)
@@ -2945,7 +2941,6 @@ function App() {
       : 0
   const analysisError = analysisErrorByConversation[activeConversation.id] ?? ''
   const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
-  const draftFactGap = draftFactGapByConversation[activeConversation.id] ?? null
   const effectiveLength = activeConversation.length ?? 'medium'
 
   useEffect(() => {
@@ -3245,11 +3240,6 @@ function App() {
 
   function invalidateAnalysisAndDraft(conversationId: string) {
     dispatchAnalysisState({ type: 'invalidate-analysis', conversationId })
-    setDraftFactGapByConversation((current) => {
-      const next = { ...current }
-      delete next[conversationId]
-      return next
-    })
     invalidateDraftOutputs(conversationId)
   }
 
@@ -4329,18 +4319,12 @@ function App() {
         chatMessages: [...conversation.chatMessages, ...analysisMessages],
       }))
 
-      const draftGenerated = await generateDraftForAnalysis(nextAnalysis, false)
-      if (!draftGenerated) {
-        if (previousDraftWasReady) restorePreviousDraft()
-        else {
-          updateConversationStage(projectId, conversationId, 'draft')
-          if (
-            activeConversationRouteRef.current.projectId === projectId &&
-            activeConversationRouteRef.current.conversationId === conversationId
-          ) {
-            showConversationRoute('draft', { projectId, conversationId })
-          }
-        }
+      updateConversationStage(projectId, conversationId, 'draft')
+      if (
+        activeConversationRouteRef.current.projectId === projectId &&
+        activeConversationRouteRef.current.conversationId === conversationId
+      ) {
+        showConversationRoute('draft', { projectId, conversationId })
       }
     } catch (error) {
       const message = getErrorMessage(error)
@@ -4365,7 +4349,6 @@ function App() {
   async function generateDraftForAnalysis(
     nextAnalysis: AiAnalysisResult,
     requireReadyState = true,
-    allowConservativeDraft = false,
   ) {
     if (
       (requireReadyState && !canGenerateDraft) ||
@@ -4416,27 +4399,11 @@ function App() {
           analysis: nextAnalysis,
           notes: selectedNotes,
           snippets: selectedSnippets,
-          brief: {
-            ...creationBrief,
-            allowConservativeDraft,
-          },
+          brief: creationBrief,
         })
-        if (response.status === 'insufficient_facts') {
-          setDraftFactGapByConversation((current) => ({
-            ...current,
-            [conversationId]: response.assessment,
-          }))
-          setIsWritingBriefOpen(true)
-          return false
-        }
         nextDraft = response.draft
         appliedWritingProfile = response.appliedWritingProfile
         qualitySnapshot = response.quality
-        setDraftFactGapByConversation((current) => {
-          const next = { ...current }
-          delete next[conversationId]
-          return next
-        })
         setDraftUsageByConversation((current) => ({
           ...current,
           [conversationId]: response.usage,
@@ -4497,10 +4464,6 @@ function App() {
 
   async function handleGenerateDraft() {
     await generateDraftForAnalysis(analysis)
-  }
-
-  async function handleGenerateConservativeDraft() {
-    await generateDraftForAnalysis(analysis, true, true)
   }
 
   async function handleSendChat() {
@@ -7541,42 +7504,6 @@ function App() {
 
                       {isWritingBriefOpen ? (
                         <div className="mt-5 grid gap-4 border-t border-[var(--border)] pt-5 lg:grid-cols-2">
-                        {draftFactGap ? (
-                          <div
-                            className="grid gap-3 border border-[rgba(169,118,38,0.22)] bg-[rgba(246,239,223,0.62)] px-4 py-3 lg:col-span-2"
-                            role="status"
-                          >
-                            <div className="flex items-start gap-3">
-                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[rgb(146,99,31)]" />
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-[var(--foreground)]">
-                                  还差一点关键信息
-                                </p>
-                                <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
-                                  {draftFactGap.summary}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              {draftFactGap.missingFacts.map((missingFact) => (
-                                <div
-                                  key={missingFact.id}
-                                  className="border-l-2 border-[rgba(169,118,38,0.34)] pl-3"
-                                >
-                                  <p className="text-xs font-semibold text-[var(--foreground)]">
-                                    {missingFact.label}
-                                  </p>
-                                  <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">
-                                    {missingFact.question}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                            <p className="text-xs leading-5 text-[var(--soft-foreground)]">
-                              将答案补到下方“希望保留的信息”，不确定的内容可以明确写“暂不展开”
-                            </p>
-                          </div>
-                        ) : null}
                         <label className="grid gap-2">
                           <span className="text-sm font-semibold text-[var(--foreground)]">
                             内容主题 <span className="text-[var(--destructive)]">必填</span>
@@ -7782,20 +7709,14 @@ function App() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="text-sm leading-6 text-[var(--foreground)]">
                                 <p className="font-semibold">
-                                  {draftFactGap
-                                    ? '还差一点关键信息'
-                                    : isWritingBriefValid
+                                  {isWritingBriefValid
                                     ? isUsingCloudLibrary
-                                      ? '准备完成'
+                                      ? '可以直接生成'
                                       : '可以生成流程演示稿'
                                     : '先补全创作简报'}
                                 </p>
                                 <p className="mt-1 text-[var(--muted-foreground)]">
-                                  {draftFactGap
-                                    ? `待补充：${draftFactGap.missingFacts
-                                        .map((item) => item.label)
-                                        .join('、')}`
-                                    : isWritingBriefValid
+                                  {isWritingBriefValid
                                     ? `${
                                         effectiveLength === 'short'
                                           ? '短篇幅'
@@ -7812,18 +7733,6 @@ function App() {
                                 ) : null}
                               </div>
                               <div className="flex flex-wrap items-center justify-end gap-2">
-                                {draftFactGap?.canGenerateConservative ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={handleGenerateConservativeDraft}
-                                    disabled={isDraftGenerating}
-                                    className="text-[var(--muted-foreground)]"
-                                  >
-                                    按现有信息生成
-                                  </Button>
-                                ) : null}
                                 <Button
                                   type="button"
                                   size="sm"
@@ -7831,15 +7740,13 @@ function App() {
                                   disabled={isDraftGenerating || !canGenerateDraft}
                                 >
                                   <WandSparkles className="h-4 w-4" />
-                                  {draftFactGap
-                                    ? '补充后重新检查'
-                                    : draftGenerationError
-                                      ? isUsingCloudLibrary
-                                        ? '重新生成初稿'
-                                        : '重新生成演示稿'
-                                      : isUsingCloudLibrary
-                                        ? '生成初稿'
-                                        : '生成演示稿'}
+                                  {draftGenerationError
+                                    ? isUsingCloudLibrary
+                                      ? '重新生成'
+                                      : '重新生成演示稿'
+                                    : isUsingCloudLibrary
+                                      ? '直接生成'
+                                      : '生成演示稿'}
                                 </Button>
                               </div>
                             </div>

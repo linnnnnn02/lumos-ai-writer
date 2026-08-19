@@ -503,8 +503,7 @@ async function auditDraftGroundingWithDeepSeek(
 ) {
   if (
     input.brief.sourceFacts.trim().length === 0 &&
-    input.brief.facts.length === 0 &&
-    !input.brief.allowConservativeDraft
+    input.brief.facts.length === 0
   ) {
     return {
       audit: null,
