@@ -1926,6 +1926,7 @@ function App() {
   const readerAudiencePopoverRef = useRef<HTMLDivElement | null>(null)
   const finalCopyToastTimerRef = useRef<number | null>(null)
   const lastPlanPasteEventAtRef = useRef(0)
+  const planAttachmentPreviewUrlsRef = useRef(new Map<string, string>())
   const projectDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const rewriteInputRef = useRef<HTMLTextAreaElement | null>(null)
   const draftMovePromptToolbarRef = useRef<HTMLDivElement | null>(null)
@@ -1952,6 +1953,16 @@ function App() {
   useEffect(() => {
     draftVersionsRef.current = draftVersionsByConversation
   }, [draftVersionsByConversation])
+
+  useEffect(
+    () => () => {
+      planAttachmentPreviewUrlsRef.current.forEach((previewUrl) => {
+        URL.revokeObjectURL(previewUrl)
+      })
+      planAttachmentPreviewUrlsRef.current.clear()
+    },
+    [],
+  )
 
   const storedActiveProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
@@ -3145,6 +3156,14 @@ function App() {
     rewriteMessages.length > 0 ||
     rewritePendingConversationId === activeConversation.id
   const planAttachments = planAttachmentsByConversation[activeConversation.id] ?? []
+  const planImagePreviewAttachments = planAttachments.filter(
+    (attachment) =>
+      attachment.kind === 'image' &&
+      planAttachmentPreviewUrlsRef.current.has(attachment.id),
+  )
+  const planCompactAttachments = planAttachments.filter(
+    (attachment) => !planAttachmentPreviewUrlsRef.current.has(attachment.id),
+  )
   const readerAudienceDraft = readerAudienceByConversation[activeConversation.id] ?? ''
   const effectiveReaderAudience = readerAudienceDraft.trim() || effectiveTargetAudience
   const readerPreviewRecord = readerPreviewByConversation[activeConversation.id]
@@ -6167,9 +6186,14 @@ function App() {
 
     const nextAttachments: PlanAttachment[] = Array.from(files).map((file) => {
       const kind: PlanAttachment['kind'] = file.type.startsWith('image/') ? 'image' : 'document'
+      const id = crypto.randomUUID()
+
+      if (kind === 'image') {
+        planAttachmentPreviewUrlsRef.current.set(id, URL.createObjectURL(file))
+      }
 
       return {
-        id: crypto.randomUUID(),
+        id,
         name: file.name,
         kind,
       }
@@ -6223,6 +6247,12 @@ function App() {
   }
 
   function handleRemovePlanAttachment(attachmentId: string) {
+    const previewUrl = planAttachmentPreviewUrlsRef.current.get(attachmentId)
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl)
+      planAttachmentPreviewUrlsRef.current.delete(attachmentId)
+    }
+
     dispatchConversationInputState({
       type: 'remove-attachment',
       conversationId: activeConversation.id,
@@ -7729,10 +7759,49 @@ function App() {
 
               <div className="shrink-0 bg-transparent px-1 pt-3 md:px-4">
                 <div
-                  className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]"
+                  className={`relative rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)] ${
+                    planImagePreviewAttachments.length > 0
+                      ? 'min-h-[14rem]'
+                      : 'min-h-[var(--ui-chat-input-min)]'
+                  }`}
                   onKeyDownCapture={handlePlanComposerPasteShortcut}
                   onPasteCapture={(event) => void handlePastePlanAttachments(event)}
                 >
+                  {planImagePreviewAttachments.length > 0 ? (
+                    <div
+                      className="absolute inset-x-6 top-4 z-[1] flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                      aria-label="已添加图片预览"
+                      aria-live="polite"
+                      role="list"
+                    >
+                      {planImagePreviewAttachments.map((attachment) => {
+                        const previewUrl = planAttachmentPreviewUrlsRef.current.get(attachment.id)
+                        if (!previewUrl) return null
+
+                        return (
+                          <figure
+                            key={attachment.id}
+                            className="group relative size-[5.5rem] shrink-0 overflow-hidden rounded-[0.65rem] border border-white/90 bg-[var(--surface-muted)] shadow-[0_6px_16px_rgba(15,23,42,0.10)]"
+                            role="listitem"
+                          >
+                            <img
+                              src={previewUrl}
+                              alt={attachment.name}
+                              className="h-full w-full object-contain"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePlanAttachment(attachment.id)}
+                              className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/58 text-white opacity-100 shadow-sm transition hover:bg-black/72 focus-visible:ring-2 focus-visible:ring-white sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                              aria-label={`移除图片 ${attachment.name}`}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </figure>
+                        )
+                      })}
+                    </div>
+                  ) : null}
                   <Textarea
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
@@ -7743,7 +7812,11 @@ function App() {
                       }
                     }}
                     aria-describedby="plan-attachment-help"
-                    className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
+                    className={`w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] pb-[4.25rem] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0 ${
+                      planImagePreviewAttachments.length > 0
+                        ? 'min-h-[14rem] pt-[8rem]'
+                        : 'min-h-[var(--ui-chat-input-min)] pt-[var(--ui-chat-input-py)]'
+                    }`}
                     placeholder="补充具体信息或调整方向（选填）"
                   />
                   <p id="plan-attachment-help" className="sr-only">
@@ -7764,39 +7837,41 @@ function App() {
                         }}
                       />
                     </label>
-                    {planAttachments.length > 0 ? (
+                    {planCompactAttachments.length > 0 ? (
                       <div
                         className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                         aria-label="已添加附件"
                         aria-live="polite"
                         role="list"
                       >
-                        {planAttachments.map((attachment) => (
-                          <span
-                            key={attachment.id}
-                            className="inline-flex h-8 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full bg-white/78 py-1 pl-2.5 pr-1 text-xs font-semibold text-[var(--muted-foreground)] shadow-[0_4px_12px_rgba(15,23,42,0.04)]"
-                            role="listitem"
-                          >
-                            {attachment.kind === 'image' ? (
-                              <Image className="h-3.5 w-3.5 shrink-0" />
-                            ) : (
-                              <Paperclip className="h-3.5 w-3.5 shrink-0" />
-                            )}
-                            <span className="truncate">{attachment.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemovePlanAttachment(attachment.id)}
-                              className="flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
-                              aria-label={`移除附件 ${attachment.name}`}
+                        {planCompactAttachments.map((attachment) => (
+                            <span
+                              key={attachment.id}
+                              className="inline-flex h-8 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full bg-white/78 py-1 pl-2.5 pr-1 text-xs font-semibold text-[var(--muted-foreground)] shadow-[0_4px_12px_rgba(15,23,42,0.04)]"
+                              role="listitem"
                             >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </span>
+                              {attachment.kind === 'image' ? (
+                                <Image className="h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <span className="truncate">{attachment.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePlanAttachment(attachment.id)}
+                                className="flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                                aria-label={`移除附件 ${attachment.name}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
                         ))}
                       </div>
                     ) : (
                       <p className="min-w-0 flex-1 truncate text-xs text-[var(--soft-foreground)]">
-                        可点击添加，或直接粘贴剪贴板图片
+                        {planAttachments.length > 0
+                          ? `已添加 ${planAttachments.length} 张图片`
+                          : '可点击添加，或直接粘贴剪贴板图片'}
                       </p>
                     )}
                     <Button
