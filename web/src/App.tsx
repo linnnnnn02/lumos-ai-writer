@@ -53,7 +53,6 @@ import {
   History,
   Home,
   Image,
-  Layers3,
   Loader2,
   MessageCircle,
   MoreHorizontal,
@@ -100,7 +99,7 @@ import {
   type WorkflowStepId,
   type WorkflowStepItem,
 } from '@/components/workflow-header-nav'
-import { LearningResult } from '@/features/workspace/analysis/learning-result'
+import { buildLearningResultViewModel } from '@/features/workspace/analysis/learning-result-model'
 import {
   type ChatMessage,
   type ConversationRecord,
@@ -108,9 +107,15 @@ import {
   type WritingBrief,
 } from '@/features/workspace/model/workspace-model'
 import {
+  DEFAULT_TARGET_AUDIENCE,
+  buildOptionalBriefQuestions,
   buildReferenceRecommendations,
+  hasExplicitLengthPreference,
   inferProjectLengthFromWritingRequest,
+  inferTargetAudienceFromWritingRequest,
   inferWritingBriefFromRequest,
+  isDirectGenerationReply,
+  isOptionalBriefSkipReply,
 } from '@/features/workspace/model/writing-request-intent'
 import {
   createWorkspaceProjectState,
@@ -303,28 +308,6 @@ function dedupeReaderSuggestionMessages(messages: RewriteChatMessage[]) {
     return true
   })
 }
-
-const lengthOptions: Array<{
-  value: ProjectLength
-  title: string
-  lines: string[]
-}> = [
-  {
-    value: 'short',
-    title: '短篇幅',
-    lines: ['约 0-200 字', '适合快速表达一个判断或重点。'],
-  },
-  {
-    value: 'medium',
-    title: '中篇幅',
-    lines: ['约 201-600 字', '适合把背景、事实和个人判断说完整。'],
-  },
-  {
-    value: 'long',
-    title: '长篇幅',
-    lines: ['约 601-1000 字', '适合需要展开过程、对比或复杂信息的内容。'],
-  },
-]
 
 const shellSteps: Array<{ id: PageStep; title: string }> = [
   { id: 'workspace', title: '项目' },
@@ -699,6 +682,19 @@ function getDefaultWritingBrief(topic: string): WritingBrief {
   }
 
   return inferredBrief
+}
+
+function appendBriefValue(currentValue: string, nextValue: string) {
+  const currentItems = currentValue
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const nextItems = nextValue
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  return Array.from(new Set([...currentItems, ...nextItems])).join('\n')
 }
 
 function isWritingBrief(value: unknown): value is WritingBrief {
@@ -1850,7 +1846,6 @@ function App() {
   const [isWritingProfileLoading, setIsWritingProfileLoading] = useState(false)
   const [isWritingProfileSaving, setIsWritingProfileSaving] = useState(false)
   const [writingProfileError, setWritingProfileError] = useState('')
-  const [isWritingBriefOpen, setIsWritingBriefOpen] = useState(false)
   const [, setDraftUsageByConversation] = useState<
     Record<string, AiUsage | null>
   >({})
@@ -2924,11 +2919,7 @@ function App() {
     referenceSelectionDraftByConversation[activeConversation.id] ?? activeConversation.selectedItemIds
   const hasLearningResult = activeConversation.analysisReady
   const hasPlanReady = hasLearningResult
-  const missingBriefFields = [
-    activeConversation.topic.trim().length < 4 ? '内容主题' : '',
-    activeConversation.targetAudience.trim().length < 1 ? '目标读者' : '',
-  ].filter(Boolean)
-  const isWritingBriefValid = missingBriefFields.length === 0
+  const isWritingBriefValid = activeConversation.topic.trim().length >= 4
   const canGenerateDraft = hasPlanReady && isWritingBriefValid
   const hasDraftReady =
     canGenerateDraft && Boolean(draftReadyByConversation[activeConversation.id])
@@ -2942,6 +2933,13 @@ function App() {
   const analysisError = analysisErrorByConversation[activeConversation.id] ?? ''
   const draftGenerationError = draftGenerationErrorByConversation[activeConversation.id] ?? ''
   const effectiveLength = activeConversation.length ?? 'medium'
+  const effectiveTargetAudience =
+    activeConversation.targetAudience.trim() || DEFAULT_TARGET_AUDIENCE
+  const optionalBriefQuestions = buildOptionalBriefQuestions({
+    writingRequest: activeConversation.writingRequest || activeConversation.topic,
+    targetAudience: effectiveTargetAudience,
+    brief: activeConversation.writingBrief,
+  })
 
   useEffect(() => {
     if (!analysisWaitStartedAt && !draftWaitStartedAt) return
@@ -3012,14 +3010,14 @@ function App() {
         notes: selectedNotes,
         snippets: selectedSnippets,
         topic: activeConversation.topic,
-        targetAudience: activeConversation.targetAudience,
+        targetAudience: effectiveTargetAudience,
         projectName: activeProject.name,
         length: effectiveLength,
       }),
     [
       activeProject.name,
       effectiveLength,
-      activeConversation.targetAudience,
+      effectiveTargetAudience,
       activeConversation.topic,
       selectedFolderName,
       selectedNotes,
@@ -3027,18 +3025,22 @@ function App() {
     ],
   )
   const analysis = analysisByConversation[activeConversation.id] ?? fallbackAnalysis
+  const learningResult = useMemo(
+    () => buildLearningResultViewModel(analysis, isUsingCloudLibrary),
+    [analysis, isUsingCloudLibrary],
+  )
 
   const generatedInitialDraftCopy = useMemo(
     () =>
       buildInitialDraftCopy({
         topic: activeConversation.topic,
-        targetAudience: activeConversation.targetAudience,
+        targetAudience: effectiveTargetAudience,
         length: effectiveLength,
         writingBrief: activeConversation.writingBrief,
       }),
     [
       effectiveLength,
-      activeConversation.targetAudience,
+      effectiveTargetAudience,
       activeConversation.topic,
       activeConversation.writingBrief,
     ],
@@ -3106,7 +3108,7 @@ function App() {
     rewritePendingConversationId === activeConversation.id
   const planAttachments = planAttachmentsByConversation[activeConversation.id] ?? []
   const readerAudienceDraft = readerAudienceByConversation[activeConversation.id] ?? ''
-  const effectiveReaderAudience = readerAudienceDraft.trim() || activeConversation.targetAudience
+  const effectiveReaderAudience = readerAudienceDraft.trim() || effectiveTargetAudience
   const readerPreviewRecord = readerPreviewByConversation[activeConversation.id]
   const activeReaderPreview =
     readerPreviewRecord &&
@@ -3119,10 +3121,10 @@ function App() {
       buildReaderPreviewFeedback({
         draft: initialDraftCopy,
         audience: readerAudienceDraft,
-        fallbackAudience: activeConversation.targetAudience,
+        fallbackAudience: effectiveTargetAudience,
       }),
     [
-      activeConversation.targetAudience,
+      effectiveTargetAudience,
       initialDraftCopy,
       readerAudienceDraft,
     ],
@@ -3311,57 +3313,6 @@ function App() {
     showFinalCopyToast(`已将版本 ${version.version} 恢复为新版本`)
   }
 
-  function handleWritingBriefChange(
-    field: 'topic' | 'targetAudience' | keyof WritingBrief,
-    value: string,
-  ) {
-    invalidateDraftOutputs(activeConversation.id)
-    updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
-      ...conversation,
-      finalizedAt: undefined,
-      ...(field === 'topic' || field === 'targetAudience'
-        ? { [field]: value }
-        : {
-            writingBrief: {
-              ...conversation.writingBrief,
-              [field]: value,
-            },
-          }),
-    }))
-  }
-
-  function handleLengthChange(length: ProjectLength) {
-    if (activeConversation.length === length) return
-
-    invalidateDraftOutputs(activeConversation.id)
-    setDraftUsageByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setDraftBridgeMessagesByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setDraftMoveHistoryByConversation((current) => {
-      const next = { ...current }
-      delete next[activeConversation.id]
-      return next
-    })
-    setDraftDragSelection(null)
-    setDraftPointerDrag(null)
-    setDraftDropTarget(null)
-    setDraftDropLanding(null)
-    setDraftMovePrompt(null)
-
-    updateConversation(activeProject.id, activeConversation.id, (conversation) => ({
-      ...conversation,
-      finalizedAt: undefined,
-      length,
-    }))
-  }
-
   function handleReaderAudienceChange(value: string) {
     const conversationId = activeConversation.id
     dispatchReaderPreviewState({
@@ -3416,7 +3367,6 @@ function App() {
     setDraftDropTarget(null)
     setDraftDropLanding(null)
     setDraftMovePrompt(null)
-    setIsWritingBriefOpen(false)
     setIsReaderPreviewVisible(false)
     dispatchNavigation({ type: 'clear-conversation-context' })
     dispatchConversationInputState({ type: 'clear-all-transient' })
@@ -3548,6 +3498,7 @@ function App() {
     if (writingRequest.length < 4) return
 
     const requestChanged = writingRequest !== activeConversation.topic.trim()
+    const inferredTargetAudience = inferTargetAudienceFromWritingRequest(writingRequest)
     const shouldResetProgress = requestChanged || activeConversationStage === 'intake'
     if (requestChanged) {
       invalidateAnalysisAndDraft(activeConversation.id)
@@ -3567,7 +3518,9 @@ function App() {
       writingRequest,
       topic: writingRequest,
       targetAudience:
-        conversation.targetAudience.trim() || '会搜索本次主题、重视真实经验和具体信息的读者',
+        inferredTargetAudience ||
+        (requestChanged ? DEFAULT_TARGET_AUDIENCE : conversation.targetAudience.trim()) ||
+        DEFAULT_TARGET_AUDIENCE,
       length: requestChanged
         ? inferProjectLengthFromWritingRequest(writingRequest)
         : conversation.length ?? inferProjectLengthFromWritingRequest(writingRequest),
@@ -3908,7 +3861,7 @@ function App() {
             projectContext: {
               projectName: activeProject.name,
               topic: activeConversation.topic,
-              targetAudience: activeConversation.targetAudience,
+              targetAudience: effectiveTargetAudience,
             },
             libraryEvidence: projectLibraryEvidence,
             feedbackEvidence: toWritingFeedbackEvidence(projectFeedback),
@@ -4291,7 +4244,7 @@ function App() {
             projectName: activeProject.name,
             folderName: selectedFolderName,
             topic: activeConversation.topic,
-            targetAudience: activeConversation.targetAudience,
+            targetAudience: effectiveTargetAudience,
             length: effectiveLength,
             notes: selectedNotes,
             snippets: selectedSnippets,
@@ -4394,7 +4347,7 @@ function App() {
           projectId,
           projectName: activeProject.name,
           topic: activeConversation.topic,
-          targetAudience: activeConversation.targetAudience,
+          targetAudience: effectiveTargetAudience,
           length: effectiveLength,
           analysis: nextAnalysis,
           notes: selectedNotes,
@@ -4475,6 +4428,24 @@ function App() {
     const projectId = activeProject.id
     const conversationId = activeConversation.id
     const isPlanInstruction = step === 'plan'
+    const isSkippedPlanSupplement =
+      isPlanInstruction && isOptionalBriefSkipReply(question)
+    const shouldGenerateAfterReply =
+      isPlanInstruction && isDirectGenerationReply(question)
+    const inferredPlanBrief = inferWritingBriefFromRequest(question)
+    const inferredPlanAudience = inferTargetAudienceFromWritingRequest(question)
+    const hasPlanLengthUpdate =
+      isPlanInstruction && hasExplicitLengthPreference(question)
+    const hasStructuredPlanUpdate = Boolean(
+      inferredPlanAudience ||
+        inferredPlanBrief.objective ||
+        inferredPlanBrief.requiredFacts ||
+        inferredPlanBrief.boundaries ||
+        inferredPlanBrief.instructions ||
+        hasPlanLengthUpdate,
+    )
+    const supplementalInstruction = hasStructuredPlanUpdate ? '' : question
+    const shouldApplyPlanSupplement = isPlanInstruction && !isSkippedPlanSupplement
     const shouldGenerateTitle =
       activeConversation.chatMessages.length === 0 &&
       isDefaultConversationTitle(activeConversation.title)
@@ -4486,28 +4457,57 @@ function App() {
       lines: [question],
     }
 
-    if (isPlanInstruction) invalidateDraftOutputs(conversationId)
+    if (shouldApplyPlanSupplement) invalidateDraftOutputs(conversationId)
     updateConversation(projectId, conversationId, (conversation) => ({
       ...conversation,
       title: shouldGenerateTitle ? buildConversationTitleFromPrompt(question) : conversation.title,
-      finalizedAt: isPlanInstruction ? undefined : conversation.finalizedAt,
-      writingBrief: isPlanInstruction
+      finalizedAt: shouldApplyPlanSupplement ? undefined : conversation.finalizedAt,
+      targetAudience:
+        shouldApplyPlanSupplement && inferredPlanAudience
+          ? inferredPlanAudience
+          : conversation.targetAudience,
+      length: hasPlanLengthUpdate
+        ? inferProjectLengthFromWritingRequest(question)
+        : conversation.length,
+      writingBrief: shouldApplyPlanSupplement
         ? {
-            ...conversation.writingBrief,
-            instructions: [conversation.writingBrief.instructions.trim(), question]
-              .filter(Boolean)
-              .join('\n'),
+            objective: appendBriefValue(
+              conversation.writingBrief.objective,
+              inferredPlanBrief.objective,
+            ),
+            requiredFacts: appendBriefValue(
+              conversation.writingBrief.requiredFacts,
+              inferredPlanBrief.requiredFacts,
+            ),
+            boundaries: appendBriefValue(
+              conversation.writingBrief.boundaries,
+              inferredPlanBrief.boundaries,
+            ),
+            instructions: appendBriefValue(
+              conversation.writingBrief.instructions,
+              inferredPlanBrief.instructions || supplementalInstruction,
+            ),
           }
         : conversation.writingBrief,
       chatMessages: [...conversation.chatMessages, userMessage],
     }))
     setChatInput('')
 
-    const reply = isPlanInstruction
+    const reply = isSkippedPlanSupplement
       ? {
           stage: 'followup' as const,
-          title: '已加入创作简报',
-          lines: ['内容已保存。请重新生成初稿，使这条要求应用到文案。'],
+          title: '可以直接生成',
+          lines: [
+            selectedNotes.length > 0
+              ? '会按你前面提交的需求和已选参考继续，不补写没有提供的事实。'
+              : '会按你前面提交的需求继续，不补写没有提供的事实。',
+          ],
+        }
+      : isPlanInstruction
+      ? {
+          stage: 'followup' as const,
+          title: '已记住这次补充',
+          lines: ['下一版会使用这条信息。'],
         }
       : activeConversation.analysisReady
         ? buildAssistantReply(question, analysis)
@@ -4532,6 +4532,9 @@ function App() {
     }))
 
     dispatchAnalysisState({ type: 'finish-chat-reply', conversationId })
+    if (shouldGenerateAfterReply) {
+      await handleGenerateDraft()
+    }
   }
 
   function handleApplyHistoricalPlanInstruction(messageId: string) {
@@ -4571,8 +4574,8 @@ function App() {
             return {
               ...chatMessage,
               source: 'plan_instruction',
-              title: '已加入创作简报',
-              lines: ['内容已保存。请重新生成初稿，使这条要求应用到文案。'],
+              title: '已记住这次补充',
+              lines: ['下一版会使用这条信息。'],
             }
           }
           return chatMessage
@@ -5799,7 +5802,7 @@ function App() {
           projectId,
           projectName: activeProject.name,
           topic: activeConversation.topic,
-          targetAudience: activeConversation.targetAudience,
+          targetAudience: effectiveTargetAudience,
           draft: initialDraftCopy,
           fieldId,
           selectedText: selection,
@@ -5997,7 +6000,7 @@ function App() {
         projectId: activeProject.id,
         projectName: activeProject.name,
         topic: activeConversation.topic,
-        targetAudience: activeConversation.targetAudience,
+        targetAudience: effectiveTargetAudience,
         readerAudience: readerAudienceDraft.trim(),
         draft: initialDraftCopy,
         analysis: activeConversation.analysisReady ? analysis : undefined,
@@ -7415,9 +7418,17 @@ function App() {
     const planInstructionMessages = getPlanInstructionMessages(
       activeConversation.chatMessages,
     )
-    const planInstructionCount = planInstructionMessages.filter(
-      (message) => message.role === 'user',
-    ).length
+    const hasSkippedOptionalBrief = activeConversation.chatMessages.some(
+      (message) =>
+        message.role === 'user' &&
+        message.source === 'plan_instruction' &&
+        isOptionalBriefSkipReply(message.lines.join(' ')),
+    )
+    const conversationalQuestions = hasSkippedOptionalBrief ? [] : optionalBriefQuestions
+    const optionalBriefTopics = conversationalQuestions
+      .map((question) => question.label.replace(/^补充/u, ''))
+      .join('、')
+    const primaryLearningPattern = selectedNotes.length > 0 ? learningResult.patterns[0] : undefined
 
     return (
       <div className="relative h-[100dvh] overflow-hidden bg-[linear-gradient(120deg,#eef2f6_0%,#f6f8fb_46%,#ffffff_100%)]">
@@ -7453,220 +7464,92 @@ function App() {
               <section className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col overflow-hidden">
                 <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 pt-5 md:px-4 [scrollbar-gutter:stable]">
                   <div className="grid gap-5">
-                    <section className="border-b border-[var(--border)] px-1 pb-6 md:px-3">
-                      <LearningResult
-                        analysis={analysis}
-                        isCloudEnabled={isUsingCloudLibrary}
-                        referenceCount={selectedNotes.length}
-                        snippetCount={selectedSnippets.length}
-                      />
-
-                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="outline">{activeConversation.targetAudience}</Badge>
-                          <Badge variant="outline">
-                            {effectiveLength === 'short'
-                              ? '短篇幅'
-                              : effectiveLength === 'medium'
-                                ? '中篇幅'
-                                : '长篇幅'}
-                          </Badge>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span
-                            className={
-                              isWritingBriefValid
-                                ? 'inline-flex items-center gap-1.5 text-xs font-semibold text-[#17675b]'
-                                : 'inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--destructive)]'
-                            }
-                            role="status"
-                          >
-                            {isWritingBriefValid ? (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            ) : (
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                            )}
-                            {isWritingBriefValid
-                              ? '可以生成'
-                              : `还缺：${missingBriefFields.join('、')}`}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            aria-expanded={isWritingBriefOpen}
-                            onClick={() => setIsWritingBriefOpen((current) => !current)}
-                          >
-                            {isWritingBriefOpen ? '收起生成设置' : '检查生成设置'}
-                          </Button>
-                        </div>
-                      </div>
-
-                      {isWritingBriefOpen ? (
-                        <div className="mt-5 grid gap-4 border-t border-[var(--border)] pt-5 lg:grid-cols-2">
-                        <label className="grid gap-2">
-                          <span className="text-sm font-semibold text-[var(--foreground)]">
-                            内容主题 <span className="text-[var(--destructive)]">必填</span>
-                          </span>
-                          <Input
-                            value={activeConversation.topic}
-                            onChange={(event) => handleWritingBriefChange('topic', event.target.value)}
-                            placeholder="例如：第一次骑深圳湾 15 公里的真实体验"
-                          />
-                        </label>
-                        <label className="grid gap-2">
-                          <span className="text-sm font-semibold text-[var(--foreground)]">
-                            目标读者 <span className="text-[var(--destructive)]">必填</span>
-                          </span>
-                          <Input
-                            value={activeConversation.targetAudience}
-                            onChange={(event) =>
-                              handleWritingBriefChange('targetAudience', event.target.value)
-                            }
-                            placeholder="例如：怕晒、担心路线太难的骑行新手"
-                          />
-                        </label>
-                        <fieldset className="grid gap-2 lg:col-span-2">
-                          <legend className="text-sm font-semibold text-[var(--foreground)]">
-                            篇幅 <span className="text-[var(--destructive)]">必选</span>
-                          </legend>
-                          <div
-                            className="grid gap-1 rounded-[var(--ui-radius-control)] bg-[var(--surface-muted)] p-1 sm:grid-cols-3"
-                            role="radiogroup"
-                            aria-label="篇幅"
-                          >
-                            {lengthOptions.map((option) => {
-                              const isSelected = activeConversation.length === option.value
-                              return (
-                                <Button
-                                  key={option.value}
-                                  type="button"
-                                  variant="ghost"
-                                  role="radio"
-                                  aria-checked={isSelected}
-                                  onClick={() => handleLengthChange(option.value)}
-                                  className={
-                                    isSelected
-                                      ? 'h-auto justify-start gap-2 rounded-[calc(var(--ui-radius-control)-0.25rem)] bg-white px-3 py-2.5 text-left text-[var(--foreground)] shadow-[0_4px_14px_rgba(48,34,22,0.06)] hover:bg-white sm:justify-center'
-                                      : 'h-auto justify-start rounded-[calc(var(--ui-radius-control)-0.25rem)] px-3 py-2.5 text-left text-[var(--muted-foreground)] hover:bg-white/60 hover:text-[var(--foreground)] sm:justify-center'
-                                  }
-                                >
-                                  {isSelected ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-strong)]" /> : null}
-                                  <span>
-                                    <span className="block text-sm font-semibold">{option.title}</span>
-                                    <span className="block text-xs font-normal text-[var(--soft-foreground)]">
-                                      {option.lines[0]}
-                                    </span>
-                                  </span>
-                                </Button>
-                              )
-                            })}
-                          </div>
-                        </fieldset>
-                        <label className="grid gap-2 lg:col-span-2">
-                          <span className="text-sm font-semibold text-[var(--foreground)]">写作目标</span>
-                          <Input
-                            value={activeConversation.writingBrief.objective}
-                            onChange={(event) => handleWritingBriefChange('objective', event.target.value)}
-                            placeholder="希望读者看完理解、相信或采取什么行动"
-                          />
-                        </label>
-                        <label className="grid gap-2">
-                          <span className="text-sm font-semibold text-[var(--foreground)]">
-                            希望保留的信息
-                          </span>
-                          <Textarea
-                            value={activeConversation.writingBrief.requiredFacts}
-                            onChange={(event) =>
-                              handleWritingBriefChange('requiredFacts', event.target.value)
-                            }
-                            className="resize-y"
-                            placeholder="只填写可以确认的事实，例如：全程约 15 公里、傍晚出发更避晒"
-                          />
-                        </label>
-                        <label className="grid gap-2">
-                          <span className="text-sm font-semibold text-[var(--foreground)]">表达边界</span>
-                          <Textarea
-                            value={activeConversation.writingBrief.boundaries}
-                            onChange={(event) =>
-                              handleWritingBriefChange('boundaries', event.target.value)
-                            }
-                            className="resize-y"
-                            placeholder="例如：不要夸大难度，不用攻略站口吻"
-                          />
-                        </label>
-                        {activeConversation.writingBrief.instructions ? (
-                          <label className="grid gap-2 lg:col-span-2">
-                            <span className="text-sm font-semibold text-[var(--foreground)]">补充要求</span>
-                            <Textarea
-                              value={activeConversation.writingBrief.instructions}
-                              onChange={(event) =>
-                                handleWritingBriefChange('instructions', event.target.value)
-                              }
-                              className="resize-y"
-                            />
-                          </label>
-                        ) : null}
-                        </div>
-                      ) : null}
-
-                      {planAttachments.length > 0 ? (
-                        <div className="mt-4">
-                          <div className="flex flex-wrap gap-2">
-                            {planAttachments.map((attachment) => (
-                              <span
-                                key={attachment.id}
-                                className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-muted)] py-1 pl-3 pr-1.5 text-xs font-semibold text-[var(--muted-foreground)]"
-                              >
-                                {attachment.kind === 'image' ? (
-                                  <Image className="h-3.5 w-3.5 shrink-0" />
-                                ) : (
-                                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
-                                )}
-                                <span className="max-w-[16rem] truncate">{attachment.name}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemovePlanAttachment(attachment.id)}
-                                  className="flex size-[var(--ui-control-height-sm)] items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-white/70 hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
-                                  aria-label={`移除附件 ${attachment.name}`}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                          <p className="mt-2 text-xs leading-5 text-[var(--soft-foreground)]">
-                            当前版本会保存附件名称，但尚未解析文件内容，不会把附件作为生成依据。
-                          </p>
-                        </div>
-                      ) : null}
-                    </section>
-
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-                        <Layers3 className="h-5 w-5" />
+                        <Sparkles className="h-5 w-5" />
                       </div>
-                      <div
+                      <article
                         data-plan-draft-card
-                        className="max-w-[50rem] rounded-[var(--ui-radius-panel)] rounded-tl-[0.45rem] bg-white px-5 py-5 shadow-[0_14px_34px_rgba(48,34,22,0.05)]"
+                        className="min-w-0 max-w-[48rem] pt-1"
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={isUsingCloudLibrary ? 'accent' : 'outline'}>
-                            {isUsingCloudLibrary ? 'AI 初稿' : '本地演示稿'}
-                          </Badge>
-                          <Badge variant="outline">标题 + 正文</Badge>
+                        <div className="space-y-2 text-sm leading-7 text-[var(--foreground)] sm:text-[0.95rem]">
+                          <p>
+                            {selectedNotes.length > 0
+                              ? `我看完了你选的 ${selectedNotes.length} 篇参考和 ${selectedSnippets.length} 条标注。我的理解是：${learningResult.conclusion}`
+                              : `我已经理解了你前面提交的需求：${learningResult.conclusion}`}
+                          </p>
+
+                          {primaryLearningPattern ? (
+                            <p className="text-[var(--muted-foreground)]">
+                              这次会参考“{primaryLearningPattern}”的处理方式，但不会照抄原文。
+                            </p>
+                          ) : null}
+
+                          {conversationalQuestions.length > 0 ? (
+                            <p className="text-[var(--muted-foreground)]">
+                              现有信息已经可以生成。如果愿意，还可以补充
+                              {optionalBriefTopics}；不补充也可以直接生成。
+                            </p>
+                          ) : (
+                            <p className="text-[var(--muted-foreground)]">
+                              现有信息已经够用了。你可以继续补充，也可以直接生成初稿。
+                            </p>
+                          )}
                         </div>
+
                         {!isUsingCloudLibrary ? (
                           <p
-                            className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--surface-muted)] px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]"
+                            className="mt-3 text-xs leading-5 text-[var(--muted-foreground)]"
                             role="status"
                           >
                             当前未登录，这版只用于体验流程，不会调用 AI，也不代表真实生成质量或篇幅交付。
                           </p>
                         ) : null}
-                        {hasDraftReady ? (
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          {conversationalQuestions.map((question) => (
+                            <Button
+                              key={question.id}
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setChatInput(question.inputPrefix)}
+                            >
+                              {question.label}
+                            </Button>
+                          ))}
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleGenerateDraft}
+                            disabled={isDraftGenerating || !canGenerateDraft}
+                          >
+                            {isDraftGenerating ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <WandSparkles className="h-4 w-4" />
+                            )}
+                            {isDraftGenerating
+                              ? '正在生成'
+                              : hasDraftReady || draftGenerationError
+                                ? '重新生成初稿'
+                                : isUsingCloudLibrary
+                                  ? '生成初稿'
+                                  : '生成演示稿'}
+                          </Button>
+                        </div>
+
+                        {draftGenerationError ? (
+                          <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]" role="alert">
+                            {draftGenerationError}
+                          </p>
+                        ) : null}
+
+                        {isDraftGenerating ? (
+                          renderDraftGenerationSkeleton()
+                        ) : hasDraftReady ? (
                           <>
-                            <div className="mt-4">
+                            <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-5">
                               {activeDraftQuality ? (
                                 <DraftQualitySummary
                                   snapshot={activeDraftQuality}
@@ -7702,80 +7585,14 @@ function App() {
                               </div>
                             </div>
                           </>
-                        ) : isDraftGenerating ? (
-                          renderDraftGenerationSkeleton()
-                        ) : (
-                          <div className="mt-5 border-t border-[rgba(31,22,17,0.06)] pt-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="text-sm leading-6 text-[var(--foreground)]">
-                                <p className="font-semibold">
-                                  {isWritingBriefValid
-                                    ? isUsingCloudLibrary
-                                      ? '可以直接生成'
-                                      : '可以生成流程演示稿'
-                                    : '先补全创作简报'}
-                                </p>
-                                <p className="mt-1 text-[var(--muted-foreground)]">
-                                  {isWritingBriefValid
-                                    ? `${
-                                        effectiveLength === 'short'
-                                          ? '短篇幅'
-                                          : effectiveLength === 'medium'
-                                            ? '中篇幅'
-                                            : '长篇幅'
-                                      }｜${selectedNotes.length} 篇参考，${selectedSnippets.length} 条标注`
-                                    : `还缺：${missingBriefFields.join('、')}`}
-                                </p>
-                                {hasStoredDraft && !hasDraftReady ? (
-                                  <p className="mt-1 text-xs text-[var(--soft-foreground)]">
-                                    上一版仍已保留，重新生成成功后才会替换当前工作稿。
-                                  </p>
-                                ) : null}
-                              </div>
-                              <div className="flex flex-wrap items-center justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={handleGenerateDraft}
-                                  disabled={isDraftGenerating || !canGenerateDraft}
-                                >
-                                  <WandSparkles className="h-4 w-4" />
-                                  {draftGenerationError
-                                    ? isUsingCloudLibrary
-                                      ? '重新生成'
-                                      : '重新生成演示稿'
-                                    : isUsingCloudLibrary
-                                      ? '直接生成'
-                                      : '生成演示稿'}
-                                </Button>
-                              </div>
-                            </div>
-                            {draftGenerationError ? (
-                              <p className="mt-3 text-sm leading-6 text-[rgb(185,28,28)]">
-                                {draftGenerationError}
-                              </p>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
+                        ) : null}
+                      </article>
                     </div>
 
                     {draftBridgeMessages.map((message) => renderDraftBridgeMessage(message))}
 
                     {planInstructionMessages.length > 0 ? (
-                      <section
-                        aria-label="已发送的创作补充"
-                        className="ml-0 max-w-[50rem] border-y border-[rgba(31,22,17,0.07)] py-3 md:ml-[3.25rem]"
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-3 px-1">
-                          <p className="text-xs font-semibold text-[var(--muted-foreground)]">
-                            已发送的创作补充
-                          </p>
-                          <span className="text-xs text-[var(--soft-foreground)]">
-                            {planInstructionCount} 条
-                          </span>
-                        </div>
-                        <div className="grid gap-2" aria-live="polite">
+                      <section aria-label="补充对话" className="grid gap-3" aria-live="polite">
                           {planInstructionMessages.map((message) =>
                             message.role === 'user' ? (
                               <article
@@ -7802,55 +7619,63 @@ function App() {
                                       className="h-7 px-2 text-xs text-white/72 hover:bg-white/10 hover:text-white"
                                     >
                                       <CheckCircle2 className="h-3.5 w-3.5" />
-                                      应用到简报
+                                      用于下一版
                                     </Button>
                                   </div>
                                 ) : null}
                               </article>
                             ) : (
-                              <article
-                                key={message.id}
-                                className="flex items-center justify-end gap-1.5 px-1 text-xs leading-5 text-[var(--muted-foreground)]"
-                                role="status"
-                              >
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#17675b]" />
-                                <p>
-                                  <span className="font-semibold text-[var(--foreground)]">
-                                    {message.title ?? '已收到'}
-                                  </span>
-                                  {message.title === '已加入创作简报'
-                                    ? '，重新生成后生效'
-                                    : '，尚未写入简报'}
-                                </p>
-                              </article>
+                              <div key={message.id} className="flex items-start gap-3" role="status">
+                                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-strong)]">
+                                  <Sparkles className="h-4 w-4" />
+                                </div>
+                                <article className="max-w-[42rem] rounded-[var(--ui-radius-card)] rounded-tl-[0.35rem] bg-white/82 px-4 py-2.5 text-sm leading-6 text-[var(--foreground)] shadow-[0_8px_20px_rgba(48,34,22,0.035)]">
+                                  <p className="font-semibold">{message.title ?? '已收到'}</p>
+                                  {message.lines.map((line, index) => (
+                                    <p
+                                      key={`${message.id}-${index}`}
+                                      className="text-[var(--muted-foreground)]"
+                                    >
+                                      {line}
+                                    </p>
+                                  ))}
+                                </article>
+                              </div>
                             ),
                           )}
-                        </div>
                       </section>
                     ) : null}
 
-                    <div className="ml-0 grid gap-3 md:ml-[3.25rem]">
-                      {[
-                        { label: '补充信息', text: '还有必须保留的真实细节吗？' },
-                        { label: '校准目标', text: '这版更偏收藏、评论，还是行动？' },
-                        { label: '调整语气', text: '先把表达润得更像朋友分享。' },
-                      ].map((question) => (
-                        <button
-                          key={question.label}
-                          type="button"
-                          onClick={() => setChatInput(question.text)}
-                          className="w-fit rounded-full border border-[var(--border)] bg-white/76 px-4 py-2 text-left text-sm leading-6 text-[var(--foreground)] shadow-[0_10px_24px_rgba(48,34,22,0.03)] transition hover:bg-white/94 focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
-                        >
-                          <span className="mr-2 text-[var(--accent-strong)]">{question.label}</span>
-                          {question.text}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </div>
 
               <div className="shrink-0 bg-transparent px-1 pt-3 md:px-4">
                 <div className="relative min-h-[var(--ui-chat-input-min)] rounded-[var(--ui-radius-panel)] border border-[rgba(15,23,42,0.08)] bg-[rgba(248,250,252,0.84)] shadow-[0_10px_24px_rgba(15,23,42,0.035)] transition focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
+                  {planAttachments.length > 0 ? (
+                    <div className="flex flex-wrap gap-2 px-6 pb-1 pt-4">
+                      {planAttachments.map((attachment) => (
+                        <span
+                          key={attachment.id}
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-muted)] py-1 pl-3 pr-1.5 text-xs font-semibold text-[var(--muted-foreground)]"
+                        >
+                          {attachment.kind === 'image' ? (
+                            <Image className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span className="max-w-[16rem] truncate">{attachment.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePlanAttachment(attachment.id)}
+                            className="flex size-[var(--ui-control-height-sm)] items-center justify-center rounded-full text-[var(--soft-foreground)] hover:bg-white/70 hover:text-[var(--foreground)] focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+                            aria-label={`移除附件 ${attachment.name}`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <Textarea
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
@@ -7861,7 +7686,7 @@ function App() {
                       }
                     }}
                     className="min-h-[var(--ui-chat-input-min)] w-full resize-none border-0 bg-transparent px-[var(--ui-chat-input-px)] py-[var(--ui-chat-input-py)] pb-[4.25rem] pr-[var(--ui-chat-action-pr)] text-base leading-7 text-[var(--foreground)] shadow-none outline-none placeholder:text-[var(--soft-foreground)] focus:border-transparent focus:ring-0 focus-visible:ring-0"
-                    placeholder="补充文案信息，或说明要调整的方向..."
+                    placeholder="补充具体信息或调整方向（选填）"
                   />
                   <label className="absolute bottom-4 left-6 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[var(--soft-foreground)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] focus-within:ring-4 focus-within:ring-[var(--ring)]">
                     <Paperclip className="h-4 w-4" />
