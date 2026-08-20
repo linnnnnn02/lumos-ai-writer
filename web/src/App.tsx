@@ -102,6 +102,7 @@ import {
 import { buildLearningResultViewModel } from '@/features/workspace/analysis/learning-result-model'
 import {
   type ChatMessage,
+  type ChatAttachment,
   type ConversationRecord,
   type ProjectRecord,
   type WritingBrief,
@@ -224,6 +225,53 @@ const clipboardImageExtensionByMimeType: Record<string, string> = {
   'image/png': 'png',
   'image/tiff': 'tiff',
   'image/webp': 'webp',
+}
+
+const maxPlanAttachmentCount = 4
+const maxPersistedImageBytes = 900_000
+const maxImageSourceBytes = 16 * 1024 * 1024
+const maxImageEdge = 1600
+
+function readBlobAsDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') resolve(reader.result)
+      else reject(new Error('无法读取图片。'))
+    })
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('无法读取图片。')))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function prepareChatImageDataUrl(file: File) {
+  if (file.size > maxImageSourceBytes) {
+    throw new Error('图片不能超过 16 MB。')
+  }
+
+  const canKeepOriginal =
+    file.size <= maxPersistedImageBytes &&
+    ['image/gif', 'image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+  if (canKeepOriginal) return readBlobAsDataUrl(file)
+
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, maxImageEdge / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  const context = canvas.getContext('2d')
+  if (!context) {
+    bitmap.close()
+    throw new Error('当前浏览器无法处理这张图片。')
+  }
+
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  const compressed = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, 'image/webp', 0.86)
+  })
+  if (!compressed) throw new Error('图片压缩失败。')
+  return readBlobAsDataUrl(compressed)
 }
 
 async function readClipboardImageFiles() {
@@ -1331,10 +1379,6 @@ function buildAnalysisChat(context: AiAnalysisResult): ChatMessage[] {
   ]
 }
 
-function sleep(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-}
-
 function getErrorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : '请求失败'
 }
@@ -1353,6 +1397,33 @@ function getRequiredFactStatements(value: string) {
     .split(/[\n；;]+/)
     .map((item) => item.trim().replace(/[。！？.!?]+$/, ''))
     .filter(Boolean)
+}
+
+function buildCreationBrief(writingBrief: WritingBrief) {
+  const requiredFacts = getRequiredFactStatements(writingBrief.requiredFacts)
+  return {
+    objective: writingBrief.objective.trim(),
+    sourceFacts: writingBrief.requiredFacts.trim(),
+    instructions: writingBrief.instructions.trim(),
+    contentMode: 'auto' as const,
+    facts: requiredFacts.map((statement, index) => ({
+      id: `brief-${index + 1}`,
+      statement,
+      required: true,
+    })),
+    mustInclude: [
+      writingBrief.requiredFacts.trim(),
+      writingBrief.objective.trim()
+        ? `写作目标：${writingBrief.objective.trim()}`
+        : '',
+      writingBrief.instructions.trim()
+        ? `补充要求：${writingBrief.instructions.trim()}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    avoidTone: writingBrief.boundaries.trim(),
+  }
 }
 
 function buildInitialDraftCopy(input: {
@@ -1926,7 +1997,6 @@ function App() {
   const readerAudiencePopoverRef = useRef<HTMLDivElement | null>(null)
   const finalCopyToastTimerRef = useRef<number | null>(null)
   const lastSuccessfulPlanImagePasteAtRef = useRef(0)
-  const planAttachmentPreviewUrlsRef = useRef(new Map<string, string>())
   const projectDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const rewriteInputRef = useRef<HTMLTextAreaElement | null>(null)
   const draftMovePromptToolbarRef = useRef<HTMLDivElement | null>(null)
@@ -1953,16 +2023,6 @@ function App() {
   useEffect(() => {
     draftVersionsRef.current = draftVersionsByConversation
   }, [draftVersionsByConversation])
-
-  useEffect(
-    () => () => {
-      planAttachmentPreviewUrlsRef.current.forEach((previewUrl) => {
-        URL.revokeObjectURL(previewUrl)
-      })
-      planAttachmentPreviewUrlsRef.current.clear()
-    },
-    [],
-  )
 
   const storedActiveProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? initialProjects[0],
@@ -3113,34 +3173,7 @@ function App() {
     hasDraftReady && activeDraftQuality?.overallStatus !== 'failed'
 
   const creationBrief = useMemo(
-    () => {
-      const requiredFacts = getRequiredFactStatements(
-        activeConversation.writingBrief.requiredFacts,
-      )
-      return {
-        objective: activeConversation.writingBrief.objective.trim(),
-        sourceFacts: activeConversation.writingBrief.requiredFacts.trim(),
-        instructions: activeConversation.writingBrief.instructions.trim(),
-        contentMode: 'auto' as const,
-        facts: requiredFacts.map((statement, index) => ({
-          id: `brief-${index + 1}`,
-          statement,
-          required: true,
-        })),
-        mustInclude: [
-          activeConversation.writingBrief.requiredFacts.trim(),
-          activeConversation.writingBrief.objective.trim()
-            ? `写作目标：${activeConversation.writingBrief.objective.trim()}`
-            : '',
-          activeConversation.writingBrief.instructions.trim()
-            ? `补充要求：${activeConversation.writingBrief.instructions.trim()}`
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        avoidTone: activeConversation.writingBrief.boundaries.trim(),
-      }
-    },
+    () => buildCreationBrief(activeConversation.writingBrief),
     [activeConversation.writingBrief],
   )
 
@@ -3157,12 +3190,10 @@ function App() {
     rewritePendingConversationId === activeConversation.id
   const planAttachments = planAttachmentsByConversation[activeConversation.id] ?? []
   const planImagePreviewAttachments = planAttachments.filter(
-    (attachment) =>
-      attachment.kind === 'image' &&
-      planAttachmentPreviewUrlsRef.current.has(attachment.id),
+    (attachment) => attachment.kind === 'image' && Boolean(attachment.dataUrl),
   )
   const planCompactAttachments = planAttachments.filter(
-    (attachment) => !planAttachmentPreviewUrlsRef.current.has(attachment.id),
+    (attachment) => !attachment.dataUrl,
   )
   const readerAudienceDraft = readerAudienceByConversation[activeConversation.id] ?? ''
   const effectiveReaderAudience = readerAudienceDraft.trim() || effectiveTargetAudience
@@ -4359,6 +4390,12 @@ function App() {
   async function generateDraftForAnalysis(
     nextAnalysis: AiAnalysisResult,
     requireReadyState = true,
+    overrides?: {
+      writingBrief?: WritingBrief
+      targetAudience?: string
+      length?: ProjectLength
+      topic?: string
+    },
   ) {
     if (
       (requireReadyState && !canGenerateDraft) ||
@@ -4371,6 +4408,13 @@ function App() {
     const projectId = activeProject.id
     const conversationId = activeConversation.id
     const previousDraftWasReady = Boolean(draftReadyByConversation[conversationId])
+    const requestWritingBrief = overrides?.writingBrief ?? activeConversation.writingBrief
+    const requestTargetAudience = overrides?.targetAudience ?? effectiveTargetAudience
+    const requestLength = overrides?.length ?? effectiveLength
+    const requestTopic = overrides?.topic ?? activeConversation.topic
+    const requestCreationBrief = overrides?.writingBrief
+      ? buildCreationBrief(requestWritingBrief)
+      : creationBrief
 
     setDraftGeneratingConversationId(conversationId)
     setDraftWaitStartedAt(Date.now())
@@ -4383,7 +4427,14 @@ function App() {
     })
 
     try {
-      let nextDraft = generatedInitialDraftCopy
+      let nextDraft = overrides
+        ? buildInitialDraftCopy({
+            topic: requestTopic,
+            targetAudience: requestTargetAudience,
+            length: requestLength,
+            writingBrief: requestWritingBrief,
+          })
+        : generatedInitialDraftCopy
       let appliedWritingProfile: AppliedWritingProfileContext = {
         account: null,
         project: null,
@@ -4403,13 +4454,13 @@ function App() {
         const response = await generateDraft(accessToken, {
           projectId,
           projectName: activeProject.name,
-          topic: activeConversation.topic,
-          targetAudience: effectiveTargetAudience,
-          length: effectiveLength,
+          topic: requestTopic,
+          targetAudience: requestTargetAudience,
+          length: requestLength,
           analysis: nextAnalysis,
           notes: selectedNotes,
           snippets: selectedSnippets,
-          brief: creationBrief,
+          brief: requestCreationBrief,
         })
         nextDraft = response.draft
         appliedWritingProfile = response.appliedWritingProfile
@@ -4480,19 +4531,22 @@ function App() {
     if (isChatStreaming) return
 
     const question = chatInput.trim()
-    if (!question) return
+    const pendingAttachments: ChatAttachment[] = planAttachments.map((attachment) => ({
+      ...attachment,
+    }))
+    if (!question && pendingAttachments.length === 0) return
 
     const projectId = activeProject.id
     const conversationId = activeConversation.id
     const isPlanInstruction = step === 'plan'
     const isSkippedPlanSupplement =
-      isPlanInstruction && isOptionalBriefSkipReply(question)
-    const shouldGenerateAfterReply =
-      isPlanInstruction && isDirectGenerationReply(question)
+      Boolean(question) && isPlanInstruction && isOptionalBriefSkipReply(question)
+    const isDirectGenerationRequest =
+      Boolean(question) && isPlanInstruction && isDirectGenerationReply(question)
     const inferredPlanBrief = inferWritingBriefFromRequest(question)
     const inferredPlanAudience = inferTargetAudienceFromWritingRequest(question)
     const hasPlanLengthUpdate =
-      isPlanInstruction && hasExplicitLengthPreference(question)
+      Boolean(question) && isPlanInstruction && hasExplicitLengthPreference(question)
     const hasStructuredPlanUpdate = Boolean(
       inferredPlanAudience ||
         inferredPlanBrief.objective ||
@@ -4502,8 +4556,40 @@ function App() {
         hasPlanLengthUpdate,
     )
     const supplementalInstruction = hasStructuredPlanUpdate ? '' : question
-    const shouldApplyPlanSupplement = isPlanInstruction && !isSkippedPlanSupplement
+    const shouldApplyPlanSupplement =
+      Boolean(question) &&
+      isPlanInstruction &&
+      !isSkippedPlanSupplement &&
+      !isDirectGenerationRequest
+    const nextTargetAudience =
+      shouldApplyPlanSupplement && inferredPlanAudience
+        ? inferredPlanAudience
+        : activeConversation.targetAudience
+    const nextLength = hasPlanLengthUpdate
+      ? inferProjectLengthFromWritingRequest(question)
+      : activeConversation.length
+    const nextWritingBrief = shouldApplyPlanSupplement
+      ? {
+          objective: appendBriefValue(
+            activeConversation.writingBrief.objective,
+            inferredPlanBrief.objective,
+          ),
+          requiredFacts: appendBriefValue(
+            activeConversation.writingBrief.requiredFacts,
+            inferredPlanBrief.requiredFacts,
+          ),
+          boundaries: appendBriefValue(
+            activeConversation.writingBrief.boundaries,
+            inferredPlanBrief.boundaries,
+          ),
+          instructions: appendBriefValue(
+            activeConversation.writingBrief.instructions,
+            inferredPlanBrief.instructions || supplementalInstruction,
+          ),
+        }
+      : activeConversation.writingBrief
     const shouldGenerateTitle =
+      Boolean(question) &&
       activeConversation.chatMessages.length === 0 &&
       isDefaultConversationTitle(activeConversation.title)
     const userMessage: ChatMessage = {
@@ -4511,7 +4597,8 @@ function App() {
       role: 'user',
       stage: activeConversation.analysisReady ? 'followup' : 'setup',
       source: isPlanInstruction ? 'plan_instruction' : undefined,
-      lines: [question],
+      lines: question ? [question] : [],
+      ...(pendingAttachments.length > 0 ? { attachments: pendingAttachments } : {}),
     }
 
     if (shouldApplyPlanSupplement) invalidateDraftOutputs(conversationId)
@@ -4519,78 +4606,72 @@ function App() {
       ...conversation,
       title: shouldGenerateTitle ? buildConversationTitleFromPrompt(question) : conversation.title,
       finalizedAt: shouldApplyPlanSupplement ? undefined : conversation.finalizedAt,
-      targetAudience:
-        shouldApplyPlanSupplement && inferredPlanAudience
-          ? inferredPlanAudience
-          : conversation.targetAudience,
-      length: hasPlanLengthUpdate
-        ? inferProjectLengthFromWritingRequest(question)
-        : conversation.length,
-      writingBrief: shouldApplyPlanSupplement
-        ? {
-            objective: appendBriefValue(
-              conversation.writingBrief.objective,
-              inferredPlanBrief.objective,
-            ),
-            requiredFacts: appendBriefValue(
-              conversation.writingBrief.requiredFacts,
-              inferredPlanBrief.requiredFacts,
-            ),
-            boundaries: appendBriefValue(
-              conversation.writingBrief.boundaries,
-              inferredPlanBrief.boundaries,
-            ),
-            instructions: appendBriefValue(
-              conversation.writingBrief.instructions,
-              inferredPlanBrief.instructions || supplementalInstruction,
-            ),
-          }
-        : conversation.writingBrief,
+      targetAudience: nextTargetAudience,
+      length: nextLength,
+      writingBrief: nextWritingBrief,
       chatMessages: [...conversation.chatMessages, userMessage],
     }))
     setChatInput('')
-
-    const reply = isSkippedPlanSupplement
-      ? {
-          stage: 'followup' as const,
-          title: '可以直接生成',
-          lines: [
-            selectedNotes.length > 0
-              ? '会按你前面提交的需求和已选参考继续，不补写没有提供的事实。'
-              : '会按你前面提交的需求继续，不补写没有提供的事实。',
-          ],
-        }
-      : isPlanInstruction
-      ? {
-          stage: 'followup' as const,
-          title: '已记住这次补充',
-          lines: ['下一版会使用这条信息。'],
-        }
-      : activeConversation.analysisReady
-        ? buildAssistantReply(question, analysis)
-        : buildSetupReply(question)
+    dispatchConversationInputState({ type: 'clear-attachments', conversationId })
 
     dispatchAnalysisState({ type: 'start-chat-reply', conversationId })
-    await sleep(220)
+    try {
+      let reply: Pick<ChatMessage, 'stage' | 'title' | 'lines'>
 
-    updateConversation(projectId, conversationId, (conversation) => ({
-      ...conversation,
-      chatMessages: [
-        ...conversation.chatMessages,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          stage: reply.stage,
-          source: isPlanInstruction ? 'plan_instruction' : undefined,
-          title: reply.title,
-          lines: reply.lines,
-        },
-      ],
-    }))
+      if (isPlanInstruction && question) {
+        const generated = await generateDraftForAnalysis(analysis, true, {
+          writingBrief: nextWritingBrief,
+          targetAudience: nextTargetAudience.trim() || DEFAULT_TARGET_AUDIENCE,
+          length: nextLength ?? 'medium',
+        })
+        reply = generated
+          ? {
+              stage: 'followup',
+              title: shouldApplyPlanSupplement ? '初稿已更新' : '初稿已生成',
+              lines: [
+                shouldApplyPlanSupplement
+                  ? '已按这条文字补充重新生成初稿。'
+                  : selectedNotes.length > 0
+                    ? '已按当前需求和已选参考生成初稿。'
+                    : '已按当前需求生成初稿，没有补写未提供的事实。',
+                ...(pendingAttachments.some((attachment) => attachment.kind === 'image')
+                  ? ['图片已随消息保存；当前模型暂时不会读取图片内容。']
+                  : []),
+              ],
+            }
+          : {
+              stage: 'followup',
+              title: '这次未能更新初稿',
+              lines: ['补充内容已经保留，请重试生成；失败前的草稿不会丢失。'],
+            }
+      } else if (isPlanInstruction && pendingAttachments.length > 0) {
+        reply = {
+          stage: 'followup',
+          title: '图片已发送',
+          lines: ['图片已保留在对话中。当前模型暂时不能识别图片内容，请补充一行文字说明希望如何调整。'],
+        }
+      } else {
+        reply = activeConversation.analysisReady
+          ? buildAssistantReply(question, analysis)
+          : buildSetupReply(question)
+      }
 
-    dispatchAnalysisState({ type: 'finish-chat-reply', conversationId })
-    if (shouldGenerateAfterReply) {
-      await handleGenerateDraft()
+      updateConversation(projectId, conversationId, (conversation) => ({
+        ...conversation,
+        chatMessages: [
+          ...conversation.chatMessages,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            stage: reply.stage,
+            source: isPlanInstruction ? 'plan_instruction' : undefined,
+            title: reply.title,
+            lines: reply.lines,
+          },
+        ],
+      }))
+    } finally {
+      dispatchAnalysisState({ type: 'finish-chat-reply', conversationId })
     }
   }
 
@@ -6181,29 +6262,47 @@ function App() {
     })
   }
 
-  function handleAddPlanAttachments(files: FileList | File[]) {
-    if (!files.length) return
+  async function handleAddPlanAttachments(files: FileList | File[]) {
+    const conversationId = activeConversation.id
+    const availableCount = Math.max(0, maxPlanAttachmentCount - planAttachments.length)
+    const selectedFiles = Array.from(files).slice(0, availableCount)
+    if (selectedFiles.length === 0) {
+      showFinalCopyToast(`每次最多添加 ${maxPlanAttachmentCount} 个附件`)
+      return 0
+    }
 
-    const nextAttachments: PlanAttachment[] = Array.from(files).map((file) => {
-      const kind: PlanAttachment['kind'] = file.type.startsWith('image/') ? 'image' : 'document'
-      const id = crypto.randomUUID()
+    const preparedAttachments = await Promise.allSettled(
+      selectedFiles.map(async (file): Promise<PlanAttachment> => {
+        const kind: PlanAttachment['kind'] = file.type.startsWith('image/')
+          ? 'image'
+          : 'document'
+        return {
+          id: crypto.randomUUID(),
+          name: file.name,
+          kind,
+          ...(kind === 'image' ? { dataUrl: await prepareChatImageDataUrl(file) } : {}),
+        }
+      }),
+    )
+    const nextAttachments = preparedAttachments.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    )
+    const failedCount = preparedAttachments.length - nextAttachments.length
 
-      if (kind === 'image') {
-        planAttachmentPreviewUrlsRef.current.set(id, URL.createObjectURL(file))
-      }
+    if (nextAttachments.length > 0) {
+      dispatchConversationInputState({
+        type: 'add-attachments',
+        conversationId,
+        attachments: nextAttachments,
+      })
+    }
+    if (failedCount > 0) {
+      showFinalCopyToast(`${failedCount} 张图片读取失败，请换一张重试`)
+    } else if (selectedFiles.length < files.length) {
+      showFinalCopyToast(`每次最多添加 ${maxPlanAttachmentCount} 个附件`)
+    }
 
-      return {
-        id,
-        name: file.name,
-        kind,
-      }
-    })
-
-    dispatchConversationInputState({
-      type: 'add-attachments',
-      conversationId: activeConversation.id,
-      attachments: nextAttachments,
-    })
+    return nextAttachments.length
   }
 
   async function handlePastePlanAttachments(event: React.ClipboardEvent<HTMLElement>) {
@@ -6231,9 +6330,9 @@ function App() {
       return
     }
 
-    handleAddPlanAttachments(imageFiles)
     lastSuccessfulPlanImagePasteAtRef.current = Date.now()
-    showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
+    const addedCount = await handleAddPlanAttachments(imageFiles)
+    if (addedCount > 0) showFinalCopyToast(`已粘贴 ${addedCount} 张图片`)
   }
 
   function handlePlanComposerPasteShortcut(event: React.KeyboardEvent<HTMLElement>) {
@@ -6248,20 +6347,15 @@ function App() {
         ) {
           return
         }
-        handleAddPlanAttachments(imageFiles)
+        void handleAddPlanAttachments(imageFiles).then((addedCount) => {
+          if (addedCount > 0) showFinalCopyToast(`已粘贴 ${addedCount} 张图片`)
+        })
         lastSuccessfulPlanImagePasteAtRef.current = Date.now()
-        showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
       }, 0)
     })
   }
 
   function handleRemovePlanAttachment(attachmentId: string) {
-    const previewUrl = planAttachmentPreviewUrlsRef.current.get(attachmentId)
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl)
-      planAttachmentPreviewUrlsRef.current.delete(attachmentId)
-    }
-
     dispatchConversationInputState({
       type: 'remove-attachment',
       conversationId: activeConversation.id,
@@ -7716,6 +7810,35 @@ function App() {
                                 key={message.id}
                                 className="ml-auto max-w-[88%] rounded-[var(--ui-radius-card)] rounded-br-[0.35rem] bg-[#202428] px-4 py-2.5 text-white shadow-[0_8px_20px_rgba(15,23,42,0.1)] md:max-w-[42rem]"
                               >
+                                {message.attachments && message.attachments.length > 0 ? (
+                                  <div
+                                    className={`flex flex-wrap gap-2 ${message.lines.length > 0 ? 'mb-2.5' : ''}`}
+                                    aria-label="消息附件"
+                                  >
+                                    {message.attachments.map((attachment) =>
+                                      attachment.kind === 'image' && attachment.dataUrl ? (
+                                        <figure
+                                          key={attachment.id}
+                                          className="overflow-hidden rounded-[0.55rem] border border-white/15 bg-white/8"
+                                        >
+                                          <img
+                                            src={attachment.dataUrl}
+                                            alt={attachment.name}
+                                            className="max-h-52 max-w-[15rem] object-contain"
+                                          />
+                                        </figure>
+                                      ) : (
+                                        <span
+                                          key={attachment.id}
+                                          className="inline-flex max-w-[15rem] items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/82"
+                                        >
+                                          <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                                          <span className="truncate">{attachment.name}</span>
+                                        </span>
+                                      ),
+                                    )}
+                                  </div>
+                                ) : null}
                                 {message.lines.map((line, index) => (
                                   <p
                                     key={`${message.id}-${index}`}
@@ -7784,8 +7907,7 @@ function App() {
                       role="list"
                     >
                       {planImagePreviewAttachments.map((attachment) => {
-                        const previewUrl = planAttachmentPreviewUrlsRef.current.get(attachment.id)
-                        if (!previewUrl) return null
+                        if (!attachment.dataUrl) return null
 
                         return (
                           <figure
@@ -7794,7 +7916,7 @@ function App() {
                             role="listitem"
                           >
                             <img
-                              src={previewUrl}
+                              src={attachment.dataUrl}
                               alt={attachment.name}
                               className="h-full w-full object-contain"
                             />
@@ -7841,7 +7963,7 @@ function App() {
                         multiple
                         className="hidden"
                         onChange={(event) => {
-                          if (event.target.files) handleAddPlanAttachments(event.target.files)
+                          if (event.target.files) void handleAddPlanAttachments(event.target.files)
                           event.target.value = ''
                         }}
                       />
@@ -7886,7 +8008,7 @@ function App() {
                     <Button
                       className="ml-auto shrink-0"
                       onClick={handleSendChat}
-                      disabled={isChatStreaming || !chatInput.trim()}
+                      disabled={isChatStreaming || (!chatInput.trim() && planAttachments.length === 0)}
                       aria-label="发送文案信息"
                     >
                       <Send className="h-4 w-4" />

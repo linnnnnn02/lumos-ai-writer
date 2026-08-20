@@ -1,8 +1,6 @@
-export type PlanAttachment = {
-  id: string
-  name: string
-  kind: 'image' | 'document'
-}
+import type { ChatAttachment } from './workspace-model'
+
+export type PlanAttachment = ChatAttachment
 
 export type WorkspaceConversationInputSnapshot = {
   chatInputByConversation: Record<string, string>
@@ -36,6 +34,7 @@ export type WorkspaceConversationInputAction =
       attachments: PlanAttachment[]
     }
   | { type: 'remove-attachment'; conversationId: string; attachmentId: string }
+  | { type: 'clear-attachments'; conversationId: string }
   | { type: 'reset-conversation'; conversationId: string }
 
 function withoutConversation<T>(record: Record<string, T>, conversationId: string) {
@@ -213,6 +212,16 @@ export function workspaceConversationInputReducer(
           state.planAttachmentsByConversation[action.conversationId] ?? []
         ).filter((attachment) => attachment.id !== action.attachmentId),
       },
+    }
+  }
+
+  if (action.type === 'clear-attachments') {
+    return {
+      ...state,
+      planAttachmentsByConversation: withoutConversation(
+        state.planAttachmentsByConversation,
+        action.conversationId,
+      ),
     }
   }
 

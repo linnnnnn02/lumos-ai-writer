@@ -12,6 +12,7 @@ export type ChatMessage = {
   source?: 'plan_instruction'
   title?: string
   lines: string[]
+  attachments?: ChatAttachment[]
   highlights?: Array<{
     title: string
     body: string
@@ -25,6 +26,13 @@ export type ChatMessage = {
     reason: string
   }>
   preferenceQuestion?: string
+}
+
+export type ChatAttachment = {
+  id: string
+  name: string
+  kind: 'image' | 'document'
+  dataUrl?: string
 }
 
 export type WritingBrief = {

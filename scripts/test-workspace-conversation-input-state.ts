@@ -109,6 +109,12 @@ assert.deepEqual(
   state.planAttachmentsByConversation[conversationId]?.map((attachment) => attachment.id),
   ['attachment-2'],
 )
+state = workspaceConversationInputReducer(state, {
+  type: 'clear-attachments',
+  conversationId,
+})
+assert.equal(state.planAttachmentsByConversation[conversationId], undefined)
+assert.equal(state.chatInputByConversation[conversationId], '只分析已选择的素材')
 
 state = workspaceConversationInputReducer(state, {
   type: 'clear-conversation-transient',
