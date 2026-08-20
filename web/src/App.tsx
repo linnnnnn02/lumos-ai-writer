@@ -1925,7 +1925,7 @@ function App() {
   const readerCommentRefs = useRef(new Map<string, HTMLElement>())
   const readerAudiencePopoverRef = useRef<HTMLDivElement | null>(null)
   const finalCopyToastTimerRef = useRef<number | null>(null)
-  const lastPlanPasteEventAtRef = useRef(0)
+  const lastSuccessfulPlanImagePasteAtRef = useRef(0)
   const planAttachmentPreviewUrlsRef = useRef(new Map<string, string>())
   const projectDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const rewriteInputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -6207,7 +6207,7 @@ function App() {
   }
 
   async function handlePastePlanAttachments(event: React.ClipboardEvent<HTMLElement>) {
-    lastPlanPasteEventAtRef.current = Date.now()
+    const pasteStartedAt = Date.now()
     const plainText = event.clipboardData.getData('text/plain')
     const itemImageFiles = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
@@ -6218,11 +6218,13 @@ function App() {
       : Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'))
 
     if (imageFiles.length === 0 && plainText) return
-    if (!plainText) event.preventDefault()
+    event.preventDefault()
 
     if (imageFiles.length === 0) {
       imageFiles = await readClipboardImageFiles()
     }
+
+    if (lastSuccessfulPlanImagePasteAtRef.current >= pasteStartedAt) return
 
     if (imageFiles.length === 0) {
       showFinalCopyToast('未读取到剪贴板图片，请重新复制图片后再粘贴')
@@ -6230,6 +6232,7 @@ function App() {
     }
 
     handleAddPlanAttachments(imageFiles)
+    lastSuccessfulPlanImagePasteAtRef.current = Date.now()
     showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
   }
 
@@ -6239,8 +6242,14 @@ function App() {
     const shortcutAt = Date.now()
     void readClipboardImageFiles().then((imageFiles) => {
       window.setTimeout(() => {
-        if (lastPlanPasteEventAtRef.current >= shortcutAt || imageFiles.length === 0) return
+        if (
+          lastSuccessfulPlanImagePasteAtRef.current >= shortcutAt ||
+          imageFiles.length === 0
+        ) {
+          return
+        }
         handleAddPlanAttachments(imageFiles)
+        lastSuccessfulPlanImagePasteAtRef.current = Date.now()
         showFinalCopyToast(`已粘贴 ${imageFiles.length} 张图片`)
       }, 0)
     })
